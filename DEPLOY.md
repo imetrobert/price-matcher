@@ -128,8 +128,14 @@ Supabase dashboard → Authentication → URL Configuration:
 - **Site URL**: `https://pricecheck.imetrobert.com`
 - **Redirect URLs**: add `https://pricecheck.imetrobert.com/**`
 
-Skipping this is the single most common cause of "login appears to work but
-bounces straight back to the sign-in screen".
+**This is not required for the login to work.** CartMatch signs in with
+`signInWithPassword`, which is a direct token exchange with no redirect, so the
+allow-list is not consulted. Set it anyway, because it *is* consulted the
+moment you use a password-reset email, a magic link, or an OAuth provider — and
+a reset link that lands on the wrong origin is a confusing thing to debug later.
+
+If sign-in succeeds and then bounces back to `/login`, the cause is the session
+cookie, not this setting. See Troubleshooting.
 
 ## 7. Verify it is actually protected
 
@@ -181,7 +187,7 @@ not a deployment fault. See the README for what has to happen to change it.
 
 | Symptom | Cause |
 |---|---|
-| Login succeeds, immediately back at `/login` | Step 6 not done — redirect URL missing. |
+| Login succeeds, immediately back at `/login` | The session cookie is not surviving the round trip. Almost always the site is being served over plain HTTP (Supabase sets `Secure` cookies, which browsers drop on HTTP), or you reached it on a different host than the one in the address bar when you signed in — e.g. `www.` vs bare, or the `*.vercel.app` URL vs the custom domain. Confirm `https://` and one consistent hostname. It is **not** the redirect-URL setting in step 6; password sign-in never consults it. |
 | `503` on every path | `CARTMATCH_REQUIRE_AUTH=true` with no Supabase keys. |
 | Red "Unprotected instance" banner in production | `NEXT_PUBLIC_*` vars missing. Anyone with the URL can use it — fix immediately. |
 | "Invalid login credentials" | Wrong password, or the user exists in a *different* Supabase project than the one these keys point at. |
