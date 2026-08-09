@@ -7,11 +7,20 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { AuthGuard } from "@/components/AuthGuard";
 import { Notice, PageHeader } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
 import { formatCents } from "@/lib/money";
 import { loadLastResult } from "@/lib/prefs";
-import type { AuditRecord, PipelineResult, PriceObservation } from "@/types";
+import { activeBackend, recentAudit, recentObservations, saveValidation, validationSummary } from "@/lib/store";
+import { visionProviderName, env } from "@/config/env";
+import { allowlistActive, authConfigured } from "@/lib/auth/config";
+import type {
+  AuditRecord,
+  MatchValidationReport,
+  PipelineResult,
+  PriceObservation,
+} from "@/types";
 
 interface AuditPayload {
   audit: AuditRecord[];
@@ -23,20 +32,33 @@ interface AuditPayload {
 }
 
 export default function AdminPage() {
+  return (
+    <AuthGuard>
+      <AdminView />
+    </AuthGuard>
+  );
+}
+
+function AdminView() {
   const [data, setData] = useState<AuditPayload | null>(null);
   const [health, setHealth] = useState<Record<string, unknown> | null>(null);
   const [lastRun, setLastRun] = useState<PipelineResult | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
-    fetch("/api/admin/audit?limit=200")
-      .then((r) => r.json())
-      .then(setData)
+    Promise.all([recentAudit(200), recentObservations(200), validationSummary()])
+      .then(([audit, observations, validation]) =>
+        setData({ audit, observations, validation }),
+      )
       .catch(() => setData(null));
-    fetch("/api/health")
-      .then((r) => r.json())
-      .then(setHealth)
-      .catch(() => setHealth(null));
+    setHealth({
+      dataMode: env.dataMode,
+      vision: visionProviderName(),
+      storageBackend: activeBackend(),
+      authConfigured: authConfigured(),
+      allowlistActive: allowlistActive(),
+      supabaseUrl: env.supabaseUrl ? "configured" : "not configured",
+    });
   }, []);
 
   useEffect(() => {
@@ -217,19 +239,23 @@ function ValidationForm({
   ];
 
   async function submit() {
-    const res = await fetch("/api/validate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        opportunityId,
-        retailerId,
-        competitorRetailerId,
-        ...answers,
-        notes,
-      }),
+    const id = `val-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await saveValidation({
+      id,
+      opportunityId,
+      retailerId: retailerId as MatchValidationReport["retailerId"],
+      competitorRetailerId:
+        competitorRetailerId as MatchValidationReport["competitorRetailerId"],
+      pageExisted: answers.pageExisted ?? null,
+      exactProductMatched: answers.exactProductMatched ?? null,
+      priceMatched: answers.priceMatched ?? null,
+      itemAvailable: answers.itemAvailable ?? null,
+      cashierAcceptedPrice: answers.cashierAcceptedPrice ?? null,
+      priceMatchRequestAccepted: answers.priceMatchRequestAccepted ?? null,
+      notes,
+      recordedAt: new Date().toISOString(),
     });
-    const data = await res.json();
-    if (data.ok) onSaved(data.id);
+    onSaved(id);
   }
 
   return (

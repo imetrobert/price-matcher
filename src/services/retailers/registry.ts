@@ -7,8 +7,6 @@
  * that retailer's row and nothing else.
  */
 
-import "server-only";
-
 import { env } from "@/config/env";
 import { RETAILER_IDS, enabledRetailers, getRetailer } from "@/config/retailers";
 import { LiveRetailerAdapter } from "@/services/retailers/liveAdapter";

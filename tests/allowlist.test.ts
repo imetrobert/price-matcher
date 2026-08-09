@@ -9,23 +9,19 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  allowedEmails,
-  allowlistActive,
-  emailAllowed,
-  isPublicPath,
-} from "@/lib/auth/config";
+import { allowedEmails, allowlistActive, emailAllowed } from "@/lib/auth/config";
 
-const ORIGINAL = process.env.CARTMATCH_ALLOWED_EMAILS;
+const VAR = "NEXT_PUBLIC_CARTMATCH_ALLOWED_EMAILS";
+const ORIGINAL = process.env[VAR];
 
 afterEach(() => {
-  if (ORIGINAL === undefined) delete process.env.CARTMATCH_ALLOWED_EMAILS;
-  else process.env.CARTMATCH_ALLOWED_EMAILS = ORIGINAL;
+  if (ORIGINAL === undefined) delete process.env[VAR];
+  else process.env[VAR] = ORIGINAL;
 });
 
 function setList(value: string | undefined) {
-  if (value === undefined) delete process.env.CARTMATCH_ALLOWED_EMAILS;
-  else process.env.CARTMATCH_ALLOWED_EMAILS = value;
+  if (value === undefined) delete process.env[VAR];
+  else process.env[VAR] = value;
 }
 
 describe("when no allowlist is configured", () => {
@@ -90,19 +86,14 @@ describe("when an allowlist is configured", () => {
   });
 });
 
-describe("denial route reachability", () => {
-  it("keeps /not-authorized public so a denied user does not loop", () => {
-    // If this were gated, the middleware would redirect a denied user to a
-    // page that itself redirects them, forever.
-    expect(isPublicPath("/not-authorized")).toBe(true);
-    expect(isPublicPath("/login")).toBe(true);
-    expect(isPublicPath("/api/health")).toBe(true);
-  });
-
-  it("still gates the real app routes", () => {
-    expect(isPublicPath("/")).toBe(false);
-    expect(isPublicPath("/scan")).toBe(false);
-    expect(isPublicPath("/admin")).toBe(false);
-    expect(isPublicPath("/api/pipeline")).toBe(false);
+describe("the allowlist is display-only on a static site", () => {
+  it("mirrors the Edge Function's rule so the UI and the real gate agree", () => {
+    // The authoritative copy of this logic is
+    // supabase/functions/_shared/auth.ts, which runs server-side and cannot be
+    // bypassed. This one only decides what the UI shows. They must agree, or a
+    // user is told they have access and then gets a 403 on every action.
+    setList("owner@example.com");
+    expect(emailAllowed("owner@example.com")).toBe(true);
+    expect(emailAllowed("stranger@example.com")).toBe(false);
   });
 });

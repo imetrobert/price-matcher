@@ -5,7 +5,7 @@
  * downstream, so it is tested for what it REFUSES as much as what it accepts.
  */
 
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { parseVisionResponse } from "@/services/vision/schema";
 
@@ -120,30 +120,5 @@ describe("vision response parsing", () => {
       { isMock: true },
     );
     expect(out[0]!.isMock).toBe(true);
-  });
-});
-
-describe("thinkingConfig model gating", () => {
-  const original = process.env.GEMINI_MODEL;
-  afterEach(() => {
-    if (original === undefined) delete process.env.GEMINI_MODEL;
-    else process.env.GEMINI_MODEL = original;
-  });
-
-  // Imported lazily so each case sees the env var set for it.
-  async function supports(model: string): Promise<boolean> {
-    process.env.GEMINI_MODEL = model;
-    const mod = await import("@/services/vision/gemini");
-    return mod.__supportsThinkingConfigForTest();
-  }
-
-  it("sends thinkingConfig on 2.5 and later", async () => {
-    expect(await supports("gemini-2.5-flash")).toBe(true);
-    expect(await supports("gemini-3.0-pro")).toBe(true);
-  });
-
-  it("withholds it from models that predate it", async () => {
-    expect(await supports("gemini-2.0-flash")).toBe(false);
-    expect(await supports("gemini-1.5-pro")).toBe(false);
   });
 });

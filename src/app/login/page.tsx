@@ -17,9 +17,42 @@ import { authConfigured } from "@/lib/auth/config";
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<LoginShell />}>
       <LoginForm />
     </Suspense>
+  );
+}
+
+/**
+ * Static fallback, and the first thing a phone renders.
+ *
+ * On a static site this markup IS the HTML file: it appears before any
+ * JavaScript loads. A `null` fallback here means a blank white screen until
+ * the bundle arrives — which, on a shop's wifi, is exactly the moment someone
+ * decides the app is broken. So the shell carries the real heading and a
+ * disabled form, and the interactive version swaps in underneath it.
+ */
+function LoginShell() {
+  return (
+    <main className="pt-10">
+      <header className="mb-6">
+        <h1 className="text-3xl font-extrabold tracking-tight">CartMatch</h1>
+        <p className="mt-1 text-muted">Sign in to continue.</p>
+      </header>
+      <div className="card space-y-3">
+        <div>
+          <span className="label">Email</span>
+          <div className="field flex items-center text-muted">Loading…</div>
+        </div>
+        <div>
+          <span className="label">Password</span>
+          <div className="field" />
+        </div>
+        <button type="button" className="btn-primary" disabled>
+          Sign in
+        </button>
+      </div>
+    </main>
   );
 }
 
@@ -51,9 +84,8 @@ function LoginForm() {
         setError(signInError.message);
         return;
       }
-      // Full navigation so the middleware sees the new cookie.
-      router.push(next);
-      router.refresh();
+      // Full navigation so every component re-reads the new session.
+      window.location.href = next;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed.");
     } finally {

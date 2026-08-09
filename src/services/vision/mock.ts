@@ -1,21 +1,29 @@
+"use client";
+
 /**
  * Mock vision provider.
  *
- * Returns a fixed, plausible cart so the confirmation and results screens can
- * be developed without a Gemini key. It does not look at the image bytes at
- * all — it cannot, and pretending otherwise would be the exact deception the
- * spec forbids. Every detection is stamped `isMock: true`.
+ * Returns a fixed, plausible cart so the confirmation and results screens work
+ * without a Gemini key. It does not look at the image bytes at all — it cannot,
+ * and pretending otherwise would be the deception this project exists to
+ * avoid. Every detection is stamped `isMock: true`.
  */
-
-import "server-only";
 
 import { parseVisionResponse } from "@/services/vision/schema";
 import type { DetectedProduct } from "@/types";
-import type { VisionImage, VisionOutcome } from "@/services/vision/gemini";
+
+interface VisionImageLike {
+  base64: string;
+  mimeType: string;
+}
+
+type MockOutcome =
+  | { ok: true; products: DetectedProduct[]; isMock: boolean; note: string }
+  | { ok: false; error: string; code: "NO_IMAGES" };
 
 /**
  * Deliberately mixed confidences so the confirmation UI has to render the
- * "needs confirmation" state, and a low-confidence item the user must fix.
+ * "needs confirmation" state, including one item whose size is unreadable.
  */
 const MOCK_CART = {
   products: [
@@ -91,7 +99,7 @@ const MOCK_CART = {
     },
     {
       // Size unreadable on purpose: exercises the "needs confirmation" path
-      // and the "size unknown caps the match score" rule.
+      // and the rule that an unknown size caps the achievable match score.
       brand: "Ritz",
       product_name: "Crackers",
       product_type: "crackers",
@@ -109,9 +117,9 @@ const MOCK_CART = {
 };
 
 export async function mockRecognizeCart(
-  images: VisionImage[],
+  images: VisionImageLike[],
   opts: { reason: string },
-): Promise<VisionOutcome> {
+): Promise<MockOutcome> {
   if (images.length === 0) {
     return { ok: false, code: "NO_IMAGES", error: "No images supplied." };
   }
@@ -119,9 +127,7 @@ export async function mockRecognizeCart(
   // Small delay so loading states are visible during UI development.
   await new Promise((r) => setTimeout(r, 250));
 
-  const products: DetectedProduct[] = parseVisionResponse(MOCK_CART, {
-    isMock: true,
-  });
+  const products = parseVisionResponse(MOCK_CART, { isMock: true });
 
   return {
     ok: true,

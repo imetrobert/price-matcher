@@ -21,9 +21,11 @@ const ctx: StoreContext = {
 };
 
 beforeAll(() => {
-  process.env.CARTMATCH_DATA_MODE = "MOCK";
-  // Keep the audit trail out of the repo during tests.
-  process.env.CARTMATCH_DATA_DIR = ".data-test";
+  // MOCK is already the default, but state it: a LIVE run returns no prices at
+  // all, and a silent env change would turn these into vacuous passes.
+  process.env.NEXT_PUBLIC_CARTMATCH_DATA_MODE = "MOCK";
+  // No audit-trail cleanup needed: with Supabase unconfigured in tests, the
+  // store is a no-op that logs rather than writing anywhere.
 });
 
 const oikos = buildCanonicalProduct({

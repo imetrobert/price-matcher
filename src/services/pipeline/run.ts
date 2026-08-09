@@ -14,8 +14,6 @@
  * verify" row. It never fails the run and never substitutes a fallback price.
  */
 
-import "server-only";
-
 import { env } from "@/config/env";
 import { SAVINGS } from "@/config/thresholds";
 import { competitorsFor, getRetailer } from "@/config/retailers";

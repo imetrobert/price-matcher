@@ -14,11 +14,15 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ProofSheet } from "@/components/ProofSheet";
+import { AuthGuard } from "@/components/AuthGuard";
 import { MockBanner, Money, Notice, PageHeader, Spinner } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
 import { formatCents, tryParsePriceToCents } from "@/lib/money";
 import { DEFAULT_PREFS, loadPrefs, saveLastResult } from "@/lib/prefs";
 import { stateLabel } from "@/services/policies/eligibility";
+import { buildCanonicalProduct } from "@/services/products/normalize";
+import { runPipeline } from "@/services/pipeline/run";
+import { analyzeCartPhotos } from "@/services/vision";
 import type {
   DetectedProduct,
   PipelineResult,
@@ -34,6 +38,14 @@ interface EditableItem extends DetectedProduct {
 }
 
 export default function ScanPage() {
+  return (
+    <AuthGuard>
+      <ScanFlow />
+    </AuthGuard>
+  );
+}
+
+function ScanFlow() {
   const router = useRouter();
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFS);
   const [step, setStep] = useState<Step>("capture");
@@ -75,24 +87,19 @@ export default function ScanPage() {
     setBusy("Reading your cart…");
     setError(null);
     try {
-      const res = await fetch("/api/vision", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          images: images.map((i) => ({ base64: i.base64, mimeType: i.mimeType })),
-        }),
-      });
-      const data = await res.json();
-      if (!data.ok) {
-        setError(data.error ?? "Recognition failed.");
+      const outcome = await analyzeCartPhotos(
+        images.map((i) => ({ base64: i.base64, mimeType: i.mimeType })),
+      );
+      if (!outcome.ok) {
+        setError(outcome.error);
         return;
       }
-      const detected = data.products as DetectedProduct[];
+      const detected = outcome.products;
       if (detected.length === 0) {
         setError("No products detected. Try a closer or better-lit photo.");
         return;
       }
-      setVisionNote(data.note ?? null);
+      setVisionNote(outcome.note);
       setItems(
         detected.map((d) => ({ ...d, include: true, manualPrice: "" })),
       );
@@ -113,33 +120,31 @@ export default function ScanPage() {
     setBusy("Checking competitor prices…");
     setError(null);
     try {
-      const res = await fetch("/api/pipeline", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          retailerId: prefs.currentRetailerId,
+      const pipelineResult = await runPipeline({
+        storeContext: {
+          retailerId: prefs.currentRetailerId!,
           storeId: prefs.currentStoreId,
+          storeName: null,
           postalCode: prefs.postalCode,
-          thresholdCents: prefs.minSavingsCents,
-          items: chosen.map((i) => ({
-            brand: i.brand,
-            productName: i.productName,
+          capturedAt: new Date().toISOString(),
+        },
+        thresholdCents: prefs.minSavingsCents,
+        items: chosen.map((i) => ({
+          canonical: buildCanonicalProduct({
+            brand: i.brand ?? "",
+            name: i.productName ?? "",
             variant: i.variant,
             fatPercentage: i.fatPercentage,
             size: i.size,
-            packageQuantity: i.packageQuantity,
-            visibleUpc: i.visibleUpc,
-            manualCurrentPriceCents: tryParsePriceToCents(i.manualPrice),
-          })),
-        }),
+            packageCount: i.packageQuantity,
+            gtin: i.visibleUpc,
+            identitySource: i.visibleUpc ? "VISIBLE_BARCODE" : "USER_ENTERED",
+          }),
+          manualCurrentPriceCents: tryParsePriceToCents(i.manualPrice),
+        })),
       });
-      const data = await res.json();
-      if (!data.ok) {
-        setError(data.error ?? "Comparison failed.");
-        return;
-      }
-      setResult(data.result as PipelineResult);
-      saveLastResult(data.result);
+      setResult(pipelineResult);
+      saveLastResult(pipelineResult);
       setStep("results");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Comparison failed.");

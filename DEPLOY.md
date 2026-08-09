@@ -1,215 +1,195 @@
 # Deploying CartMatch to pricecheck.imetrobert.com
 
-**None of this has been executed.** I have no access to your DNS registrar,
-your hosting account, or your Supabase project, so the steps below are a
-runbook for you to run, not a record of something that happened. Where a step
-can fail in a way that silently leaves the app unprotected, that is called out.
+GitHub Pages (static site) + Supabase (auth, data, and the Gemini call).
+No third-party hosting account.
 
-Total time: about 15 minutes, most of it waiting for DNS.
-
----
-
-## Before you start
-
-You need:
-
-- The **project URL**, the **publishable key** and the **secret key** from
-  Supabase → Settings → API Keys. Use the *same project as your other apps* —
-  that is what makes the login the same email and password.
-
-  Supabase renamed these; you may see either generation:
-
-  | Dashboard name | Legacy name | Goes in | Public? |
-  |---|---|---|---|
-  | publishable (`sb_publishable_…`) | `anon` | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | yes, by design |
-  | secret (`sb_secret_…`) | `service_role` | `SUPABASE_SERVICE_ROLE_KEY` | **never** |
-
-  Rule of thumb: if you had to click "reveal" to see it, it is the secret key.
-- A **Gemini API key**, if you want real photo recognition.
-- Access to DNS for `imetrobert.com`.
+**None of this has been executed.** I have no access to your DNS, your GitHub
+Pages settings, or your Supabase project. This is a runbook for you to run.
 
 ---
 
-## 1. Apply the database schema
+## How the pieces fit, and where the security is
 
-Once, against your existing project:
+GitHub Pages serves files. It cannot run a server, so the app is a static
+bundle — and since the repository is **public**, that bundle is readable by
+anyone. That is fine, because it contains nothing worth stealing:
+
+| Piece | Where it runs | Holds secrets? |
+|---|---|---|
+| UI, matching engine, savings maths, freshness rules | Your browser | no — pure logic |
+| Sign-in | Supabase Auth, in the browser | publishable key only, public by design |
+| Gemini cart recognition | Supabase **Edge Function** | yes — the key never leaves Supabase |
+| Audit trail, price observations | Supabase tables | protected by Row Level Security |
+
+**The client-side sign-in screen is not a security control.** Anyone can read
+the bundle and skip it. What actually protects things:
+
+- The **Edge Function** verifies your JWT before spending a Gemini call.
+- **Row Level Security** decides which rows your session may read or write,
+  enforced by Postgres regardless of what the browser sends.
+
+Design accordingly: never assume the UI is hiding something.
+
+---
+
+## 1. Database (once)
+
+In the Supabase SQL Editor, run **both** files from this repo, in order:
+
+1. `supabase/schema.sql` — creates the three `cartmatch_` tables.
+2. `supabase/policies.sql` — **required for this deployment.** Adds a `user_id`
+   column and the RLS policies that let your browser write as yourself.
+
+Without step 2 every write fails: the tables have RLS on with no policies,
+which permits nothing but the secret key — and there is no server here to hold
+one. Symptom is an empty `/admin` and RLS errors in the browser console.
+
+By default each person sees only their own runs. `policies.sql` ends with a
+commented-out block if you would rather everyone admitted sees everything.
+
+## 2. Edge Function (once)
+
+This is what holds your Gemini key.
 
 ```bash
-psql "$SUPABASE_DB_URL" -f supabase/schema.sql
+npm install -g supabase
+supabase login
+supabase link --project-ref <your-project-ref>
+
+supabase functions deploy vision
+
+supabase secrets set GEMINI_API_KEY=...
+supabase secrets set CARTMATCH_ALLOWED_EMAILS=you@yourdomain.com
+supabase secrets set CARTMATCH_ALLOWED_ORIGINS=https://pricecheck.imetrobert.com
 ```
 
-Or paste `supabase/schema.sql` into the Supabase SQL editor. It creates three
-`cartmatch_`-prefixed tables with RLS enabled and no policies, so only the
-service role can touch them.
+`CARTMATCH_ALLOWED_EMAILS` must be set **here as well as** in the build
+variables below. The build copy decides what the UI shows; **this copy decides
+what is actually permitted.** If they disagree, someone is told they have
+access and then gets a 403 on every scan.
 
-## 2. Confirm you have a user account
+## 3. Build variables
 
-CartMatch has **no sign-up form** — a public sign-up on a personal tool invites
-strangers in. If you already sign in to another app on this project, that
-account works here as-is; skip ahead.
+**Settings → Secrets and variables → Actions.**
 
-Otherwise: Supabase dashboard → Authentication → Users → **Add user** →
-"Auto Confirm User" so no confirmation email is needed.
+Under **Variables** (these are published in the bundle — that is expected):
 
-## 3. Deploy
-
-### Vercel (recommended — zero config for Next.js)
-
-```bash
-npm i -g vercel
-vercel link
-vercel --prod
-```
-
-### Anything else
-
-The app is a standard Next.js 15 server (it needs Node, not a static export —
-middleware and route handlers run per request):
-
-```bash
-npm ci && npm run build && npm start   # listens on $PORT, default 3000
-```
-
-Put it behind TLS. The `Strict-Transport-Security` header is already set.
-
-## 4. Set environment variables
-
-In Vercel: Project → Settings → Environment Variables (Production). Elsewhere,
-whatever your host uses. **The app will refuse to serve without the first
-three** — see step 6.
-
-| Variable | Value |
+| Name | Value |
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | `https://<project>.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon / public key |
-| `CARTMATCH_REQUIRE_AUTH` | `true` |
-| `CARTMATCH_ALLOWED_EMAILS` | your email, comma-separated for more people |
-| `SUPABASE_URL` | same as `NEXT_PUBLIC_SUPABASE_URL` |
-| `SUPABASE_SERVICE_ROLE_KEY` | service role key |
-| `GEMINI_API_KEY` | your Gemini key (omit to stay on mock vision) |
-| `GEMINI_MODEL` | `gemini-2.5-flash` (the default; set explicitly if you want a different one) |
-| `CARTMATCH_DATA_MODE` | `MOCK` until a retailer adapter actually works |
+| `NEXT_PUBLIC_CARTMATCH_ALLOWED_EMAILS` | your email, comma-separated for more |
+| `NEXT_PUBLIC_CARTMATCH_DATA_MODE` | `MOCK` |
+| `PAGES_CUSTOM_DOMAIN` | `pricecheck.imetrobert.com` |
 
-> **Set `CARTMATCH_ALLOWED_EMAILS` if the Supabase project is shared with your
-> other apps.** Supabase Auth is project-scoped, so without it *every* confirmed
-> user on the project can sign in here — including anyone you add later for a
-> different app, silently. With it set, membership of the project is necessary
-> but not sufficient, and adding someone to CartMatch is a deliberate act.
-> Leaving it unset is a valid choice; the app will tell you it is unset rather
-> than let you assume otherwise.
+Under **Secrets**:
 
-> ⚠️ **`SUPABASE_SERVICE_ROLE_KEY` must never be given a `NEXT_PUBLIC_` prefix.**
-> The anon key is designed to ship to the browser and is powerless on its own —
-> every request it makes is checked against Row Level Security. The service
-> role key bypasses RLS entirely. Prefixing it would publish a key that can
-> read and write your whole database to anyone who opens devtools.
+| Name | Value |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | your **publishable** key (`sb_publishable_…`) |
 
-> **Leave `CARTMATCH_DATA_MODE=MOCK`.** No retailer integration exists yet (see
-> the README). `LIVE` will simply report every retailer as unavailable — which
-> is correct behaviour, just not useful. Switch it when an adapter works.
+> The publishable key is stored as a "secret" only to keep it out of the
+> workflow file's plain text. It is inlined into the published bundle and is
+> **designed to be public** — it is powerless without a session, because RLS
+> evaluates every request it makes.
+>
+> ⚠️ Your **secret** key (`sb_secret_…`, formerly `service_role`) must never
+> appear in any of these. It bypasses RLS entirely. It belongs only in Supabase
+> Edge Function secrets, and this app no longer uses it at all.
+>
+> Leave `NEXT_PUBLIC_CARTMATCH_DATA_MODE` on `MOCK`. `LIVE` reports every
+> retailer as unavailable, because no retailer adapter exists (see README).
 
-## 5. Point the subdomain at it
+The workflow refuses to publish if anything matching a secret-key pattern
+appears in the build output — a last check before it goes to the internet.
 
-### Vercel
+## 4. Turn on Pages
 
-1. Project → Settings → Domains → add `pricecheck.imetrobert.com`.
-2. Vercel shows the record to create. It is normally:
+**Settings → Pages → Build and deployment → Source: GitHub Actions.**
 
-   | Type | Name | Value |
-   |---|---|---|
-   | `CNAME` | `pricecheck` | `cname.vercel-dns.com` |
+Not "Deploy from a branch". The workflow in `.github/workflows/deploy.yml`
+publishes the built output, and it only runs on pushes to `main`.
 
-3. Add that record at your DNS provider for `imetrobert.com`.
-4. Wait for propagation (usually minutes; up to an hour). Vercel issues the
-   TLS certificate automatically once the record resolves.
+**The code is currently on `claude/prompt-length-limits-71ze3z`; `main` has
+only the README.** Merge that branch to `main` or nothing will build.
 
-**If `imetrobert.com` is behind Cloudflare**, set the record to **DNS only**
-(grey cloud) until the certificate is issued, or the ACME challenge fails.
-You can turn the proxy back on afterwards.
+## 5. Point the subdomain at Pages
 
-Check it:
+At your DNS provider for `imetrobert.com`:
+
+| Type | Name | Value |
+|---|---|---|
+| `CNAME` | `pricecheck` | `imetrobert.github.io` |
+
+Most registrars want just `pricecheck` in the Name field, not the full domain.
+Note the value is your **user** subdomain, not the repository.
+
+Then **Settings → Pages → Custom domain** → `pricecheck.imetrobert.com`, and
+tick **Enforce HTTPS** once the certificate issues (usually minutes).
+
+**On Cloudflare:** set the record to **DNS only** (grey cloud) until the
+certificate is issued, or the challenge fails.
 
 ```bash
 dig +short pricecheck.imetrobert.com
-curl -sI https://pricecheck.imetrobert.com | head -3
 ```
 
-### Another host
+## 6. Tell Supabase the domain
 
-Point `pricecheck` at whatever your host gives you — `CNAME` to their hostname,
-or an `A` record to a static IP. Do not skip TLS: the login posts a password.
+**Authentication → URL Configuration:**
 
-## 6. Tell Supabase about the domain
+- Site URL: `https://pricecheck.imetrobert.com`
+- Redirect URLs: add `https://pricecheck.imetrobert.com/**`
 
-Supabase dashboard → Authentication → URL Configuration:
+Not required for password sign-in, which is a direct token exchange and never
+consults this list. Set it so password-reset emails and any OAuth you add later
+land on the right origin.
 
-- **Site URL**: `https://pricecheck.imetrobert.com`
-- **Redirect URLs**: add `https://pricecheck.imetrobert.com/**`
-
-**This is not required for the login to work.** CartMatch signs in with
-`signInWithPassword`, which is a direct token exchange with no redirect, so the
-allow-list is not consulted. Set it anyway, because it *is* consulted the
-moment you use a password-reset email, a magic link, or an OAuth provider — and
-a reset link that lands on the wrong origin is a confusing thing to debug later.
-
-If sign-in succeeds and then bounces back to `/login`, the cause is the session
-cookie, not this setting. See Troubleshooting.
-
-## 7. Verify it is actually protected
-
-Run these against the live domain. **All four must pass** before you treat the
-deployment as done.
+## 7. Verify
 
 ```bash
-# 1. Signed out, the app must redirect to the login page — not render.
-curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" https://pricecheck.imetrobert.com/
-#    expect: 307 https://pricecheck.imetrobert.com/login?next=%2F
+# Site is up
+curl -s -o /dev/null -w "%{http_code}\n" https://pricecheck.imetrobert.com/
+# 200 — and yes, the page is public. That is expected; see the top.
 
-# 2. The API must be protected too, not just the pages.
+# No secret key material in the published bundle
+curl -s https://pricecheck.imetrobert.com/_next/static/chunks/*.js 2>/dev/null \
+  | grep -cE 'sb_secret_[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{35}'
+# 0
+
+# The Edge Function refuses an unauthenticated caller — THIS is the real gate
 curl -s -o /dev/null -w "%{http_code}\n" -X POST \
-  https://pricecheck.imetrobert.com/api/pipeline \
-  -H 'Content-Type: application/json' -d '{}'
-#    expect: 307   (NOT 200, and NOT 400)
-
-# 3. The public health endpoint must reveal nothing but auth status.
-curl -s https://pricecheck.imetrobert.com/api/health
-#    expect exactly: {"ok":true,"auth":{"configured":true,"required":true,"email":null}}
-
-# 4. The login page must load.
-curl -s -o /dev/null -w "%{http_code}\n" https://pricecheck.imetrobert.com/login
-#    expect: 200
+  https://<project>.supabase.co/functions/v1/vision \
+  -H 'Content-Type: application/json' -d '{"images":[]}'
+# 401
 ```
 
-If check 1 returns `200`, the environment variables did not take effect —
-**the instance is open to anyone with the URL.** Fix before sharing it.
+That last check is the one that matters. If it returns anything other than
+`401`, stop and fix it before using the app: your Gemini quota is reachable by
+anyone.
 
-If any check returns `503`, `CARTMATCH_REQUIRE_AUTH=true` is set but the
-Supabase keys are missing. That is the app failing closed on purpose.
+Then on your phone: open the site, sign in, and confirm the header reads
+"Signed in as …" with no orange **Open to everyone** banner.
 
-Then open it on your phone, sign in, and confirm the home screen shows
-"Signed in as …" rather than the red **Unprotected instance** banner.
+## What works, and what does not
 
----
+Behind sign-in: the full flow (photo → confirm → compare → proof → Checkout
+Mode), `/test`, and `/admin`.
 
-## What you get, and what you don't
-
-Working behind the login: the full flow (photo → confirm → compare → proof →
-Checkout Mode), the manual test harness at `/test`, and the debug view at
-`/admin`.
-
-Not working, because no retailer integration exists: real prices. Every figure
-will carry the purple **MOCK DATA** banner. That is the app telling the truth,
-not a deployment fault. See the README for what has to happen to change it.
+Every price will carry the purple **MOCK DATA** banner. No retailer
+integration exists — and on this architecture it never can run in the browser,
+because retailers do not permit cross-origin requests. It has to become a
+second Edge Function; `src/services/retailers/liveAdapter.ts` explains what
+that involves.
 
 ## Troubleshooting
 
 | Symptom | Cause |
 |---|---|
-| Login succeeds, immediately back at `/login` | The session cookie is not surviving the round trip. Almost always the site is being served over plain HTTP (Supabase sets `Secure` cookies, which browsers drop on HTTP), or you reached it on a different host than the one in the address bar when you signed in — e.g. `www.` vs bare, or the `*.vercel.app` URL vs the custom domain. Confirm `https://` and one consistent hostname. It is **not** the redirect-URL setting in step 6; password sign-in never consults it. |
-| `503` on every path | `CARTMATCH_REQUIRE_AUTH=true` with no Supabase keys. |
-| Red "Unprotected instance" banner in production | `NEXT_PUBLIC_*` vars missing. Anyone with the URL can use it — fix immediately. |
-| "Invalid login credentials" | Wrong password, or the user exists in a *different* Supabase project than the one these keys point at. |
-| Sign-in works, then "Access not enabled for this account" | That address is not in `CARTMATCH_ALLOWED_EMAILS`. Add it (comma-separated) and redeploy — or you signed in with a second account you own. |
-| Orange "Open to everyone on the Supabase project" banner | `CARTMATCH_ALLOWED_EMAILS` is unset, so anyone on the project can sign in. Intentional or not, the app will not stay quiet about it. |
-| Certificate never issues | Cloudflare proxy on during issuance — set the record to DNS-only. |
-| Audit trail empty at `/admin` | Schema not applied, or the service role key is wrong. Signed in, `/api/health` reports `storage.reachable`. |
+| Blank page, 404 on `/_next/...` | `.nojekyll` missing — Jekyll strips underscore paths. The workflow creates it; check the build log. |
+| Assets 404 under `imetrobert.github.io/price-matcher/` | You are on the project URL, not the custom domain. Either use the custom domain or set the `NEXT_PUBLIC_BASE_PATH` variable to `/price-matcher`. |
+| Sign-in works, "Access not enabled for this account" | Your address is not in `NEXT_PUBLIC_CARTMATCH_ALLOWED_EMAILS`. Add it and re-run the workflow (build-time value — a redeploy is required). |
+| Scans fail with 403 from the Edge Function | `CARTMATCH_ALLOWED_EMAILS` in the **Supabase secrets** disagrees with the build variable. |
+| Scans fail with CORS errors | `CARTMATCH_ALLOWED_ORIGINS` does not include your domain. |
+| `/admin` empty, RLS errors in console | `supabase/policies.sql` not applied. |
+| Orange "Open to everyone" banner | No allowlist set — anyone on the Supabase project can sign in. |
+| Changed a variable, nothing happened | `NEXT_PUBLIC_*` are inlined at build time. Re-run the workflow. |

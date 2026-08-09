@@ -3,29 +3,30 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { AuthBar } from "@/components/AuthBar";
+import { AuthBar, AuthGuard } from "@/components/AuthGuard";
 import { MockBanner, Notice } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
+import { env, visionProviderName } from "@/config/env";
 import { formatCents } from "@/lib/money";
+import { healthReport } from "@/services/retailers/registry";
 import { DEFAULT_PREFS, loadPrefs, prefsAreComplete } from "@/lib/prefs";
-import type { AdapterHealth, DataMode, UserPreferences } from "@/types";
-
-interface HealthPayload {
-  dataMode: DataMode;
-  vision: { provider: string; geminiConfigured: boolean };
-  adapters: AdapterHealth[];
-}
+import type { AdapterHealth, UserPreferences } from "@/types";
 
 export default function HomePage() {
+  return (
+    <AuthGuard>
+      <Home />
+    </AuthGuard>
+  );
+}
+
+function Home() {
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFS);
-  const [health, setHealth] = useState<HealthPayload | null>(null);
+  const [adapters, setAdapters] = useState<AdapterHealth[] | null>(null);
 
   useEffect(() => {
     setPrefs(loadPrefs());
-    fetch("/api/health")
-      .then((r) => r.json())
-      .then((d) => setHealth(d))
-      .catch(() => setHealth(null));
+    healthReport().then(setAdapters).catch(() => setAdapters(null));
   }, []);
 
   const ready = prefsAreComplete(prefs) && prefs.currentRetailerId !== null;
@@ -43,8 +44,8 @@ export default function HomePage() {
       </header>
 
       <MockBanner
-        visible={health?.dataMode === "MOCK"}
-        dataMode={health?.dataMode}
+        visible={env.dataMode === "MOCK"}
+        dataMode={env.dataMode}
         note="Running on test fixtures. Prices shown anywhere in the app are invented and must not be shown to a cashier."
       />
 
@@ -81,16 +82,16 @@ export default function HomePage() {
         </div>
       ) : null}
 
-      {health ? (
+      {adapters ? (
         <section className="mt-6">
           <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-muted">
             Service status
           </h2>
           <div className="card space-y-2 text-sm">
-            <Row label="Data mode" value={health.dataMode} />
-            <Row label="Photo recognition" value={health.vision.provider} />
+            <Row label="Data mode" value={env.dataMode} />
+            <Row label="Photo recognition" value={visionProviderName()} />
             <div className="border-t border-line pt-2">
-              {health.adapters.map((a) => (
+              {adapters.map((a) => (
                 <p key={a.retailerId} className="mb-1 leading-snug">
                   <span className="font-semibold">
                     {RETAILERS[a.retailerId]?.displayName ?? a.retailerId}

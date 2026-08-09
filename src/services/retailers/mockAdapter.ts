@@ -1,5 +1,5 @@
 /**
- * Fixture-backed adapter used only when CARTMATCH_DATA_MODE=MOCK.
+ * Fixture-backed adapter used only when NEXT_PUBLIC_CARTMATCH_DATA_MODE=MOCK.
  *
  * It behaves exactly like a real adapter — same interface, same match gauntlet,
  * same freshness maths — so the pipeline and UI can be developed and tested
@@ -7,8 +7,6 @@
  * `isMock: true` with `sourceType: "MOCK_FIXTURE"`, which the eligibility
  * engine refuses to promote to CHECKOUT_READY.
  */
-
-import "server-only";
 
 import { getPolicy } from "@/config/policies";
 import { getRetailer } from "@/config/retailers";
@@ -40,7 +38,7 @@ export class MockRetailerAdapter implements RetailerAdapter {
     return {
       retailerId: this.retailerId,
       status: "MOCK_ONLY",
-      reason: `${config.displayName}: serving FIXTURE data (CARTMATCH_DATA_MODE=MOCK). These prices are invented and can never be used as checkout proof.`,
+      reason: `${config.displayName}: serving FIXTURE data (NEXT_PUBLIC_CARTMATCH_DATA_MODE=MOCK). These prices are invented and can never be used as checkout proof.`,
       lastCheckedAt: new Date().toISOString(),
     };
   }

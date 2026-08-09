@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from "react";
 
+import { AuthGuard } from "@/components/AuthGuard";
 import { ProofSheet } from "@/components/ProofSheet";
 import { MockBanner, Money, Notice, PageHeader, Spinner } from "@/components/ui";
 import { enabledRetailers, RETAILERS } from "@/config/retailers";
@@ -17,9 +18,19 @@ import { PRODUCT_FIXTURES } from "@/fixtures/products";
 import { formatCents, tryParsePriceToCents } from "@/lib/money";
 import { DEFAULT_PREFS, loadPrefs } from "@/lib/prefs";
 import { stateLabel } from "@/services/policies/eligibility";
+import { buildCanonicalProduct } from "@/services/products/normalize";
+import { runPipeline } from "@/services/pipeline/run";
 import type { PipelineResult, RetailerId, SavingsOpportunity } from "@/types";
 
 export default function TestPage() {
+  return (
+    <AuthGuard>
+      <TestHarness />
+    </AuthGuard>
+  );
+}
+
+function TestHarness() {
   const [prefs, setPrefs] = useState(DEFAULT_PREFS);
   const [brand, setBrand] = useState("Oikos");
   const [name, setName] = useState("Greek Yogurt");
@@ -48,33 +59,31 @@ export default function TestPage() {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch("/api/pipeline", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const pipelineResult = await runPipeline({
+        storeContext: {
           retailerId: retailer,
           storeId: prefs.currentStoreId,
+          storeName: null,
           postalCode: postal,
-          thresholdCents: tryParsePriceToCents(threshold) ?? 50,
-          items: [
-            {
+          capturedAt: new Date().toISOString(),
+        },
+        thresholdCents: tryParsePriceToCents(threshold) ?? 50,
+        items: [
+          {
+            canonical: buildCanonicalProduct({
               brand,
-              productName: name,
+              name,
               variant: variant || null,
               fatPercentage: fat || null,
               size: size || null,
-              visibleUpc: upc || null,
-              manualCurrentPriceCents: tryParsePriceToCents(price),
-            },
-          ],
-        }),
+              gtin: upc || null,
+              identitySource: upc ? "VISIBLE_BARCODE" : "USER_ENTERED",
+            }),
+            manualCurrentPriceCents: tryParsePriceToCents(price),
+          },
+        ],
       });
-      const data = await res.json();
-      if (!data.ok) {
-        setError(data.error ?? "Pipeline failed.");
-        return;
-      }
-      setResult(data.result as PipelineResult);
+      setResult(pipelineResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Pipeline failed.");
     } finally {

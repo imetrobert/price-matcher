@@ -4,50 +4,50 @@
  * ---------------------------------------------------------------------------
  * STATUS: INTERFACE ONLY — NO RETAILER PARSER IS IMPLEMENTED
  * ---------------------------------------------------------------------------
- * This is deliberate, and it is the honest state of the integration.
+ * Two separate reasons, and both must be cleared before this can return a price.
  *
- * The development environment cannot reach any of the six retailer domains:
- * the egress proxy answers `403 Forbidden` to the CONNECT request for
- * www.maxi.ca, www.superc.ca, www.walmart.ca, www.metro.ca, www.iga.net and
- * www.provigo.ca. That means no search URL, no product-page URL pattern, and
- * no HTML structure has ever been observed. Writing selectors against pages
- * nobody has loaded would produce a parser that *looks* finished and returns
- * wrong data — precisely the failure mode the spec prohibits.
+ * 1. NOTHING HAS EVER BEEN OBSERVED. The environment this was written in
+ *    cannot reach any of the six retailer domains — the egress proxy answers
+ *    403 to the CONNECT request for maxi.ca, superc.ca, walmart.ca, metro.ca,
+ *    iga.net and provigo.ca. No search URL, no product URL pattern and no page
+ *    structure has ever been seen. Selectors written against pages nobody has
+ *    loaded would produce a scraper that looks finished and returns wrong
+ *    prices, which is precisely the failure this project exists to prevent.
  *
- * So: `health()` performs a real reachability probe and reports what actually
- * happened, and every data method returns a typed error explaining what is
- * missing. Nothing is faked.
+ * 2. A BROWSER CANNOT DO THIS ANYWAY. The app is now a static site, so this
+ *    code runs in the browser, where retailer requests are blocked by CORS.
+ *    Retailers do not send Access-Control-Allow-Origin to arbitrary sites, and
+ *    they are under no obligation to.
  *
  * ---------------------------------------------------------------------------
- * TO IMPLEMENT A RETAILER (once egress to that domain is permitted)
+ * WHERE A REAL IMPLEMENTATION HAS TO LIVE
  * ---------------------------------------------------------------------------
- *  1. Load the retailer's search page in a real browser; capture the search
- *     URL shape and whether results are server-rendered or fetched via an
- *     internal JSON endpoint.
- *  2. Implement `buildSearchUrl` and `parseSearchResults` in a subclass.
- *  3. Load a product page; capture the price selector and any JSON-LD
- *     (`<script type="application/ld+json">`) offer block, which is usually
- *     more stable than CSS selectors.
- *  4. Implement `parseProductPage` returning price, availability, and — if the
- *     page exposes it — the GTIN. A GTIN on the page upgrades the match from
- *     attribute-level to Level 1.
- *  5. Verify the store-context behaviour: most Quebec banners scope price to a
- *     selected store via a cookie or a path segment. Until that is confirmed,
- *     a parsed price must be recorded as CONDITIONALLY_VERIFIED with the
- *     "Montreal-area online price" restriction, not as the in-store price.
- *  6. Only after steps 1-5 are exercised against live pages, update
- *     `priceReliability` in src/config/retailers.ts.
+ * In a Supabase Edge Function — `supabase/functions/retailer/` — for the same
+ * reason the Gemini call moved there. A server-side fetch has no CORS
+ * restriction, can hold credentials if a retailer ever requires them, and
+ * keeps the parsing logic off the public bundle.
  *
- * Review the retailer's Terms of Service and robots.txt before enabling any
+ * The steps, once a retailer is reachable:
+ *  1. Load the retailer's search page in a real browser; capture the search URL
+ *     shape and whether results are server-rendered or fetched as JSON.
+ *  2. Load a product page; capture the price selector and any JSON-LD offer
+ *     block, which is usually more stable than CSS selectors.
+ *  3. Extract price, availability and — if the page exposes it — the GTIN. A
+ *     GTIN on the page upgrades the match from attribute-level to Level 1.
+ *  4. Confirm the store-context behaviour. Most Quebec banners scope price to a
+ *     selected store via a cookie or a path segment. Until that is confirmed, a
+ *     parsed price must be recorded as CONDITIONALLY_VERIFIED with the
+ *     "Montreal-area online price" restriction, never as the in-store price.
+ *  5. Only after steps 1-4 run against live pages, update `priceReliability`
+ *     in src/config/retailers.ts and record what was measured.
+ *
+ * Review the retailer's Terms of Service and robots.txt before enabling
  * automated fetching. If automated access is not permitted, the correct
  * outcome is to leave the adapter unavailable.
  */
 
-import "server-only";
-
 import { getRetailer } from "@/config/retailers";
 import { getPolicy } from "@/config/policies";
-import { probeReachable } from "@/services/retailers/http";
 import type {
   AdapterHealth,
   AdapterResult,
@@ -69,22 +69,10 @@ export class LiveRetailerAdapter implements RetailerAdapter {
 
   async health(): Promise<AdapterHealth> {
     const config = getRetailer(this.retailerId);
-    const probe = await probeReachable(config.homepage, this.retailerId);
-
-    if (!probe.reachable) {
-      return {
-        retailerId: this.retailerId,
-        status: "UNAVAILABLE",
-        reason: `${config.displayName} price service unavailable — ${probe.detail}`,
-        lastCheckedAt: new Date().toISOString(),
-      };
-    }
-
-    // Reachable, but there is still no parser. Say exactly that.
     return {
       retailerId: this.retailerId,
       status: "UNAVAILABLE",
-      reason: `${config.displayName} is reachable, but no product-page parser has been implemented or validated for it yet. See src/services/retailers/liveAdapter.ts for the steps required.`,
+      reason: `${config.displayName} price lookup is not implemented. It requires a Supabase Edge Function to fetch retailer pages — a browser cannot, because of CORS — and no page parser has been written or validated. See src/services/retailers/liveAdapter.ts.`,
       lastCheckedAt: new Date().toISOString(),
     };
   }
@@ -94,7 +82,7 @@ export class LiveRetailerAdapter implements RetailerAdapter {
     _ctx: StoreContext,
   ): Promise<AdapterResult<ProductSearchCandidate[]>> {
     return this.notImplemented(
-      "product search (no verified search URL or result structure for this retailer)",
+      "product search (no verified search URL or result structure, and browser requests to retailers are blocked by CORS)",
     );
   }
 

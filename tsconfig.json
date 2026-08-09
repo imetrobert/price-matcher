@@ -20,5 +20,12 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    // Supabase Edge Functions are Deno, not Node: different globals, different
+    // module resolution (jsr:/npm: specifiers, .ts import paths). Typechecking
+    // them with this config produces only noise. `supabase functions deploy`
+    // typechecks them with Deno's own config, which is the one that matters.
+    "supabase/functions"
+  ]
 }

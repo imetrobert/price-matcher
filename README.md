@@ -5,6 +5,10 @@ store; you photograph your cart; the app tells you which of those exact items
 are verifiably cheaper elsewhere, and gives you something you can show a
 cashier.
 
+Deployed as a **static site on GitHub Pages**, with Supabase for sign-in, data,
+and the one call that needs a secret. See [Architecture](#architecture) for what
+that costs and what it buys.
+
 Working name. Renaming means editing `src/app/layout.tsx` and the strings in
 `src/app/page.tsx` — the name is not baked into module paths or types.
 
@@ -17,14 +21,15 @@ refusing to state things it cannot back up, and the same standard applies here.
 
 | Area | Status |
 |---|---|
-| Product matching engine | **Real and tested.** 59 automated tests, including every discrimination case from the spec. |
+| Product matching engine | **Real and tested.** 76 automated tests, including every discrimination case from the spec. |
 | Money / savings arithmetic | **Real and tested.** Integer cents throughout. |
 | Freshness, eligibility, audit trail | **Real and tested.** |
-| Mobile UI, Checkout Mode, proof sheet | **Real.** Exercised against the running server. |
-| Auth gate (routing, fail-closed, header hardening) | **Real and verified at runtime** against a running server. |
-| Supabase persistence | **Written, never run.** No Supabase project was reachable from the build environment. |
-| Supabase sign-in (credential exchange) | **Written, never run with a real project.** The gate around it is verified; the login round trip is not. |
-| Gemini cart recognition | **Written, never run with a real key.** No `GEMINI_API_KEY` was available. |
+| Mobile UI, Checkout Mode, proof sheet | **Real.** Exercised against the built static export. |
+| Static export + Pages workflow | **Real.** All 8 pages build and serve; the secret-leak guard is tested in both directions. |
+| Sign-in gate in the browser | **Real, but it is not a security control** — see [Where the security actually is](#where-the-security-actually-is). |
+| Supabase persistence + RLS policies | **Written, never run.** No Supabase project was reachable from the build environment. |
+| Supabase sign-in (credential exchange) | **Written, never run with a real project.** |
+| Gemini cart recognition (Edge Function) | **Written, never deployed.** No `GEMINI_API_KEY` and no Supabase project were available. |
 | **Retailer price integrations** | **NOT IMPLEMENTED.** See below. |
 
 ### The blocker: retailer egress is refused
@@ -169,25 +174,28 @@ so it is the same `auth.users` table and therefore the same email and password.
 There is no sign-up form on purpose — accounts are created in the Supabase
 dashboard, and a public sign-up on a personal tool invites strangers in.
 
-Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` and every
-route requires a session: pages, and the API routes behind them. `/login` and a
-minimal `/api/health` are the only public surfaces.
+### Where the security actually is
 
-**It fails closed.** With `CARTMATCH_REQUIRE_AUTH=true` (the default in
-production) and the keys missing, every path returns `503` rather than serving
-the app — a missing environment variable can never quietly expose a deployment.
-Verified at runtime: `/`, `/scan`, `/admin`, and `POST /api/pipeline` all
-return `503` unconfigured, and all `307` to `/login` when configured without a
-session.
+GitHub Pages serves files; it cannot run a server. So the whole app is a static
+bundle, and since this repository is public, **anyone can read that bundle and
+skip the sign-in screen entirely.** The login page is a UX affordance, not a
+gate. Two things are the real controls:
 
-**The two Supabase keys are not interchangeable.** The **anon** key is designed
-to ship to the browser and is powerless alone — every request it makes is
-evaluated against Row Level Security, which is why the `NEXT_PUBLIC_` prefix is
-correct there. The **service role** key bypasses RLS entirely and is
-server-side only. Never prefix it `NEXT_PUBLIC_`.
+| Control | Enforced by | Protects |
+|---|---|---|
+| JWT verification + allowlist in `supabase/functions/_shared/auth.ts` | Supabase Edge Function, before any Gemini call | your API key and your quota |
+| Row Level Security (`supabase/policies.sql`) | Postgres, on every query | your scans, prices, and postal code |
 
-Signed out, `/api/health` returns only auth status — no retailer, storage, or
-key information, and never the allowlist contents.
+Design accordingly: never put anything in this repository that depends on the
+UI hiding it. Nothing in `src/` is trusted.
+
+**The two Supabase keys are not interchangeable.** The **publishable** key
+(`sb_publishable_…`, formerly `anon`) is designed to ship to the browser and is
+powerless alone — every request it makes is evaluated against RLS, which is why
+the `NEXT_PUBLIC_` prefix is correct there. The **secret** key (`sb_secret_…`,
+formerly `service_role`) bypasses RLS entirely. **This app no longer uses it at
+all**, and the deploy workflow refuses to publish if anything matching a
+secret-key pattern appears in the build output.
 
 ### Who gets in (`CARTMATCH_ALLOWED_EMAILS`)
 
@@ -196,15 +204,21 @@ serves your other apps, they all share one `auth.users` table — so by default 
 valid session for any of them is a valid session here, and anyone added later
 for a different app gets CartMatch too, silently.
 
-Set `CARTMATCH_ALLOWED_EMAILS` to a comma-separated list and project membership
-becomes necessary but not sufficient. Someone signed in but not listed lands on
-a plain `/not-authorized` page — deliberately **not** a redirect to `/login`,
-which would bounce them straight back and spin forever.
+The allowlist decouples app access from project membership. It is set in **two
+places, and they do different jobs**:
 
-Unset is a legitimate choice and admits everyone on the project, so a forgotten
-variable can never lock you out of your own app. When it is unset the app says
-so, in an orange banner on the home screen and in `/api/health`. A silently
-inactive access control is worse than none.
+- `NEXT_PUBLIC_CARTMATCH_ALLOWED_EMAILS` (build variable) decides what the UI
+  *shows*. Someone signed in but not listed lands on a plain "access not
+  enabled" page — deliberately **not** a redirect to `/login`, which would
+  bounce them straight back and spin forever.
+- `CARTMATCH_ALLOWED_EMAILS` (Supabase Edge Function secret) decides what is
+  *permitted*. This one is the actual control.
+
+If they disagree, someone is told they have access and then gets a `403` on
+every scan. Unset is a legitimate choice and admits everyone on the project, so
+a forgotten variable can never lock you out of your own app; when it is unset
+the app says so in an orange banner. A silently inactive access control is
+worse than none.
 
 ## Setup
 
@@ -214,57 +228,70 @@ cp .env.example .env.local     # fill in what you have
 npm run dev                    # http://localhost:3000
 ```
 
-The app runs with **no keys at all** in mock mode — useful for UI work. Without
-auth keys it runs unprotected in development and shows a red **Unprotected
-instance** banner; in production the middleware refuses to serve instead.
+The app runs with **no keys at all** in mock mode — useful for UI work. `npm run
+dev` still uses the Next.js dev server; only the production build is a static
+export. The vision Edge Function is not part of `npm run dev`, so photo
+recognition falls back to mock locally unless you run `supabase functions serve`
+and point `NEXT_PUBLIC_SUPABASE_URL` at it.
 
 ## Deploying to pricecheck.imetrobert.com
 
-See **[DEPLOY.md](./DEPLOY.md)** for the full runbook: schema, environment
-variables, the `CNAME`, the Supabase redirect URL (the usual cause of a login
-loop), and four `curl` checks that prove the live instance is actually
-protected before you share the URL.
+See **[DEPLOY.md](./DEPLOY.md)** for the full runbook: the two SQL files, the
+Edge Function and its secrets, the GitHub Actions variables, the `CNAME`, and
+the `curl` checks — including the one that matters, which proves the Edge
+Function refuses an unauthenticated caller.
 
-None of it has been executed — I have no access to your DNS, host, or Supabase
-project.
+None of it has been executed — I have no access to your DNS, your GitHub Pages
+settings, or your Supabase project.
 
-### Environment variables
+### Build variables (all public)
 
-All server-side only. None is exposed to the browser bundle.
+`NEXT_PUBLIC_*` values are inlined into the bundle at build time. The bundle and
+this repository are both world-readable, so **everything in this table is
+public** regardless of whether GitHub stores it under "Variables" or "Secrets".
 
 | Variable | Purpose |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Sign-in. Same project as your other apps = same credentials. Public by design. |
-| `CARTMATCH_REQUIRE_AUTH` | Force the auth gate. Defaults true in production, false in development. |
-| `CARTMATCH_ALLOWED_EMAILS` | Comma-separated allowlist. Unset = every user on the Supabase project is admitted, and the app says so. |
-| `GEMINI_API_KEY` | Cart photo recognition. Without it, vision falls back to mock and says so. |
+| `NEXT_PUBLIC_SUPABASE_URL` | Your project URL. |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | The **publishable** key. Same project as your other apps = same credentials. Public by design. |
+| `NEXT_PUBLIC_CARTMATCH_ALLOWED_EMAILS` | Comma-separated allowlist, for the UI. Unset = everyone on the project, and the app says so. |
+| `NEXT_PUBLIC_CARTMATCH_DATA_MODE` | `MOCK` (fixtures, labelled) or `LIVE` (real adapters only — today that means no prices at all). |
+| `NEXT_PUBLIC_BASE_PATH` | Only for `<user>.github.io/<repo>/`. Leave unset on a custom domain. |
+
+### Edge Function secrets (never in the bundle)
+
+Read only by `supabase/functions/**`, which runs on Supabase. Set with
+`supabase secrets set`:
+
+| Secret | Purpose |
+|---|---|
+| `GEMINI_API_KEY` | Cart photo recognition. Without it the function reports unavailable; it never silently mocks. |
 | `GEMINI_MODEL` | Default `gemini-2.5-flash`. |
 | `GEMINI_THINKING_BUDGET` | Tokens of thinking on 2.5+. Default `0` — recognition is extraction, not reasoning, and the shopper is waiting. |
-| `CARTMATCH_DATA_MODE` | `MOCK` (fixtures, labelled) or `LIVE` (real adapters only). |
-| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Use your existing Supabase project for persistence. |
-| `SUPABASE_SCHEMA`, `SUPABASE_TABLE_*` | Optional overrides to fit your naming. |
-| `CARTMATCH_DATA_DIR` | Local file store, used only when Supabase is not configured. |
-| `GOOGLE_SEARCH_API_KEY` / `GOOGLE_SEARCH_ENGINE_ID` | Optional, to *discover* candidate product URLs. A snippet is never used as a price. |
-| `RETAILER_FETCH_TIMEOUT_MS` | Default 12000. |
-| `CARTMATCH_PERSIST_PHOTOS` | Default `false`. Photos are otherwise processed in memory and discarded. |
+| `CARTMATCH_ALLOWED_EMAILS` | The authoritative allowlist. |
+| `CARTMATCH_ALLOWED_ORIGINS` | CORS allowlist, e.g. `https://pricecheck.imetrobert.com`. Arbitrary origins are never reflected. |
 
 ### Using your existing Supabase project
 
-Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, then apply the schema once:
+Run both SQL files in the SQL editor, in order:
 
-```bash
-psql "$SUPABASE_DB_URL" -f supabase/schema.sql
-```
+1. `supabase/schema.sql` — three tables (`cartmatch_price_observations`,
+   `cartmatch_audit_records`, `cartmatch_validations`), prefixed so they sit
+   safely beside your existing tables. Rows keep the whole domain object in a
+   `payload jsonb` column with hot fields promoted, so adding a TypeScript
+   field needs no migration.
+2. `supabase/policies.sql` — **required.** Adds `user_id` and the RLS policies
+   that let a browser session write as itself. Without it every write fails:
+   RLS is on with no policies, which permits nothing but the secret key, and
+   there is no server here to hold one.
 
-Three tables (`cartmatch_price_observations`, `cartmatch_audit_records`,
-`cartmatch_validations`), prefixed so they sit safely beside your existing
-tables, RLS on with no policies so only the service role can reach them. Rows
-keep the whole domain object in a `payload jsonb` column with hot fields
-promoted, so adding a TypeScript field needs no migration. It talks to PostgREST
-over `fetch` — no `@supabase/*` dependency.
+By default each person sees only their own runs; `policies.sql` ends with a
+commented-out block for shared visibility. Inserts stay per-user either way —
+nobody can write a row as someone else.
 
-Without these variables the app uses a local JSONL file store. Nothing else
-changes.
+Without Supabase configured, persistence is simply skipped. Writes are
+best-effort and log rather than throw, because a failed audit write must not
+cost a shopper their comparison at the till.
 
 There is also a `cartmatch_retailer_reliability` view that turns your
 "Verify This Match" feedback into measured accuracy per retailer — the intended
@@ -274,8 +301,8 @@ future input to `priceReliability`.
 
 ```bash
 npm run dev        # dev server
-npm run build      # production build
-npm run test       # vitest (59 tests)
+npm run build      # static export into out/
+npm run test       # vitest (76 tests)
 npm run typecheck  # tsc --noEmit
 npm run verify     # typecheck + test + build
 ```
@@ -284,20 +311,24 @@ npm run verify     # typecheck + test + build
 
 ## Architecture
 
+Three places code runs, and the split is not arbitrary — it follows what each
+one is allowed to hold:
+
+| Runs in | Contains | Why there |
+|---|---|---|
+| Browser (GitHub Pages) | UI, matching, savings arithmetic, freshness, eligibility, the pipeline | Pure logic. Publishing it costs nothing; it has no secret to leak. |
+| Supabase Edge Function | The Gemini call | It holds the API key. That is the entire reason it exists. |
+| Postgres | Audit trail, price observations, validations | RLS is the only enforcement a static site can rely on. |
+
 ```
-src/
-  app/                    screens + API routes
-    api/vision            POST  photo -> structured products
-    api/pipeline          POST  confirmed items -> verified opportunities
-    api/health            GET   adapter + config status
-    api/admin/audit       GET   audit trail
-    api/validate          POST  real-world outcome feedback
-  components/             UI (proof sheet, mock banner, primitives)
+src/                      → published to Pages, world-readable
+  app/                    screens (static export, no API routes)
+  components/             UI (proof sheet, mock banner, auth guard, primitives)
   config/                 retailers, policies, thresholds, env
   fixtures/               product identities + clearly-marked mock prices
-  lib/                    money (integer cents), region, prefs, store/
+  lib/                    money (integer cents), region, prefs, auth/, store/
   services/
-    vision/               Gemini + mock, strict JSON schema
+    vision/               request/response shaping + mock, strict JSON schema
     products/             normalization, canonical identity
     matching/             scoring ladder + candidate ranking
     retailers/            adapter interface, registry, live scaffold, mock
@@ -306,10 +337,20 @@ src/
     pipeline/             orchestration
   types/                  domain types
 tests/                    vitest suites
-supabase/schema.sql       tables for your existing project
+
+supabase/                 → runs on Supabase, never published
+  functions/vision/       holds GEMINI_API_KEY; verifies the JWT first
+  functions/_shared/      auth (the real gate) + CORS origin allowlist
+  schema.sql              tables
+  policies.sql            RLS — required for this deployment
+
+.github/workflows/        → build, test, leak-check, publish to Pages
 ```
 
-Two rules shape the layout:
+There are no API routes and no middleware: `output: "export"` cannot run them,
+and leaving them in place would ship dead code that looks like a protection.
+
+Three rules shape the layout:
 
 - **AI does interpretation; code does everything else.** Gemini reads photos.
   Arithmetic, thresholds, timestamps, freshness, filtering, sorting and
@@ -317,6 +358,8 @@ Two rules shape the layout:
   never delegated to a model.
 - **No type can hold a price without its provenance.** `PriceObservation`
   requires `sourceType` and `observedAt`; there is no shortcut constructor.
+- **Nothing in `src/` is trusted.** It is published. Every check that matters
+  is repeated in the Edge Function or in Postgres.
 
 ### Adding a retailer
 
@@ -343,39 +386,40 @@ audit trail, price observations, config, and the "Verify This Match" form.
 ## Privacy
 
 Postal code is the only location detail stored, and it lives in `localStorage`.
-Photos are processed in memory and discarded unless
-`CARTMATCH_PERSIST_PHOTOS=true`. No account, no payment data, no precise
-location, no advertising identifiers.
+Photos go to the Edge Function, are forwarded to Gemini, and are never written
+to a database or a disk — no code path persists an image. No account beyond the
+Supabase login, no payment data, no precise location, no advertising
+identifiers.
 
 ---
 
 ## Known limitations
 
-1. **No working retailer integration** — the headline item. See the top.
+1. **No working retailer integration** — the headline item. See the top. On
+   this architecture it can never run in the browser either: retailers do not
+   permit cross-origin requests, so it has to become a second Edge Function.
 2. **Gemini path unexercised** — the request shape follows the documented REST
-   contract and the endpoint is reachable, but no call has been made with a
-   valid key.
-3. **Supabase paths unexercised** — persistence and the sign-in credential
-   exchange are both written against the documented contracts but have never
-   run against a real project. The *gate* around sign-in is verified; the
-   round trip through Supabase is not. Run DEPLOY.md's four checks after
-   deploying.
-4. **No per-user data separation.** `CARTMATCH_ALLOWED_EMAILS` controls *who
-   gets in*, not *what they see*. Everyone admitted shares one audit trail and
-   everyone can reach `/admin`, which shows every scan, price and postal code.
-   There are no roles. Fine among people who already trust each other; wrong
-   if you ever want someone to have access without visibility into your runs.
-5. **All retailer policies `UNKNOWN`**, so `POTENTIAL_PRICE_MATCH` is
+   contract, but no call has been made with a valid key, and the Edge Function
+   has never been deployed.
+3. **Supabase paths unexercised** — persistence, RLS, and the sign-in
+   credential exchange are all written against the documented contracts but
+   have never run against a real project. Run DEPLOY.md's checks after
+   deploying; the Edge Function `401` check is the one that matters.
+4. **The site itself is public.** Pages cannot require a login to serve a file,
+   so anyone with the URL loads the app shell and can read the whole bundle.
+   What they cannot do is spend your Gemini quota or read your rows. If that
+   trade is unacceptable, this is the wrong host.
+5. **The allowlist lives in two places** and nothing keeps them in sync. A
+   mismatch shows as sign-in succeeding and every scan returning `403`.
+6. **All retailer policies `UNKNOWN`**, so `POTENTIAL_PRICE_MATCH` is
    unreachable by design.
-6. **No GTINs in fixtures.** Inventing barcode numbers would let a fabricated
+7. **No GTINs in fixtures.** Inventing barcode numbers would let a fabricated
    identifier reach a Level-1 "exact UPC match". Populate them from real scans.
-7. **UI is English only.** The language preference persists but nothing is
-   translated.
-8. **Per-retailer rejections are not individually audited.** When an item
+8. **UI is English only.** The language preference persists but nothing is
+   translated. Note this is separate from *matching*, which is bilingual.
+9. **Per-retailer rejections are not individually audited.** When an item
    produces at least one displayable row, competitors rejected by the matcher
    do not each get an audit row. Item-level failures are recorded.
-9. **`.data/` file store is not concurrency-safe** — fine for one developer,
-   which is why Supabase is the recommended backend.
 10. **Store-level pricing is unproven.** Without a confirmed store context, a
    price is labelled a Montreal-area online price, never a shelf guarantee.
 
