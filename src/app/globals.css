@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-[#f6f7f9] text-ink antialiased;
+  /* Safe-area padding so the sticky checkout bar clears the iPhone home bar. */
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-line bg-surface p-4 shadow-sm;
+  }
+
+  /* 48px min target: usable with a thumb while holding a phone one-handed. */
+  .btn {
+    @apply inline-flex min-h-[48px] w-full items-center justify-center gap-2
+           rounded-xl px-5 text-base font-semibold transition
+           active:scale-[0.99] disabled:opacity-40 disabled:active:scale-100;
+  }
+
+  .btn-primary {
+    @apply btn bg-brand text-white hover:bg-brandDark;
+  }
+
+  .btn-secondary {
+    @apply btn border border-line bg-surface text-ink hover:bg-[#f2f4f7];
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-brand underline-offset-2 hover:underline;
+  }
+
+  .field {
+    @apply min-h-[48px] w-full rounded-xl border border-line bg-surface px-4
+           text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/20;
+  }
+
+  .label {
+    @apply mb-1 block text-sm font-semibold text-muted;
+  }
+
+  .pill {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold;
+  }
+
+  .pill-good {
+    @apply pill bg-good/10 text-good;
+  }
+
+  .pill-warn {
+    @apply pill bg-warn/10 text-warn;
+  }
+
+  .pill-bad {
+    @apply pill bg-bad/10 text-bad;
+  }
+
+  .pill-mock {
+    @apply pill bg-mock/10 text-mock;
+  }
+}
+
+/* Prevent iOS from zooming when focusing an input. */
+@supports (-webkit-touch-callout: none) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
