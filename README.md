@@ -186,8 +186,25 @@ evaluated against Row Level Security, which is why the `NEXT_PUBLIC_` prefix is
 correct there. The **service role** key bypasses RLS entirely and is
 server-side only. Never prefix it `NEXT_PUBLIC_`.
 
-Signed out, `/api/health` returns only `{ok, auth:{configured, required, email}}` —
-no retailer, storage, or key information.
+Signed out, `/api/health` returns only auth status — no retailer, storage, or
+key information, and never the allowlist contents.
+
+### Who gets in (`CARTMATCH_ALLOWED_EMAILS`)
+
+Supabase Auth is scoped to a **project**, not an app. If this project also
+serves your other apps, they all share one `auth.users` table — so by default a
+valid session for any of them is a valid session here, and anyone added later
+for a different app gets CartMatch too, silently.
+
+Set `CARTMATCH_ALLOWED_EMAILS` to a comma-separated list and project membership
+becomes necessary but not sufficient. Someone signed in but not listed lands on
+a plain `/not-authorized` page — deliberately **not** a redirect to `/login`,
+which would bounce them straight back and spin forever.
+
+Unset is a legitimate choice and admits everyone on the project, so a forgotten
+variable can never lock you out of your own app. When it is unset the app says
+so, in an orange banner on the home screen and in `/api/health`. A silently
+inactive access control is worse than none.
 
 ## Setup
 
@@ -219,6 +236,7 @@ All server-side only. None is exposed to the browser bundle.
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Sign-in. Same project as your other apps = same credentials. Public by design. |
 | `CARTMATCH_REQUIRE_AUTH` | Force the auth gate. Defaults true in production, false in development. |
+| `CARTMATCH_ALLOWED_EMAILS` | Comma-separated allowlist. Unset = every user on the Supabase project is admitted, and the app says so. |
 | `GEMINI_API_KEY` | Cart photo recognition. Without it, vision falls back to mock and says so. |
 | `GEMINI_MODEL` | Default `gemini-2.5-flash`. |
 | `GEMINI_THINKING_BUDGET` | Tokens of thinking on 2.5+. Default `0` — recognition is extraction, not reasoning, and the shopper is waiting. |
@@ -342,10 +360,11 @@ location, no advertising identifiers.
    run against a real project. The *gate* around sign-in is verified; the
    round trip through Supabase is not. Run DEPLOY.md's four checks after
    deploying.
-4. **Single-tenant auth.** Any account on the Supabase project can sign in;
-   there is no per-user data separation, because the audit tables are
-   service-role-only and not user-scoped. Fine for a personal tool, wrong the
-   moment you add a second person you do not want seeing your runs.
+4. **No per-user data separation.** `CARTMATCH_ALLOWED_EMAILS` controls *who
+   gets in*, not *what they see*. Everyone admitted shares one audit trail and
+   everyone can reach `/admin`, which shows every scan, price and postal code.
+   There are no roles. Fine among people who already trust each other; wrong
+   if you ever want someone to have access without visibility into your runs.
 5. **All retailer policies `UNKNOWN`**, so `POTENTIAL_PRICE_MATCH` is
    unreachable by design.
 6. **No GTINs in fixtures.** Inventing barcode numbers would let a fabricated

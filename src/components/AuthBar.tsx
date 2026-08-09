@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 interface AuthStatus {
   configured: boolean;
   required: boolean;
+  allowlistActive: boolean;
   email: string | null;
 }
 
@@ -25,6 +26,7 @@ export function AuthBar() {
         setStatus({
           configured: Boolean(d?.auth?.configured),
           required: Boolean(d?.auth?.required),
+          allowlistActive: Boolean(d?.auth?.allowlistActive),
           email: d?.auth?.email ?? null,
         }),
       )
@@ -48,18 +50,34 @@ export function AuthBar() {
   }
 
   return (
-    <div className="mb-4 flex items-center justify-between gap-3 text-sm">
-      <span className="truncate text-muted">
-        {status.email ? `Signed in as ${status.email}` : "Signed in"}
-      </span>
-      <form action="/api/auth/signout" method="post">
-        <button
-          type="submit"
-          className="shrink-0 font-semibold text-brand underline-offset-2 hover:underline"
-        >
-          Sign out
-        </button>
-      </form>
-    </div>
+    <>
+      {!status.allowlistActive ? (
+        <div className="mb-3 rounded-2xl border border-warn/30 bg-warn/5 p-3">
+          <p className="text-sm font-bold text-warn">
+            Open to everyone on the Supabase project
+          </p>
+          <p className="mt-1 text-sm text-warn/90">
+            No CartMatch allowlist is set, so any confirmed user on this
+            Supabase project can sign in — including anyone added later for a
+            different app. Set <code>CARTMATCH_ALLOWED_EMAILS</code> to control
+            it here.
+          </p>
+        </div>
+      ) : null}
+
+      <div className="mb-4 flex items-center justify-between gap-3 text-sm">
+        <span className="truncate text-muted">
+          {status.email ? `Signed in as ${status.email}` : "Signed in"}
+        </span>
+        <form action="/api/auth/signout" method="post">
+          <button
+            type="submit"
+            className="shrink-0 font-semibold text-brand underline-offset-2 hover:underline"
+          >
+            Sign out
+          </button>
+        </form>
+      </div>
+    </>
   );
 }

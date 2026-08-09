@@ -19,7 +19,12 @@ import { NextResponse } from "next/server";
 
 import { env, hasGeminiKey, hasGoogleSearch } from "@/config/env";
 import { RETAILERS } from "@/config/retailers";
-import { authConfigured, authRequired } from "@/lib/auth/config";
+import {
+  allowedEmails,
+  allowlistActive,
+  authConfigured,
+  authRequired,
+} from "@/lib/auth/config";
 import { getSessionUser } from "@/lib/auth/server";
 import { activeBackend, supabaseHealth } from "@/lib/store";
 import { healthReport } from "@/services/retailers/registry";
@@ -44,6 +49,8 @@ export async function GET() {
       auth: {
         configured: authConfigured(),
         required: authRequired(),
+        // Whether an allowlist exists is not sensitive; who is on it is.
+        allowlistActive: allowlistActive(),
         email: null,
       },
     });
@@ -61,6 +68,10 @@ export async function GET() {
     auth: {
       configured: authConfigured(),
       required: authRequired(),
+      allowlistActive: allowlistActive(),
+      // Only ever shown to someone already admitted, so they can confirm who
+      // has access without opening the hosting dashboard.
+      allowedEmails: allowedEmails(),
       email: user?.email ?? null,
     },
     storage: {

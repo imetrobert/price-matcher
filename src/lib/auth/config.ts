@@ -58,10 +58,62 @@ export function authRequired(): boolean {
 }
 
 /** Paths reachable without a session. Everything else requires one. */
-export const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/health"];
+export const PUBLIC_PATHS = [
+  "/login",
+  "/auth/callback",
+  "/not-authorized",
+  "/api/health",
+];
 
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Per-app allowlist
+// ---------------------------------------------------------------------------
+
+/**
+ * WHY THIS EXISTS
+ *
+ * Supabase Auth is scoped to a PROJECT, not to an app. When several apps share
+ * one project — as they do here — they share one `auth.users` table, so a
+ * valid session for any of them is a valid session for all of them. Adding a
+ * contractor to a different app on the same project silently grants them this
+ * one too, with no action and no signal.
+ *
+ * `CARTMATCH_ALLOWED_EMAILS` decouples them: membership of the project becomes
+ * necessary but not sufficient, and access to CartMatch becomes a deliberate
+ * act.
+ *
+ * When UNSET, every confirmed project user is admitted — the original
+ * behaviour, kept so that a forgotten variable cannot lock you out of your own
+ * app. That default is reported by /api/health and shown in the UI, because a
+ * silently-inactive access control is worse than none.
+ */
+export function allowedEmails(): string[] {
+  const raw = process.env.CARTMATCH_ALLOWED_EMAILS ?? "";
+  return raw
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e !== "");
+}
+
+/** True when an allowlist is configured and therefore being enforced. */
+export function allowlistActive(): boolean {
+  return allowedEmails().length > 0;
+}
+
+/**
+ * Is this email admitted to CartMatch specifically?
+ *
+ * Compared case-insensitively against the address Supabase verified, not
+ * anything the client supplied.
+ */
+export function emailAllowed(email: string | null | undefined): boolean {
+  if (!allowlistActive()) return true;
+  if (!email) return false;
+  return allowedEmails().includes(email.trim().toLowerCase());
 }

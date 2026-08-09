@@ -11,7 +11,7 @@ import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
-import { authConfigured, publicAuthConfig } from "@/lib/auth/config";
+import { authConfigured, emailAllowed, publicAuthConfig } from "@/lib/auth/config";
 
 export async function createServerSupabase() {
   const cfg = publicAuthConfig();
@@ -52,6 +52,25 @@ export interface SessionUser {
  * revalidating call is the correct one.
  */
 export async function getSessionUser(): Promise<SessionUser | null> {
+  const identity = await getSignedInIdentity();
+  if (!identity) return null;
+
+  // Defence in depth: the middleware already blocks non-allowlisted accounts,
+  // but a route must not depend on the matcher pattern being right. A user who
+  // is signed in but not admitted to this app is treated as no user at all.
+  if (!emailAllowed(identity.email)) return null;
+
+  return identity;
+}
+
+/**
+ * Who is signed in to the Supabase PROJECT, regardless of whether they are
+ * admitted to this app.
+ *
+ * Only for telling someone why they were turned away — never for authorising
+ * anything. Use `getSessionUser()` for that.
+ */
+export async function getSignedInIdentity(): Promise<SessionUser | null> {
   if (!authConfigured()) return null;
   const supabase = await createServerSupabase();
   if (!supabase) return null;

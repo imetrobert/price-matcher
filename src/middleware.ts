@@ -14,7 +14,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-import { authRequired, isPublicPath, publicAuthConfig } from "@/lib/auth/config";
+import {
+  authRequired,
+  emailAllowed,
+  isPublicPath,
+  publicAuthConfig,
+} from "@/lib/auth/config";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -64,6 +69,31 @@ export async function middleware(request: NextRequest) {
     // Send the shopper back where they were once signed in.
     loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
     return NextResponse.redirect(loginUrl);
+  }
+
+  // Signed in to the Supabase project, but not admitted to THIS app.
+  //
+  // Deliberately NOT a redirect to /login: the session is valid, so /login
+  // would bounce straight back here and spin. It has to be a distinct terminal
+  // state the person can actually read and act on.
+  if (user && !emailAllowed(user.email)) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Your account is not authorised for CartMatch. Ask the owner to add your email to CARTMATCH_ALLOWED_EMAILS.",
+        },
+        { status: 403 },
+      );
+    }
+    if (pathname !== "/not-authorized") {
+      const denied = request.nextUrl.clone();
+      denied.pathname = "/not-authorized";
+      denied.search = "";
+      return NextResponse.redirect(denied);
+    }
+    return response;
   }
 
   // Already signed in and sitting on /login — go to the app.

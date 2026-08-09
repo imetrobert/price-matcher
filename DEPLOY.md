@@ -83,11 +83,20 @@ three** — see step 6.
 | `NEXT_PUBLIC_SUPABASE_URL` | `https://<project>.supabase.co` |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon / public key |
 | `CARTMATCH_REQUIRE_AUTH` | `true` |
+| `CARTMATCH_ALLOWED_EMAILS` | your email, comma-separated for more people |
 | `SUPABASE_URL` | same as `NEXT_PUBLIC_SUPABASE_URL` |
 | `SUPABASE_SERVICE_ROLE_KEY` | service role key |
 | `GEMINI_API_KEY` | your Gemini key (omit to stay on mock vision) |
 | `GEMINI_MODEL` | `gemini-2.5-flash` (the default; set explicitly if you want a different one) |
 | `CARTMATCH_DATA_MODE` | `MOCK` until a retailer adapter actually works |
+
+> **Set `CARTMATCH_ALLOWED_EMAILS` if the Supabase project is shared with your
+> other apps.** Supabase Auth is project-scoped, so without it *every* confirmed
+> user on the project can sign in here — including anyone you add later for a
+> different app, silently. With it set, membership of the project is necessary
+> but not sufficient, and adding someone to CartMatch is a deliberate act.
+> Leaving it unset is a valid choice; the app will tell you it is unset rather
+> than let you assume otherwise.
 
 > ⚠️ **`SUPABASE_SERVICE_ROLE_KEY` must never be given a `NEXT_PUBLIC_` prefix.**
 > The anon key is designed to ship to the browser and is powerless on its own —
@@ -200,5 +209,7 @@ not a deployment fault. See the README for what has to happen to change it.
 | `503` on every path | `CARTMATCH_REQUIRE_AUTH=true` with no Supabase keys. |
 | Red "Unprotected instance" banner in production | `NEXT_PUBLIC_*` vars missing. Anyone with the URL can use it — fix immediately. |
 | "Invalid login credentials" | Wrong password, or the user exists in a *different* Supabase project than the one these keys point at. |
+| Sign-in works, then "Access not enabled for this account" | That address is not in `CARTMATCH_ALLOWED_EMAILS`. Add it (comma-separated) and redeploy — or you signed in with a second account you own. |
+| Orange "Open to everyone on the Supabase project" banner | `CARTMATCH_ALLOWED_EMAILS` is unset, so anyone on the project can sign in. Intentional or not, the app will not stay quiet about it. |
 | Certificate never issues | Cloudflare proxy on during issuance — set the record to DNS-only. |
 | Audit trail empty at `/admin` | Schema not applied, or the service role key is wrong. Signed in, `/api/health` reports `storage.reachable`. |
