@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { AuthBar } from "@/components/AuthBar";
 import { MockBanner, Notice } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
 import { formatCents } from "@/lib/money";
@@ -34,6 +35,8 @@ export default function HomePage() {
 
   return (
     <main>
+      <AuthBar />
+
       <header className="mb-5 mt-2">
         <h1 className="text-3xl font-extrabold tracking-tight">CartMatch</h1>
         <p className="mt-1 text-muted">Find price matches before you pay.</p>

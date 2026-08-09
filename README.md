@@ -21,7 +21,9 @@ refusing to state things it cannot back up, and the same standard applies here.
 | Money / savings arithmetic | **Real and tested.** Integer cents throughout. |
 | Freshness, eligibility, audit trail | **Real and tested.** |
 | Mobile UI, Checkout Mode, proof sheet | **Real.** Exercised against the running server. |
+| Auth gate (routing, fail-closed, header hardening) | **Real and verified at runtime** against a running server. |
 | Supabase persistence | **Written, never run.** No Supabase project was reachable from the build environment. |
+| Supabase sign-in (credential exchange) | **Written, never run with a real project.** The gate around it is verified; the login round trip is not. |
 | Gemini cart recognition | **Written, never run with a real key.** No `GEMINI_API_KEY` was available. |
 | **Retailer price integrations** | **NOT IMPLEMENTED.** See below. |
 
@@ -160,6 +162,33 @@ back a checkout claim.
 
 ---
 
+## Sign-in
+
+CartMatch uses **Supabase Auth against the same project as your other apps**,
+so it is the same `auth.users` table and therefore the same email and password.
+There is no sign-up form on purpose — accounts are created in the Supabase
+dashboard, and a public sign-up on a personal tool invites strangers in.
+
+Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` and every
+route requires a session: pages, and the API routes behind them. `/login` and a
+minimal `/api/health` are the only public surfaces.
+
+**It fails closed.** With `CARTMATCH_REQUIRE_AUTH=true` (the default in
+production) and the keys missing, every path returns `503` rather than serving
+the app — a missing environment variable can never quietly expose a deployment.
+Verified at runtime: `/`, `/scan`, `/admin`, and `POST /api/pipeline` all
+return `503` unconfigured, and all `307` to `/login` when configured without a
+session.
+
+**The two Supabase keys are not interchangeable.** The **anon** key is designed
+to ship to the browser and is powerless alone — every request it makes is
+evaluated against Row Level Security, which is why the `NEXT_PUBLIC_` prefix is
+correct there. The **service role** key bypasses RLS entirely and is
+server-side only. Never prefix it `NEXT_PUBLIC_`.
+
+Signed out, `/api/health` returns only `{ok, auth:{configured, required, email}}` —
+no retailer, storage, or key information.
+
 ## Setup
 
 ```bash
@@ -168,7 +197,19 @@ cp .env.example .env.local     # fill in what you have
 npm run dev                    # http://localhost:3000
 ```
 
-The app runs with **no keys at all** in mock mode — useful for UI work.
+The app runs with **no keys at all** in mock mode — useful for UI work. Without
+auth keys it runs unprotected in development and shows a red **Unprotected
+instance** banner; in production the middleware refuses to serve instead.
+
+## Deploying to pricecheck.imetrobert.com
+
+See **[DEPLOY.md](./DEPLOY.md)** for the full runbook: schema, environment
+variables, the `CNAME`, the Supabase redirect URL (the usual cause of a login
+loop), and four `curl` checks that prove the live instance is actually
+protected before you share the URL.
+
+None of it has been executed — I have no access to your DNS, host, or Supabase
+project.
 
 ### Environment variables
 
@@ -176,6 +217,8 @@ All server-side only. None is exposed to the browser bundle.
 
 | Variable | Purpose |
 |---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Sign-in. Same project as your other apps = same credentials. Public by design. |
+| `CARTMATCH_REQUIRE_AUTH` | Force the auth gate. Defaults true in production, false in development. |
 | `GEMINI_API_KEY` | Cart photo recognition. Without it, vision falls back to mock and says so. |
 | `GEMINI_MODEL` | Default `gemini-2.0-flash`. |
 | `CARTMATCH_DATA_MODE` | `MOCK` (fixtures, labelled) or `LIVE` (real adapters only). |
@@ -293,19 +336,27 @@ location, no advertising identifiers.
 2. **Gemini path unexercised** — the request shape follows the documented REST
    contract and the endpoint is reachable, but no call has been made with a
    valid key.
-3. **Supabase path unexercised** — same situation.
-4. **All retailer policies `UNKNOWN`**, so `POTENTIAL_PRICE_MATCH` is
+3. **Supabase paths unexercised** — persistence and the sign-in credential
+   exchange are both written against the documented contracts but have never
+   run against a real project. The *gate* around sign-in is verified; the
+   round trip through Supabase is not. Run DEPLOY.md's four checks after
+   deploying.
+4. **Single-tenant auth.** Any account on the Supabase project can sign in;
+   there is no per-user data separation, because the audit tables are
+   service-role-only and not user-scoped. Fine for a personal tool, wrong the
+   moment you add a second person you do not want seeing your runs.
+5. **All retailer policies `UNKNOWN`**, so `POTENTIAL_PRICE_MATCH` is
    unreachable by design.
-5. **No GTINs in fixtures.** Inventing barcode numbers would let a fabricated
+6. **No GTINs in fixtures.** Inventing barcode numbers would let a fabricated
    identifier reach a Level-1 "exact UPC match". Populate them from real scans.
-6. **UI is English only.** The language preference persists but nothing is
+7. **UI is English only.** The language preference persists but nothing is
    translated.
-7. **Per-retailer rejections are not individually audited.** When an item
+8. **Per-retailer rejections are not individually audited.** When an item
    produces at least one displayable row, competitors rejected by the matcher
    do not each get an audit row. Item-level failures are recorded.
-8. **`.data/` file store is not concurrency-safe** — fine for one developer,
+9. **`.data/` file store is not concurrency-safe** — fine for one developer,
    which is why Supabase is the recommended backend.
-9. **Store-level pricing is unproven.** Without a confirmed store context, a
+10. **Store-level pricing is unproven.** Without a confirmed store context, a
    price is labelled a Montreal-area online price, never a shelf guarantee.
 
 ## Not a guarantee
