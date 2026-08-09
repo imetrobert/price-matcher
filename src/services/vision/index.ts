@@ -3,9 +3,9 @@
 /**
  * Vision entry point (browser).
  *
- * Real recognition is a call to the `vision` Supabase Edge Function, which
- * holds GEMINI_API_KEY. The browser never sees that key — on a static site it
- * could not hold one safely, and this repository is public besides.
+ * Real recognition is a call to the `cartmatch-vision` Supabase Edge Function,
+ * which holds the Gemini key. The browser never sees that key — on a static
+ * site it could not hold one safely, and this repository is public besides.
  *
  * The Edge Function returns Gemini's raw JSON; validation and normalisation
  * happen here with the same `parseVisionResponse` the mock path uses, so there
@@ -29,6 +29,8 @@ export interface VisionImage {
 export type VisionErrorCode =
   | "NOT_CONFIGURED"
   | "NOT_SIGNED_IN"
+  /** Signed in, but this account is not on the Edge Function's allowlist. */
+  | "NOT_AUTHORIZED"
   | "NO_IMAGES"
   | "API_ERROR"
   | "BAD_RESPONSE";
@@ -86,12 +88,22 @@ export async function analyzeCartPhotos(
     const data = await res.json().catch(() => null);
 
     if (!res.ok || !data?.ok) {
+      // 401 and 403 are different problems and must not share a message.
+      // 401 means no usable session — signing in fixes it. 403 means the
+      // session is fine and this account is simply not on the Edge Function's
+      // allowlist; telling that person to "sign in" sends them round a loop
+      // they cannot exit, because they are already signed in.
       return {
         ok: false,
-        code: res.status === 401 || res.status === 403 ? "NOT_SIGNED_IN" : "API_ERROR",
+        code:
+          res.status === 401
+            ? "NOT_SIGNED_IN"
+            : res.status === 403
+              ? "NOT_AUTHORIZED"
+              : "API_ERROR",
         error:
           data?.error ??
-          `Recognition failed (HTTP ${res.status}). Check that the vision Edge Function is deployed.`,
+          `Recognition failed (HTTP ${res.status}). Check that the cartmatch-vision Edge Function is deployed.`,
       };
     }
 

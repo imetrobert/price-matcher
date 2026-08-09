@@ -64,9 +64,47 @@ supabase secrets set CARTMATCH_ALLOWED_ORIGINS=https://pricecheck.imetrobert.com
 
 Or deploy from the dashboard: **Edge Functions → Deploy a new function → Via
 Editor**, name it `cartmatch-vision`, paste
-`supabase/functions/cartmatch-vision/index.ts`, and **turn "Verify JWT" off** —
-that gate rejects the browser's CORS preflight, and the function runs a
-stricter check of its own.
+`supabase/functions/cartmatch-vision/index.ts`, and **turn "Verify JWT" off**.
+
+### Three things that actually went wrong doing this
+
+All three were hit on the first real deployment, all from the dashboard on a
+phone. They are cheap to avoid and expensive to diagnose.
+
+**Fill in the name field before pasting.** Leave it blank and Supabase invents
+one like `smooth-processor`. You cannot rename a function afterwards — the slug
+is fixed at creation — so the fix is to deploy again under the right name and
+delete the stray.
+
+**"Verify JWT" defaults to ON, and it must be off.** The symptom is that the
+function URL answers:
+
+```json
+{"code":"UNAUTHORIZED_NO_AUTH_HEADER","message":"Missing authorization header"}
+```
+
+That is Supabase's gate replying, not your function. Turning it off is not a
+downgrade. It checks only *whether a token is valid*, not *whose it is* — and
+on a shared project every user of every other app holds a valid token, so it
+would wave all of them through to your Gemini quota. This function checks the
+token **and** the allowlist. It is strictly stronger. The toggle also breaks
+the app outright, because browsers send an unauthenticated `OPTIONS` preflight
+before any cross-origin POST and the toggle rejects it.
+
+**Verify the paste landed whole.** The file is 474 lines and ends with a lone
+`}`. A truncated paste on a phone fails silently, later, looking like a bug.
+
+### Confirming it works, from a phone
+
+Open the function's URL in any browser. A plain GET should return:
+
+```json
+{"ok":false,"error":"Use POST."}
+```
+
+That one string proves three things at once: the function deployed, *your* code
+is executing (the message comes from this repository), and Verify JWT is off —
+because if it were on, Supabase would have answered before your code ran.
 
 **Two things to know if this project is shared with your other apps:**
 
@@ -206,7 +244,9 @@ that involves.
 | Blank page, 404 on `/_next/...` | `.nojekyll` missing — Jekyll strips underscore paths. The workflow creates it; check the build log. |
 | Assets 404 under `imetrobert.github.io/price-matcher/` | You are on the project URL, not the custom domain. Either use the custom domain or set the `NEXT_PUBLIC_BASE_PATH` variable to `/price-matcher`. |
 | Sign-in works, "Access not enabled for this account" | Your address is not in `NEXT_PUBLIC_CARTMATCH_ALLOWED_EMAILS`. Add it and re-run the workflow (build-time value — a redeploy is required). |
-| Scans fail with 403 from the Edge Function | `CARTMATCH_ALLOWED_EMAILS` in the **Supabase secrets** disagrees with the build variable. |
+| Scans fail with 403 from the Edge Function | `CARTMATCH_ALLOWED_EMAILS` in the **Supabase secrets** disagrees with the build variable. The app says "not authorised", not "sign in" — being signed in is not the problem. |
+| Function URL returns `UNAUTHORIZED_NO_AUTH_HEADER` | "Verify JWT" is still on. See section 2. |
+| Function URL returns 404 | Name mismatch — it must be `cartmatch-vision`, and it cannot be renamed after creation. |
 | Scans fail with CORS errors | `CARTMATCH_ALLOWED_ORIGINS` does not include your domain. |
 | `/admin` empty, RLS errors in console | `supabase/policies.sql` not applied. |
 | Orange "Open to everyone" banner | No allowlist set — anyone on the Supabase project can sign in. |
