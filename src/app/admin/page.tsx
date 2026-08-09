@@ -14,7 +14,8 @@ import { formatCents } from "@/lib/money";
 import { loadLastResult } from "@/lib/prefs";
 import { activeBackend, recentAudit, recentObservations, saveValidation, validationSummary } from "@/lib/store";
 import { visionProviderName, env } from "@/config/env";
-import { allowlistActive, authConfigured } from "@/lib/auth/config";
+import { authConfigured } from "@/lib/auth/config";
+import { APP_NAME, checkAppAccess } from "@/lib/auth/access";
 import type {
   AuditRecord,
   MatchValidationReport,
@@ -51,14 +52,21 @@ function AdminView() {
         setData({ audit, observations, validation }),
       )
       .catch(() => setData(null));
-    setHealth({
-      dataMode: env.dataMode,
-      vision: visionProviderName(),
-      storageBackend: activeBackend(),
-      authConfigured: authConfigured(),
-      allowlistActive: allowlistActive(),
-      supabaseUrl: env.supabaseUrl ? "configured" : "not configured",
-    });
+    checkAppAccess().then((access) =>
+      setHealth({
+        dataMode: env.dataMode,
+        vision: visionProviderName(),
+        storageBackend: activeBackend(),
+        authConfigured: authConfigured(),
+        supabaseUrl: env.supabaseUrl ? "configured" : "not configured",
+        // Which app_access grant this session holds. `app_admin` is the reason
+        // the rows below might not all be yours — worth seeing on this page.
+        [`app_access(${APP_NAME})`]:
+          access.status === "granted"
+            ? `granted (${access.role})`
+            : access.status,
+      }),
+    );
   }, []);
 
   useEffect(() => {
@@ -115,8 +123,18 @@ function AdminView() {
 
       {data && Object.keys(data.validation).length > 0 ? (
         <section className="card mb-6 text-sm">
-          <p className="mb-2 font-bold">
-            Measured retailer reliability (from your feedback)
+          {/*
+            Deliberately NOT called "measured reliability". Row Level Security
+            returns only this account's own reports, so with three users on the
+            project this is a personal tally of a handful of till outcomes.
+            Labelling it as measured evidence would be the same fabrication the
+            rest of the app refuses. Cross-user aggregation needs a definer
+            function — see the end of supabase/policies.sql.
+          */}
+          <p className="mb-2 font-bold">Your own match reports</p>
+          <p className="mb-2 text-xs text-muted">
+            Only what you have recorded — not a measured reliability rating for
+            these retailers.
           </p>
           <table className="w-full text-left text-xs">
             <thead className="text-muted">

@@ -60,7 +60,6 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_CARTMATCH_ALLOWED_EMAILS: ${{ vars.NEXT_PUBLIC_CARTMATCH_ALLOWED_EMAILS }}
           NEXT_PUBLIC_CARTMATCH_DATA_MODE: ${{ vars.NEXT_PUBLIC_CARTMATCH_DATA_MODE || 'MOCK' }}
           # Set only when serving from <user>.github.io/<repo>/ instead of a
           # custom domain. With pricecheck.imetrobert.com, leave it unset.

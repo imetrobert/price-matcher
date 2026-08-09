@@ -23,7 +23,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { Notice, Spinner } from "@/components/ui";
-import { authConfigured, emailAllowed, allowlistActive } from "@/lib/auth/config";
+import { authConfigured } from "@/lib/auth/config";
+import { checkAppAccess } from "@/lib/auth/access";
 import { getSession, signOut, type SessionUser } from "@/lib/auth/session";
 
 type State =
@@ -31,6 +32,7 @@ type State =
   | { status: "open" }
   | { status: "signed-out" }
   | { status: "denied"; user: SessionUser }
+  | { status: "unavailable"; user: SessionUser; reason: string }
   | { status: "allowed"; user: SessionUser };
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -46,18 +48,31 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    getSession().then((s) => {
+    (async () => {
+      const { user } = await getSession();
       if (cancelled) return;
-      if (!s.user) {
+      if (!user) {
         setState({ status: "signed-out" });
         return;
       }
+
+      const access = await checkAppAccess();
+      if (cancelled) return;
+
+      // Three outcomes, not two. "The check could not run" is not the same as
+      // "you are not allowed", and telling someone they lack access when the
+      // access model simply is not deployed sends them to ask for a grant they
+      // already have.
+      if (access.status === "unavailable") {
+        setState({ status: "unavailable", user, reason: access.reason });
+        return;
+      }
       setState(
-        emailAllowed(s.user.email)
-          ? { status: "allowed", user: s.user }
-          : { status: "denied", user: s.user },
+        access.status === "granted"
+          ? { status: "allowed", user }
+          : { status: "denied", user },
       );
-    });
+    })();
 
     return () => {
       cancelled = true;
@@ -97,12 +112,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
             <span className="font-semibold">{state.user.email}</span>, but that
             account has not been given access to CartMatch.
           </p>
-          {allowlistActive() ? (
-            <p className="mt-3 text-sm text-muted">
-              CartMatch keeps its own list of who may use it, separate from the
-              Supabase project. Ask the owner to add your email address.
-            </p>
-          ) : null}
+          <p className="mt-3 text-sm text-muted">
+            Access to CartMatch is granted per app, separately from having a
+            Supabase account. Ask the owner to add a grant for your address.
+          </p>
           <p className="mt-3 text-xs text-muted">
             If you have more than one account, you may simply be signed in with
             the wrong one.
@@ -117,6 +130,31 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
           >
             Sign out and try another account
           </button>
+        </div>
+      </main>
+    );
+  }
+
+  if (state.status === "unavailable") {
+    return (
+      <main className="pt-10">
+        <h1 className="text-3xl font-extrabold tracking-tight">CartMatch</h1>
+        <p className="mb-5 mt-1 text-muted">Could not check your access.</p>
+        <div className="card">
+          <p className="text-sm">
+            Signed in as{" "}
+            <span className="font-semibold">{state.user.email}</span>, but{" "}
+            <code>has_app_access(&apos;cartmatch&apos;)</code> did not answer. This
+            is a deployment problem, not a permissions one — the app is not
+            saying you lack access.
+          </p>
+          <p className="mt-3 rounded-xl bg-bad/5 px-3 py-2 text-xs text-bad">
+            {state.reason}
+          </p>
+          <p className="mt-3 text-xs text-muted">
+            Usually means the platform access model has not been applied to this
+            Supabase project.
+          </p>
         </div>
       </main>
     );
@@ -152,22 +190,11 @@ export function AuthBar() {
 
   if (!authConfigured()) return null;
 
+  // The "open to everyone" banner is gone with the email allowlist. It warned
+  // about a state that can no longer occur: access is a row in app_access, and
+  // absent means denied. There is no configuration to forget.
   return (
     <>
-      {!allowlistActive() ? (
-        <div className="mb-3 rounded-2xl border border-warn/30 bg-warn/5 p-3">
-          <p className="text-sm font-bold text-warn">
-            Open to everyone on the Supabase project
-          </p>
-          <p className="mt-1 text-sm text-warn/90">
-            No CartMatch allowlist is set, so any confirmed user on this
-            Supabase project can sign in — including anyone added later for a
-            different app. Set it in both the build env and the Edge Function
-            secrets.
-          </p>
-        </div>
-      ) : null}
-
       <div className="mb-4 flex items-center justify-between gap-3 text-sm">
         <span className="truncate text-muted">
           {user?.email ? `Signed in as ${user.email}` : "Not signed in"}

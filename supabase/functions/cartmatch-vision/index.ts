@@ -39,11 +39,16 @@
  * Secrets (Edge Functions -> Secrets, or `supabase secrets set`). Note these
  * are PROJECT-WIDE, visible to every function on the project, which is why the
  * CartMatch-specific ones are prefixed:
- *   CARTMATCH_ALLOWED_EMAILS         the authoritative allowlist — required
  *   CARTMATCH_ALLOWED_ORIGINS        e.g. https://pricecheck.imetrobert.com
  *   CARTMATCH_GEMINI_API_KEY         optional; falls back to GEMINI_API_KEY
  *   CARTMATCH_GEMINI_MODEL           optional; default gemini-2.5-flash
  *   CARTMATCH_GEMINI_THINKING_BUDGET optional; default 0
+ *
+ * CARTMATCH_ALLOWED_EMAILS is GONE. Who may use this app is answered by
+ * public.app_access via has_app_access('cartmatch') — one place, no redeploy.
+ * If that secret still exists on the project, delete it: a stale allowlist that
+ * nothing reads is worse than none, because the next person to debug an access
+ * problem will edit it and wait for something to change.
  *
  * SUPABASE_URL and SUPABASE_ANON_KEY are injected by the platform.
  *
@@ -119,9 +124,18 @@ function json(body: unknown, status: number, origin: string | null): Response {
 // Two checks, both required:
 //   1. The token identifies a real Supabase user. getUser() turns it into an
 //      identity and rejects an expired or revoked token.
-//   2. That user is on CARTMATCH_ALLOWED_EMAILS. Supabase Auth is scoped to a
-//      PROJECT, so a perfectly valid token may belong to a user of a different
-//      app sharing the same project.
+//   2. That user holds a 'cartmatch' grant in public.app_access, read through
+//      public.has_app_access('cartmatch'). Supabase Auth is scoped to a
+//      PROJECT shared by six apps, so a perfectly valid token routinely belongs
+//      to someone with no business here.
+//
+// The grant check used to be an email list in this function's secrets. It was
+// replaced because it was a second source of truth: the same question —
+// "may this person use CartMatch?" — was answered by app_access in Postgres and
+// by an env var here, and nothing kept them in step. Granting access meant
+// editing two places, and forgetting one produced a sign-in that worked
+// followed by a 403 on every scan. app_access is now the only answer, and
+// granting is a single INSERT that takes effect immediately with no redeploy.
 
 interface Caller {
   id: string;
@@ -162,32 +176,37 @@ async function authenticate(req: Request): Promise<AuthOutcome> {
 
   const caller: Caller = { id: data.user.id, email: data.user.email ?? null };
 
-  if (!emailAllowed(caller.email)) {
+  // Asked as the CALLER, not as a privileged role: has_app_access is SECURITY
+  // DEFINER and reads app_access for whoever is executing it, so this client —
+  // built from the anon key with the caller's Authorization header — is what
+  // makes the answer about them.
+  const { data: granted, error: rpcError } = await supabase.rpc(
+    "has_app_access",
+    { app_name: "cartmatch" },
+  );
+
+  if (rpcError) {
+    // Fail closed. The alternative — admitting everyone when the check itself
+    // is broken — turns a deployment error into an open endpoint.
+    console.error(`[cartmatch] has_app_access failed: ${rpcError.message}`);
+    return {
+      ok: false,
+      status: 503,
+      error:
+        "Could not verify app access. public.has_app_access('cartmatch') did not answer — check the platform access model is deployed on this project.",
+    };
+  }
+
+  if (granted !== true) {
     return {
       ok: false,
       status: 403,
       error:
-        "Your account is not authorised for CartMatch. Ask the owner to add your email to CARTMATCH_ALLOWED_EMAILS.",
+        "Your account does not have access to CartMatch. Ask the owner to add a 'cartmatch' grant in public.app_access.",
     };
   }
 
   return { ok: true, caller };
-}
-
-/**
- * Unset admits any authenticated project user — matching the web app, and
- * chosen so a forgotten secret cannot lock the owner out of their own tool.
- * The app reports when it is unset rather than letting you assume otherwise.
- */
-function emailAllowed(email: string | null): boolean {
-  const raw = Deno.env.get("CARTMATCH_ALLOWED_EMAILS") ?? "";
-  const list = raw
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter((e) => e !== "");
-  if (list.length === 0) return true;
-  if (!email) return false;
-  return list.includes(email.trim().toLowerCase());
 }
 
 // ===========================================================================

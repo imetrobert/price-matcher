@@ -183,7 +183,7 @@ gate. Two things are the real controls:
 
 | Control | Enforced by | Protects |
 |---|---|---|
-| JWT verification + allowlist in `supabase/functions/_shared/auth.ts` | Supabase Edge Function, before any Gemini call | your API key and your quota |
+| JWT verification + `has_app_access('cartmatch')` | Supabase Edge Function, before any Gemini call | your API key and your quota |
 | Row Level Security (`supabase/policies.sql`) | Postgres, on every query | your scans, prices, and postal code |
 
 Design accordingly: never put anything in this repository that depends on the
@@ -197,28 +197,47 @@ formerly `service_role`) bypasses RLS entirely. **This app no longer uses it at
 all**, and the deploy workflow refuses to publish if anything matching a
 secret-key pattern appears in the build output.
 
-### Who gets in (`CARTMATCH_ALLOWED_EMAILS`)
+### Who gets in
 
-Supabase Auth is scoped to a **project**, not an app. If this project also
-serves your other apps, they all share one `auth.users` table — so by default a
-valid session for any of them is a valid session here, and anyone added later
-for a different app gets CartMatch too, silently.
+Supabase Auth is scoped to a **project**, not an app. This project serves six
+apps off one `auth.users` table, so a valid session proves only that somebody
+has an account *somewhere* on it — not that they belong here. `to
+authenticated` is therefore not access control; it describes the session, not
+the entitlement.
 
-The allowlist decouples app access from project membership. It is set in **two
-places, and they do different jobs**:
+Entitlement is a row in **`public.app_access`**, read through
+`public.has_app_access('cartmatch')`. The same question is asked in three
+places, all from that one table:
 
-- `NEXT_PUBLIC_CARTMATCH_ALLOWED_EMAILS` (build variable) decides what the UI
-  *shows*. Someone signed in but not listed lands on a plain "access not
-  enabled" page — deliberately **not** a redirect to `/login`, which would
-  bounce them straight back and spin forever.
-- `CARTMATCH_ALLOWED_EMAILS` (Supabase Edge Function secret) decides what is
-  *permitted*. This one is the actual control.
+| Asked by | Consequence of "no" |
+|---|---|
+| Row Level Security, on every query | zero rows, refused writes |
+| The `cartmatch-vision` Edge Function | `403`, before any Gemini spend |
+| `src/lib/auth/access.ts` in the browser | a page explaining they lack a grant |
 
-If they disagree, someone is told they have access and then gets a `403` on
-every scan. Unset is a legitimate choice and admits everyone on the project, so
-a forgotten variable can never lock you out of your own app; when it is unset
-the app says so in an orange banner. A silently inactive access control is
-worse than none.
+Only the first two are enforcement. The third exists so the answer arrives as
+an explanation rather than an app that loads and then fails at everything.
+
+Granting is one statement, and takes effect on that person's next page load:
+
+```sql
+insert into public.app_access (user_id, app, role)
+select id, 'cartmatch', 'member' from auth.users where email = 'x@example.com'
+on conflict (user_id, app) do update set role = excluded.role;
+```
+
+`role` is `member` or `app_admin`. An `app_admin` can *read* everyone's rows —
+so somebody supporting the app can see what happened — but still cannot write a
+row as anyone else. That asymmetry is deliberate.
+
+**This replaced a pair of email allowlists** (`NEXT_PUBLIC_CARTMATCH_ALLOWED_EMAILS`
+at build time, `CARTMATCH_ALLOWED_EMAILS` in the Edge Function secrets). Two
+copies of one fact, kept in step by hand: granting access meant editing both and
+redeploying, and forgetting either produced a sign-in that worked followed by a
+`403` on every scan, with nothing on screen connecting the two. If either
+variable still exists on your project, delete it — a stale allowlist that
+nothing reads is worse than none, because the next person to debug an access
+problem will edit it and wait for something to happen.
 
 ## Setup
 
@@ -254,7 +273,6 @@ public** regardless of whether GitHub stores it under "Variables" or "Secrets".
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Your project URL. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | The **publishable** key. Same project as your other apps = same credentials. Public by design. |
-| `NEXT_PUBLIC_CARTMATCH_ALLOWED_EMAILS` | Comma-separated allowlist, for the UI. Unset = everyone on the project, and the app says so. |
 | `NEXT_PUBLIC_CARTMATCH_DATA_MODE` | `MOCK` (fixtures, labelled) or `LIVE` (real adapters only — today that means no prices at all). |
 | `NEXT_PUBLIC_BASE_PATH` | Only for `<user>.github.io/<repo>/`. Leave unset on a custom domain. |
 
@@ -265,7 +283,6 @@ Read only by `supabase/functions/**`, which runs on Supabase. Set with
 
 | Secret | Purpose |
 |---|---|
-| `CARTMATCH_ALLOWED_EMAILS` | The authoritative allowlist. **Required** — unset admits every user on the project. |
 | `CARTMATCH_ALLOWED_ORIGINS` | CORS allowlist, e.g. `https://pricecheck.imetrobert.com`. **Required** in production, or the browser is told only localhost may call. Arbitrary origins are never reflected. |
 | `CARTMATCH_GEMINI_API_KEY` | Optional. Falls back to a project-wide `GEMINI_API_KEY` if absent. |
 | `CARTMATCH_GEMINI_MODEL` | Optional. Default `gemini-2.5-flash`. |
@@ -348,7 +365,6 @@ tests/                    vitest suites
 
 supabase/                 → runs on Supabase, never published
   functions/vision/       holds GEMINI_API_KEY; verifies the JWT first
-  functions/_shared/      auth (the real gate) + CORS origin allowlist
   schema.sql              tables
   policies.sql            RLS — required for this deployment
 
@@ -417,8 +433,10 @@ identifiers.
    so anyone with the URL loads the app shell and can read the whole bundle.
    What they cannot do is spend your Gemini quota or read your rows. If that
    trade is unacceptable, this is the wrong host.
-5. **The allowlist lives in two places** and nothing keeps them in sync. A
-   mismatch shows as sign-in succeeding and every scan returning `403`.
+5. **Access depends on the platform access model being deployed.** If
+   `public.has_app_access` is missing, the app cannot tell "no grant" from
+   "cannot ask" — it reports the second honestly rather than guessing, but
+   nobody gets in until it exists.
 6. **All retailer policies `UNKNOWN`**, so `POTENTIAL_PRICE_MATCH` is
    unreachable by design.
 7. **No GTINs in fixtures.** Inventing barcode numbers would let a fabricated

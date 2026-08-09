@@ -11,14 +11,12 @@
  * broken screen.
  *
  * The REAL boundary is elsewhere, and it is enforced by servers:
- *   - Supabase Edge Functions verify the JWT and re-check the allowlist before
- *     spending a Gemini call (supabase/functions/_shared/auth.ts).
- *   - Supabase Row Level Security decides what rows the session may read or
- *     write, enforced by Postgres.
+ *   - The cartmatch-vision Edge Function verifies the JWT and calls
+ *     has_app_access('cartmatch') before spending a Gemini call.
+ *   - Row Level Security applies the same has_app_access check to every row.
  *
- * Change the allowlist here and you change what the UI shows. Change it in the
- * Edge Function secrets and you change what is actually permitted. Keep the
- * two in step — DEPLOY.md says so in both places.
+ * Both read public.app_access. So does the function below. One source of truth,
+ * queried from three places, rather than three lists to keep in step.
  */
 
 import { env, supabaseConfigured } from "@/config/env";
@@ -35,35 +33,4 @@ export function publicAuthConfig(): PublicAuthConfig | null {
 
 export function authConfigured(): boolean {
   return supabaseConfigured();
-}
-
-// ---------------------------------------------------------------------------
-// Per-app allowlist (display only — see the header)
-// ---------------------------------------------------------------------------
-
-/**
- * Supabase Auth is scoped to a PROJECT, not an app. Several apps sharing one
- * project share one `auth.users` table, so a valid session for any of them is
- * a valid session here. This list keeps CartMatch's membership separate.
- *
- * Unset admits every project user, so a forgotten variable cannot lock the
- * owner out. The app reports that state rather than letting you assume
- * otherwise.
- */
-export function allowedEmails(): string[] {
-  const raw = process.env.NEXT_PUBLIC_CARTMATCH_ALLOWED_EMAILS ?? "";
-  return raw
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter((e) => e !== "");
-}
-
-export function allowlistActive(): boolean {
-  return allowedEmails().length > 0;
-}
-
-export function emailAllowed(email: string | null | undefined): boolean {
-  if (!allowlistActive()) return true;
-  if (!email) return false;
-  return allowedEmails().includes(email.trim().toLowerCase());
 }

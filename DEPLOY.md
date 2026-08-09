@@ -36,16 +36,45 @@ Design accordingly: never assume the UI is hiding something.
 
 In the Supabase SQL Editor, run **both** files from this repo, in order:
 
-1. `supabase/schema.sql` — creates the three `cartmatch_` tables.
-2. `supabase/policies.sql` — **required for this deployment.** Adds a `user_id`
-   column and the RLS policies that let your browser write as yourself.
+1. `supabase/schema.sql` — creates the three `cartmatch_` tables. Alone it
+   leaves the app non-functional on purpose: RLS on, no policies, nothing
+   permitted.
+2. `supabase/policies.sql` — **required.** Adds `user_id` and the RLS policies.
 
-Without step 2 every write fails: the tables have RLS on with no policies,
-which permits nothing but the secret key — and there is no server here to hold
-one. Symptom is an empty `/admin` and RLS errors in the browser console.
+Both are safe to re-run, but read the header of `policies.sql` first if this
+project was set up by someone else. Postgres OR-s permissive policies together,
+so a policy file whose `drop policy` names do not match what is actually
+deployed *adds* a second, wider grant instead of replacing the first.
 
-By default each person sees only their own runs. `policies.sql` ends with a
-commented-out block if you would rather everyone admitted sees everything.
+### This depends on the platform access model
+
+The policies call `public.has_app_access('cartmatch')` and
+`public.app_role('cartmatch')` from
+[Supabase-platform-](https://github.com/imetrobert/Supabase-platform-)
+(`migration/app_access_pattern.sql`). Apply that first or `policies.sql` fails
+on an undefined function.
+
+Then grant yourself access — nobody gets in without a row here, including you:
+
+```sql
+insert into public.app_access (user_id, app, role)
+select id, 'cartmatch', 'app_admin'
+from auth.users where email = 'you@example.com'
+on conflict (user_id, app) do update set role = excluded.role;
+```
+
+Repeat with `'member'` for the other two people. `app_admin` can read everyone's
+rows; `member` sees only their own. Neither can write a row as somebody else.
+
+Verify — every expression must mention `has_app_access`, and there should be six
+policies and no views:
+
+```sql
+select tablename, policyname, cmd, qual, with_check
+from pg_policies
+where schemaname = 'public' and tablename like 'cartmatch%'
+order by tablename, policyname;
+```
 
 ## 2. Edge Function (once)
 
@@ -58,7 +87,6 @@ supabase link --project-ref <your-project-ref>
 
 supabase functions deploy cartmatch-vision --no-verify-jwt
 
-supabase secrets set CARTMATCH_ALLOWED_EMAILS=you@yourdomain.com
 supabase secrets set CARTMATCH_ALLOWED_ORIGINS=https://pricecheck.imetrobert.com
 ```
 
@@ -87,7 +115,8 @@ That is Supabase's gate replying, not your function. Turning it off is not a
 downgrade. It checks only *whether a token is valid*, not *whose it is* — and
 on a shared project every user of every other app holds a valid token, so it
 would wave all of them through to your Gemini quota. This function checks the
-token **and** the allowlist. It is strictly stronger. The toggle also breaks
+token **and** a `cartmatch` grant in `public.app_access`. It is strictly
+stronger. The toggle also breaks
 the app outright, because browsers send an unauthenticated `OPTIONS` preflight
 before any cross-origin POST and the toggle rejects it.
 
@@ -119,10 +148,12 @@ key, so revoking it doesn't disturb the other app, set
 are read **only** under `CARTMATCH_`-prefixed names, so another app's
 `GEMINI_MODEL` can never change which model reads your cart.
 
-`CARTMATCH_ALLOWED_EMAILS` must be set **here as well as** in the build
-variables below. The build copy decides what the UI shows; **this copy decides
-what is actually permitted.** If they disagree, someone is told they have
-access and then gets a 403 on every scan.
+There is **no allowlist secret**. Who may use CartMatch is a row in
+`public.app_access`, read by `has_app_access('cartmatch')` from RLS, from this
+function, and from the browser. If `CARTMATCH_ALLOWED_EMAILS` still exists on
+your project from an earlier version, delete it: nothing reads it, and the next
+person debugging an access problem will edit it and wait for something to
+happen.
 
 ## 3. Build variables
 
@@ -133,7 +164,6 @@ Under **Variables** (these are published in the bundle — that is expected):
 | Name | Value |
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | `https://<project>.supabase.co` |
-| `NEXT_PUBLIC_CARTMATCH_ALLOWED_EMAILS` | your email, comma-separated for more |
 | `NEXT_PUBLIC_CARTMATCH_DATA_MODE` | `MOCK` |
 | `PAGES_CUSTOM_DOMAIN` | `pricecheck.imetrobert.com` |
 
@@ -224,7 +254,10 @@ That last check is the one that matters. If it returns anything other than
 anyone.
 
 Then on your phone: open the site, sign in, and confirm the header reads
-"Signed in as …" with no orange **Open to everyone** banner.
+"Signed in as …". If you see "Access not enabled for this account", your
+`app_access` grant is missing. If you see "Could not check your access", the
+platform access model is not deployed — a different problem, which is why the
+app distinguishes them.
 
 ## What works, and what does not
 
@@ -243,11 +276,11 @@ that involves.
 |---|---|
 | Blank page, 404 on `/_next/...` | `.nojekyll` missing — Jekyll strips underscore paths. The workflow creates it; check the build log. |
 | Assets 404 under `imetrobert.github.io/price-matcher/` | You are on the project URL, not the custom domain. Either use the custom domain or set the `NEXT_PUBLIC_BASE_PATH` variable to `/price-matcher`. |
-| Sign-in works, "Access not enabled for this account" | Your address is not in `NEXT_PUBLIC_CARTMATCH_ALLOWED_EMAILS`. Add it and re-run the workflow (build-time value — a redeploy is required). |
-| Scans fail with 403 from the Edge Function | `CARTMATCH_ALLOWED_EMAILS` in the **Supabase secrets** disagrees with the build variable. The app says "not authorised", not "sign in" — being signed in is not the problem. |
+| Sign-in works, "Access not enabled for this account" | No `cartmatch` row in `public.app_access` for that user. Insert one — it takes effect on their next page load, no redeploy. |
+| "Could not check your access" | `public.has_app_access` is missing or not executable by `authenticated`. The platform access model is not deployed on this project. |
+| Scans fail with 403 from the Edge Function | Same missing grant. The app says "not authorised", not "sign in" — being signed in is not the problem. |
 | Function URL returns `UNAUTHORIZED_NO_AUTH_HEADER` | "Verify JWT" is still on. See section 2. |
 | Function URL returns 404 | Name mismatch — it must be `cartmatch-vision`, and it cannot be renamed after creation. |
 | Scans fail with CORS errors | `CARTMATCH_ALLOWED_ORIGINS` does not include your domain. |
 | `/admin` empty, RLS errors in console | `supabase/policies.sql` not applied. |
-| Orange "Open to everyone" banner | No allowlist set — anyone on the Supabase project can sign in. |
 | Changed a variable, nothing happened | `NEXT_PUBLIC_*` are inlined at build time. Re-run the workflow. |

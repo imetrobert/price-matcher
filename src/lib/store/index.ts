@@ -23,6 +23,7 @@
 
 import { createClient } from "@/lib/auth/client";
 import { supabaseConfigured } from "@/config/env";
+import { getSession } from "@/lib/auth/session";
 import type { AuditRecord, MatchValidationReport, PriceObservation } from "@/types";
 
 export type StoreBackend = "supabase" | "none";
@@ -37,15 +38,41 @@ const TABLES = {
   validations: "cartmatch_validations",
 } as const;
 
-async function insert(table: string, rows: unknown[]): Promise<void> {
+/**
+ * Every row names its owner explicitly.
+ *
+ * The column also carries `default auth.uid()`, so this looks redundant — it is
+ * not. The insert policy is `with check (has_app_access('cartmatch') and
+ * user_id = auth.uid())`. If these tables are ever recreated without that
+ * default, every row would arrive with user_id NULL, fail the check, and be
+ * dropped into the console warning below rather than raised. The app would look
+ * like it was working and persist nothing. Naming the owner in code means
+ * correctness does not depend on a column default nobody looks at.
+ */
+async function insert(
+  table: string,
+  rows: Record<string, unknown>[],
+): Promise<void> {
   if (rows.length === 0 || !supabaseConfigured()) return;
   try {
+    const { user } = await getSession();
+    if (!user) {
+      // Not an error worth shouting about: signed-out users can still run the
+      // pipeline in mock mode, and RLS would refuse the write anyway.
+      return;
+    }
+
     const supabase = createClient();
-    const { error } = await supabase.from(table).insert(rows);
+    const { error } = await supabase
+      .from(table)
+      .insert(rows.map((r) => ({ ...r, user_id: user.id })));
     if (error) {
       // Surfaced in the console rather than thrown: losing an audit row is not
-      // a reason to fail a price check. A persistent RLS error here almost
-      // always means supabase/policies.sql has not been applied.
+      // a reason to fail a price check.
+      //
+      // A persistent RLS error here means one of two things, and they are worth
+      // telling apart: supabase/policies.sql has not been applied, or this
+      // account has no 'cartmatch' row in public.app_access.
       console.warn(
         `[cartmatch] write failed table=${table} code=${error.code} message=${error.message}`,
       );
@@ -142,7 +169,18 @@ export async function recentValidations(limit = 200): Promise<MatchValidationRep
   return selectRecent<MatchValidationReport>(TABLES.validations, limit);
 }
 
-/** Aggregate real-world feedback per retailer — input to reliability ratings. */
+/**
+ * Aggregate YOUR OWN validation reports per retailer.
+ *
+ * Not measured retailer reliability, and must not be presented as such. RLS
+ * returns only the caller's rows (an app_admin sees everyone's, which is its
+ * own kind of misleading), so this is a personal tally — with three users on
+ * the project, typically a handful of reports.
+ *
+ * Turning this into real evidence for `priceReliability` in
+ * src/config/retailers.ts needs a cross-user aggregate, and that cannot be a
+ * view: see the note at the end of supabase/policies.sql for the shape.
+ */
 export async function validationSummary(): Promise<
   Record<string, { total: number; priceMatched: number; accepted: number }>
 > {
