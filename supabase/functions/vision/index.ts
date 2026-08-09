@@ -6,9 +6,40 @@
  * key shipped to the browser is a published key. Here it stays in Supabase
  * secrets and never leaves the function.
  *
- * Deploy:
- *   supabase functions deploy vision
- *   supabase secrets set GEMINI_API_KEY=...
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS ONE FILE
+ * ---------------------------------------------------------------------------
+ * CORS and authentication would normally live in `_shared/`. They are inlined
+ * because this project is deployed from the Supabase dashboard editor, which
+ * bundles a single function folder and cannot resolve `../_shared/`. One
+ * function, one file, no import paths to get wrong.
+ *
+ * When a second function arrives (the retailer fetcher is the obvious one),
+ * extract the two sections below into `_shared/` and switch to CLI deploys.
+ * Duplicating an auth check across two functions is how one of them ends up
+ * quietly missing it.
+ *
+ * ---------------------------------------------------------------------------
+ * DEPLOYING
+ * ---------------------------------------------------------------------------
+ * Dashboard: Edge Functions -> Deploy a new function -> Via Editor. Name it
+ * `vision`, paste this file, deploy. **Turn "Verify JWT" OFF.** That gate
+ * rejects the browser's CORS preflight, which carries no Authorization header,
+ * and this function performs a stricter check of its own anyway: a valid token
+ * is necessary but not sufficient, because the caller must also be on
+ * CARTMATCH_ALLOWED_EMAILS.
+ *
+ * CLI equivalent:
+ *   supabase functions deploy vision --no-verify-jwt
+ *
+ * Secrets (Edge Functions -> Secrets, or `supabase secrets set`):
+ *   GEMINI_API_KEY             required
+ *   GEMINI_MODEL               default gemini-2.5-flash
+ *   GEMINI_THINKING_BUDGET     default 0
+ *   CARTMATCH_ALLOWED_EMAILS   the authoritative allowlist
+ *   CARTMATCH_ALLOWED_ORIGINS  e.g. https://pricecheck.imetrobert.com
+ *
+ * SUPABASE_URL and SUPABASE_ANON_KEY are injected by the platform.
  *
  * Verification status: written against the documented Gemini REST contract and
  * the Supabase Edge Function runtime, but never executed — no Gemini key and no
@@ -16,8 +47,146 @@
  * The first real call is the acceptance test.
  */
 
-import { authenticate } from "../_shared/auth.ts";
-import { json, preflight } from "../_shared/cors.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+
+// ===========================================================================
+// SECTION 1 — CORS
+// ===========================================================================
+// The static site is on a different origin from Supabase, so every response
+// needs these headers and OPTIONS needs a preflight handler.
+//
+// The allowlist is explicit rather than `*`. This is NOT a security boundary —
+// CORS is enforced by browsers, not by an attacker with curl; the JWT check in
+// section 2 is what protects the function. It stops a random page on the
+// internet from silently burning your Gemini quota through a visitor's session.
+
+const DEFAULT_ORIGINS = ["http://localhost:3000"];
+
+function allowedOrigins(): string[] {
+  const raw = Deno.env.get("CARTMATCH_ALLOWED_ORIGINS") ?? "";
+  const configured = raw
+    .split(",")
+    .map((o) => o.trim())
+    .filter((o) => o !== "");
+  return configured.length > 0
+    ? [...configured, ...DEFAULT_ORIGINS]
+    : DEFAULT_ORIGINS;
+}
+
+function corsHeaders(origin: string | null): Record<string, string> {
+  const allowed = allowedOrigins();
+  // Echo the origin only when it is on the list; never reflect an arbitrary one.
+  const value = origin && allowed.includes(origin) ? origin : allowed[0];
+  return {
+    "Access-Control-Allow-Origin": value,
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    Vary: "Origin",
+  };
+}
+
+function preflight(req: Request): Response | null {
+  if (req.method !== "OPTIONS") return null;
+  return new Response("ok", { headers: corsHeaders(req.headers.get("origin")) });
+}
+
+function json(body: unknown, status: number, origin: string | null): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...corsHeaders(origin),
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+// ===========================================================================
+// SECTION 2 — THE SECURITY BOUNDARY
+// ===========================================================================
+// On a static site the UI cannot protect anything: the bundle is public and
+// readable, so anyone can skip the login screen and call this endpoint
+// directly. This function therefore decides for itself who is calling, from
+// the JWT, server-side.
+//
+// Two checks, both required:
+//   1. The token identifies a real Supabase user. getUser() turns it into an
+//      identity and rejects an expired or revoked token.
+//   2. That user is on CARTMATCH_ALLOWED_EMAILS. Supabase Auth is scoped to a
+//      PROJECT, so a perfectly valid token may belong to a user of a different
+//      app sharing the same project.
+
+interface Caller {
+  id: string;
+  email: string | null;
+}
+
+type AuthOutcome =
+  | { ok: true; caller: Caller }
+  | { ok: false; status: number; error: string };
+
+async function authenticate(req: Request): Promise<AuthOutcome> {
+  const authHeader = req.headers.get("Authorization") ?? "";
+  if (!authHeader.startsWith("Bearer ")) {
+    return { ok: false, status: 401, error: "Missing bearer token." };
+  }
+
+  const url = Deno.env.get("SUPABASE_URL");
+  // Platform-injected. The fallback covers projects on the newer key naming.
+  const anonKey =
+    Deno.env.get("SUPABASE_ANON_KEY") ??
+    Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
+  if (!url || !anonKey) {
+    return {
+      ok: false,
+      status: 500,
+      error: "Edge Function is missing SUPABASE_URL / SUPABASE_ANON_KEY.",
+    };
+  }
+
+  const supabase = createClient(url, anonKey, {
+    global: { headers: { Authorization: authHeader } },
+  });
+
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) {
+    return { ok: false, status: 401, error: "Invalid or expired session." };
+  }
+
+  const caller: Caller = { id: data.user.id, email: data.user.email ?? null };
+
+  if (!emailAllowed(caller.email)) {
+    return {
+      ok: false,
+      status: 403,
+      error:
+        "Your account is not authorised for CartMatch. Ask the owner to add your email to CARTMATCH_ALLOWED_EMAILS.",
+    };
+  }
+
+  return { ok: true, caller };
+}
+
+/**
+ * Unset admits any authenticated project user — matching the web app, and
+ * chosen so a forgotten secret cannot lock the owner out of their own tool.
+ * The app reports when it is unset rather than letting you assume otherwise.
+ */
+function emailAllowed(email: string | null): boolean {
+  const raw = Deno.env.get("CARTMATCH_ALLOWED_EMAILS") ?? "";
+  const list = raw
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e !== "");
+  if (list.length === 0) return true;
+  if (!email) return false;
+  return list.includes(email.trim().toLowerCase());
+}
+
+// ===========================================================================
+// SECTION 3 — CART RECOGNITION
+// ===========================================================================
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 const MAX_IMAGES = 4;
@@ -100,7 +269,7 @@ Deno.serve(async (req: Request) => {
         ok: false,
         code: "NO_API_KEY",
         error:
-          "GEMINI_API_KEY is not set on this Edge Function. Run: supabase secrets set GEMINI_API_KEY=...",
+          "GEMINI_API_KEY is not set on this Edge Function. Add it under Edge Functions -> Secrets.",
       },
       503,
       origin,
@@ -116,11 +285,7 @@ Deno.serve(async (req: Request) => {
 
   const images = extractImages(payload);
   if (images.length === 0) {
-    return json(
-      { ok: false, error: "No images supplied." },
-      400,
-      origin,
-    );
+    return json({ ok: false, error: "No images supplied." }, 400, origin);
   }
   for (const img of images) {
     if (Math.floor((img.base64.length * 3) / 4) > MAX_BYTES) {
@@ -161,7 +326,9 @@ Deno.serve(async (req: Request) => {
     if (!res.ok && res.status === 400 && supportsThinking(model)) {
       const detail = await res.text();
       if (/thinking/i.test(detail)) {
-        console.warn(`[cartmatch] ${model} rejected thinkingConfig; retrying without it.`);
+        console.warn(
+          `[cartmatch] ${model} rejected thinkingConfig; retrying without it.`,
+        );
         res = await callGemini(apiKey, model, parts, false, 0, controller.signal);
       } else {
         return json(
