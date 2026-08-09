@@ -265,11 +265,19 @@ Read only by `supabase/functions/**`, which runs on Supabase. Set with
 
 | Secret | Purpose |
 |---|---|
-| `GEMINI_API_KEY` | Cart photo recognition. Without it the function reports unavailable; it never silently mocks. |
-| `GEMINI_MODEL` | Default `gemini-2.5-flash`. |
-| `GEMINI_THINKING_BUDGET` | Tokens of thinking on 2.5+. Default `0` — recognition is extraction, not reasoning, and the shopper is waiting. |
-| `CARTMATCH_ALLOWED_EMAILS` | The authoritative allowlist. |
-| `CARTMATCH_ALLOWED_ORIGINS` | CORS allowlist, e.g. `https://pricecheck.imetrobert.com`. Arbitrary origins are never reflected. |
+| `CARTMATCH_ALLOWED_EMAILS` | The authoritative allowlist. **Required** — unset admits every user on the project. |
+| `CARTMATCH_ALLOWED_ORIGINS` | CORS allowlist, e.g. `https://pricecheck.imetrobert.com`. **Required** in production, or the browser is told only localhost may call. Arbitrary origins are never reflected. |
+| `CARTMATCH_GEMINI_API_KEY` | Optional. Falls back to a project-wide `GEMINI_API_KEY` if absent. |
+| `CARTMATCH_GEMINI_MODEL` | Optional. Default `gemini-2.5-flash`. |
+| `CARTMATCH_GEMINI_THINKING_BUDGET` | Optional. Default `0` — recognition is extraction, not reasoning, and the shopper is waiting. |
+
+**Supabase secrets and function names are scoped to the whole project, not to
+an app.** If this project is shared, that cuts both ways: an existing
+`GEMINI_API_KEY` is reused for free, but a generic name like `GEMINI_MODEL`
+set by another app would otherwise reach in and change which model reads your
+cart. So everything CartMatch *owns* is prefixed, the function is deployed as
+`cartmatch-vision` rather than `vision`, and only the shared API key is
+inherited — deliberately, with a prefixed override available.
 
 ### Using your existing Supabase project
 

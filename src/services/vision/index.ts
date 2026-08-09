@@ -69,7 +69,10 @@ export async function analyzeCartPhotos(
   }
 
   try {
-    const res = await fetch(edgeFunctionUrl("vision"), {
+    // Named for this app, not for what it does: the Supabase project is shared
+    // with other apps, and a function called "vision" is exactly the name
+    // another one would pick — deploying would silently overwrite it.
+    const res = await fetch(edgeFunctionUrl("cartmatch-vision"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

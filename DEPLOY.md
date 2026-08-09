@@ -56,12 +56,30 @@ npm install -g supabase
 supabase login
 supabase link --project-ref <your-project-ref>
 
-supabase functions deploy vision
+supabase functions deploy cartmatch-vision --no-verify-jwt
 
-supabase secrets set GEMINI_API_KEY=...
 supabase secrets set CARTMATCH_ALLOWED_EMAILS=you@yourdomain.com
 supabase secrets set CARTMATCH_ALLOWED_ORIGINS=https://pricecheck.imetrobert.com
 ```
+
+Or deploy from the dashboard: **Edge Functions → Deploy a new function → Via
+Editor**, name it `cartmatch-vision`, paste
+`supabase/functions/cartmatch-vision/index.ts`, and **turn "Verify JWT" off** —
+that gate rejects the browser's CORS preflight, and the function runs a
+stricter check of its own.
+
+**Two things to know if this project is shared with your other apps:**
+
+*Function names are project-wide.* `cartmatch-vision`, not `vision`, because
+deploying over an existing function replaces it and `vision` is exactly what
+another app would call its own.
+
+*Secrets are project-wide too.* An existing `GEMINI_API_KEY` is picked up
+automatically — no need to add one. If you would rather CartMatch used its own
+key, so revoking it doesn't disturb the other app, set
+`CARTMATCH_GEMINI_API_KEY` and it wins. The model and thinking-budget settings
+are read **only** under `CARTMATCH_`-prefixed names, so another app's
+`GEMINI_MODEL` can never change which model reads your cart.
 
 `CARTMATCH_ALLOWED_EMAILS` must be set **here as well as** in the build
 variables below. The build copy decides what the UI shows; **this copy decides
@@ -158,7 +176,7 @@ curl -s https://pricecheck.imetrobert.com/_next/static/chunks/*.js 2>/dev/null \
 
 # The Edge Function refuses an unauthenticated caller — THIS is the real gate
 curl -s -o /dev/null -w "%{http_code}\n" -X POST \
-  https://<project>.supabase.co/functions/v1/vision \
+  https://<project>.supabase.co/functions/v1/cartmatch-vision \
   -H 'Content-Type: application/json' -d '{"images":[]}'
 # 401
 ```

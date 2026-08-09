@@ -14,9 +14,9 @@ name: Deploy to GitHub Pages
 #   The Supabase publishable key belongs here (it is designed to be public and
 #   is powerless without a session + RLS).
 #
-#   The Supabase SECRET key and GEMINI_API_KEY must NEVER appear here. They
+#   The Supabase SECRET key and the Gemini key must NEVER appear here. They
 #   live in Supabase Edge Function secrets:
-#     supabase secrets set GEMINI_API_KEY=...
+#     supabase secrets set CARTMATCH_GEMINI_API_KEY=...
 
 on:
   push:

@@ -1,5 +1,5 @@
 /**
- * POST /functions/v1/vision — cart photo -> structured product list.
+ * POST /functions/v1/cartmatch-vision — cart photo -> structured product list.
  *
  * This function exists for exactly one reason: GEMINI_API_KEY cannot live in a
  * static site. On GitHub Pages the bundle is public (and so is the repo), so a
@@ -23,21 +23,27 @@
  * DEPLOYING
  * ---------------------------------------------------------------------------
  * Dashboard: Edge Functions -> Deploy a new function -> Via Editor. Name it
- * `vision`, paste this file, deploy. **Turn "Verify JWT" OFF.** That gate
- * rejects the browser's CORS preflight, which carries no Authorization header,
- * and this function performs a stricter check of its own anyway: a valid token
- * is necessary but not sufficient, because the caller must also be on
- * CARTMATCH_ALLOWED_EMAILS.
+ * `cartmatch-vision`, paste this file, deploy. **Turn "Verify JWT" OFF.** That
+ * gate rejects the browser's CORS preflight, which carries no Authorization
+ * header, and this function performs a stricter check of its own anyway: a
+ * valid token is necessary but not sufficient, because the caller must also be
+ * on CARTMATCH_ALLOWED_EMAILS.
  *
  * CLI equivalent:
- *   supabase functions deploy vision --no-verify-jwt
+ *   supabase functions deploy cartmatch-vision --no-verify-jwt
  *
- * Secrets (Edge Functions -> Secrets, or `supabase secrets set`):
- *   GEMINI_API_KEY             required
- *   GEMINI_MODEL               default gemini-2.5-flash
- *   GEMINI_THINKING_BUDGET     default 0
- *   CARTMATCH_ALLOWED_EMAILS   the authoritative allowlist
- *   CARTMATCH_ALLOWED_ORIGINS  e.g. https://pricecheck.imetrobert.com
+ * THE NAME MATTERS. This Supabase project is shared with other apps, and
+ * `vision` is precisely the name another app would choose. Deploying over an
+ * existing function replaces it. Every name this app owns is prefixed.
+ *
+ * Secrets (Edge Functions -> Secrets, or `supabase secrets set`). Note these
+ * are PROJECT-WIDE, visible to every function on the project, which is why the
+ * CartMatch-specific ones are prefixed:
+ *   CARTMATCH_ALLOWED_EMAILS         the authoritative allowlist — required
+ *   CARTMATCH_ALLOWED_ORIGINS        e.g. https://pricecheck.imetrobert.com
+ *   CARTMATCH_GEMINI_API_KEY         optional; falls back to GEMINI_API_KEY
+ *   CARTMATCH_GEMINI_MODEL           optional; default gemini-2.5-flash
+ *   CARTMATCH_GEMINI_THINKING_BUDGET optional; default 0
  *
  * SUPABASE_URL and SUPABASE_ANON_KEY are injected by the platform.
  *
@@ -262,14 +268,22 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: auth.error }, auth.status, origin);
   }
 
-  const apiKey = Deno.env.get("GEMINI_API_KEY") ?? "";
+  // Prefixed first, shared second. Supabase secrets are project-wide, and this
+  // project is shared with other apps, so GEMINI_API_KEY may already exist and
+  // belong to something else. Reusing it works and needs no setup; adding
+  // CARTMATCH_GEMINI_API_KEY later isolates this app without touching the
+  // other one — including its revocation.
+  const apiKey =
+    Deno.env.get("CARTMATCH_GEMINI_API_KEY") ??
+    Deno.env.get("GEMINI_API_KEY") ??
+    "";
   if (apiKey === "") {
     return json(
       {
         ok: false,
         code: "NO_API_KEY",
         error:
-          "GEMINI_API_KEY is not set on this Edge Function. Add it under Edge Functions -> Secrets.",
+          "No Gemini key found. Set CARTMATCH_GEMINI_API_KEY (or GEMINI_API_KEY) under Edge Functions -> Secrets.",
       },
       503,
       origin,
@@ -297,9 +311,13 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  const model = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
+  // Deliberately does NOT fall back to a bare GEMINI_MODEL. Secrets are
+  // project-wide: if another app on this project sets GEMINI_MODEL for its own
+  // reasons, inheriting it would silently change which model reads your cart.
+  // Unset means the default below, never another app's choice.
+  const model = Deno.env.get("CARTMATCH_GEMINI_MODEL") ?? "gemini-2.5-flash";
   const thinkingBudget = Number.parseInt(
-    Deno.env.get("GEMINI_THINKING_BUDGET") ?? "0",
+    Deno.env.get("CARTMATCH_GEMINI_THINKING_BUDGET") ?? "0",
     10,
   );
 
