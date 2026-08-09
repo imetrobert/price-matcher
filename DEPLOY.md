@@ -13,10 +13,18 @@ Total time: about 15 minutes, most of it waiting for DNS.
 
 You need:
 
-- The **project URL** and **anon key** from Supabase → Project Settings → API.
-  Use the *same project as your other apps* — that is what makes the login the
-  same email and password.
-- The **service role key** from the same page (for the audit tables).
+- The **project URL**, the **publishable key** and the **secret key** from
+  Supabase → Settings → API Keys. Use the *same project as your other apps* —
+  that is what makes the login the same email and password.
+
+  Supabase renamed these; you may see either generation:
+
+  | Dashboard name | Legacy name | Goes in | Public? |
+  |---|---|---|---|
+  | publishable (`sb_publishable_…`) | `anon` | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | yes, by design |
+  | secret (`sb_secret_…`) | `service_role` | `SUPABASE_SERVICE_ROLE_KEY` | **never** |
+
+  Rule of thumb: if you had to click "reveal" to see it, it is the secret key.
 - A **Gemini API key**, if you want real photo recognition.
 - Access to DNS for `imetrobert.com`.
 
