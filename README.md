@@ -220,7 +220,8 @@ All server-side only. None is exposed to the browser bundle.
 | `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Sign-in. Same project as your other apps = same credentials. Public by design. |
 | `CARTMATCH_REQUIRE_AUTH` | Force the auth gate. Defaults true in production, false in development. |
 | `GEMINI_API_KEY` | Cart photo recognition. Without it, vision falls back to mock and says so. |
-| `GEMINI_MODEL` | Default `gemini-2.0-flash`. |
+| `GEMINI_MODEL` | Default `gemini-2.5-flash`. |
+| `GEMINI_THINKING_BUDGET` | Tokens of thinking on 2.5+. Default `0` — recognition is extraction, not reasoning, and the shopper is waiting. |
 | `CARTMATCH_DATA_MODE` | `MOCK` (fixtures, labelled) or `LIVE` (real adapters only). |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Use your existing Supabase project for persistence. |
 | `SUPABASE_SCHEMA`, `SUPABASE_TABLE_*` | Optional overrides to fit your naming. |

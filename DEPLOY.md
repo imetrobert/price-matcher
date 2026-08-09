@@ -78,6 +78,7 @@ three** — see step 6.
 | `SUPABASE_URL` | same as `NEXT_PUBLIC_SUPABASE_URL` |
 | `SUPABASE_SERVICE_ROLE_KEY` | service role key |
 | `GEMINI_API_KEY` | your Gemini key (omit to stay on mock vision) |
+| `GEMINI_MODEL` | `gemini-2.5-flash` (the default; set explicitly if you want a different one) |
 | `CARTMATCH_DATA_MODE` | `MOCK` until a retailer adapter actually works |
 
 > ⚠️ **`SUPABASE_SERVICE_ROLE_KEY` must never be given a `NEXT_PUBLIC_` prefix.**

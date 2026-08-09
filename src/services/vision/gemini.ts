@@ -65,30 +65,31 @@ export async function recognizeCart(
     });
   }
 
-  const body = {
-    contents: [{ role: "user", parts }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: CART_VISION_SCHEMA,
-      // Low temperature: this is an extraction task, not a creative one.
-      temperature: 0.1,
-    },
-  };
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const res = await fetch(
-      `${ENDPOINT}/${encodeURIComponent(env.geminiModel)}:generateContent?key=${encodeURIComponent(env.geminiApiKey)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-        cache: "no-store",
-      },
-    );
+    let res = await callGemini(parts, supportsThinkingConfig(), controller.signal);
+
+    // Defensive: `thinkingConfig` only exists on the 2.5+ series, and model
+    // families change. If it is rejected, drop it and retry once rather than
+    // failing a shopper's scan over a config field. Logged so it is visible
+    // rather than silently degrading.
+    if (!res.ok && res.status === 400 && supportsThinkingConfig()) {
+      const detail = await safeText(res);
+      if (/thinking/i.test(detail)) {
+        console.warn(
+          `[cartmatch] ${env.geminiModel} rejected thinkingConfig; retrying without it. Detail: ${truncate(detail, 200)}`,
+        );
+        res = await callGemini(parts, false, controller.signal);
+      } else {
+        return {
+          ok: false,
+          code: "API_ERROR",
+          error: `Gemini returned HTTP 400. ${truncate(detail, 400)}`,
+        };
+      }
+    }
 
     if (!res.ok) {
       const detail = await safeText(res);
@@ -147,6 +148,58 @@ interface GeminiResponse {
   candidates?: Array<{
     content?: { parts?: Array<{ text?: string }> };
   }>;
+}
+
+/**
+ * `thinkingConfig` is a 2.5-series-and-later parameter. Sending it to an
+ * older model is a 400, so gate on the model name. The check is deliberately
+ * loose (any 2.5/3.x/etc.) and backed by the retry-without-it path above, so a
+ * future model family cannot break recognition.
+ */
+/** Exposed for tests; not part of the module's public surface. */
+export function __supportsThinkingConfigForTest(): boolean {
+  return supportsThinkingConfig();
+}
+
+function supportsThinkingConfig(): boolean {
+  const model = env.geminiModel.toLowerCase();
+  if (model.includes("2.0") || model.includes("1.5") || model.includes("1.0")) {
+    return false;
+  }
+  return /gemini-(\d+)\.(\d+)/.test(model);
+}
+
+async function callGemini(
+  parts: unknown[],
+  withThinkingConfig: boolean,
+  signal: AbortSignal,
+): Promise<Response> {
+  const generationConfig: Record<string, unknown> = {
+    responseMimeType: "application/json",
+    responseSchema: CART_VISION_SCHEMA,
+    // Low temperature: this is an extraction task, not a creative one.
+    temperature: 0.1,
+  };
+
+  if (withThinkingConfig) {
+    generationConfig.thinkingConfig = {
+      thinkingBudget: env.geminiThinkingBudget,
+    };
+  }
+
+  return fetch(
+    `${ENDPOINT}/${encodeURIComponent(env.geminiModel)}:generateContent?key=${encodeURIComponent(env.geminiApiKey)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts }],
+        generationConfig,
+      }),
+      signal,
+      cache: "no-store",
+    },
+  );
 }
 
 async function safeText(res: Response): Promise<string> {

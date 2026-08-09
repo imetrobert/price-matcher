@@ -31,7 +31,21 @@ export const env = {
     return str("GEMINI_API_KEY");
   },
   get geminiModel(): string {
-    return str("GEMINI_MODEL", "gemini-2.0-flash");
+    return str("GEMINI_MODEL", "gemini-2.5-flash");
+  },
+  /**
+   * Thinking budget for the 2.5+ series, in tokens. `0` disables thinking.
+   *
+   * Cart recognition is an extraction task — read what is on the packages —
+   * not a reasoning one, and the shopper is standing in a store waiting. So
+   * the default is 0: spend the latency budget on the answer, not on
+   * deliberation. Raise it if you find the model misreading cluttered carts.
+   */
+  get geminiThinkingBudget(): number {
+    const raw = str("GEMINI_THINKING_BUDGET");
+    if (raw === "") return 0;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
   },
   get googleSearchApiKey(): string {
     return str("GOOGLE_SEARCH_API_KEY");
