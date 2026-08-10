@@ -9,6 +9,14 @@ import { SAVINGS } from "@/config/thresholds";
 import { formatCents, tryParsePriceToCents } from "@/lib/money";
 import { isInSupportedRegion, normalizePostalCode } from "@/lib/region";
 import { DEFAULT_PREFS, loadPrefs, savePrefs } from "@/lib/prefs";
+import { pushRemotePrefs, reconcilePrefs } from "@/lib/prefsSync";
+import {
+  formatDistance,
+  locatePostalCode,
+  nearbyStores,
+  type NearbyStore,
+} from "@/services/location";
+import { supabaseConfigured } from "@/config/env";
 import type { RetailerId, UserPreferences } from "@/types";
 
 export default function SetupPage() {
@@ -18,11 +26,94 @@ export default function SetupPage() {
   const [customThreshold, setCustomThreshold] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const [locating, setLocating] = useState(false);
+  const [locateNote, setLocateNote] = useState<string | null>(null);
+
+  const [stores, setStores] = useState<NearbyStore[] | null>(null);
+  const [storesAttribution, setStoresAttribution] = useState<string | null>(null);
+  const [storesBusy, setStoresBusy] = useState(false);
+  const [storesNote, setStoresNote] = useState<string | null>(null);
+
   useEffect(() => {
-    const p = loadPrefs();
-    setPrefs(p);
-    setPostalInput(p.postalCode);
+    // Render whatever is on the device immediately, then let the account copy
+    // fill in a blank postal code. Never block the screen on the network.
+    const local = loadPrefs();
+    setPrefs(local);
+    setPostalInput(local.postalCode);
+
+    let cancelled = false;
+    reconcilePrefs().then((p) => {
+      if (cancelled) return;
+      setPrefs(p);
+      // Only overwrite the field if the user has not started typing into it.
+      setPostalInput((current) => (current === "" ? p.postalCode : current));
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  async function useMyLocation() {
+    setLocating(true);
+    setError(null);
+    setLocateNote(null);
+    const result = await locatePostalCode();
+    setLocating(false);
+    if (!result.ok) {
+      setLocateNote(result.error);
+      return;
+    }
+    setPostalInput(result.data);
+    setLocateNote(`Found ${result.data}. Check it looks right before saving.`);
+  }
+
+  async function findStores() {
+    const normalized = normalizePostalCode(postalInput);
+    if (!normalized) {
+      setStoresNote("Enter or locate a postal code first.");
+      return;
+    }
+    setStoresBusy(true);
+    setStoresNote(null);
+    const result = await nearbyStores(normalized);
+    setStoresBusy(false);
+    if (!result.ok) {
+      setStores(null);
+      setStoresNote(result.error);
+      return;
+    }
+    setStores(result.data.stores);
+    setStoresAttribution(result.data.attribution);
+    if (result.data.stores.length === 0) {
+      setStoresNote(
+        `No supermarkets are mapped within 5 km of ${normalized}. Type the store name instead.`,
+      );
+    }
+  }
+
+  /**
+   * Picking a store fills the free-text field with something a cashier would
+   * recognise, and selects the banner when OpenStreetMap's brand matches one we
+   * know. When it does not match, the banner is left alone rather than guessed:
+   * a wrong banner silently changes which retailers are treated as competitors.
+   */
+  function chooseStore(store: NearbyStore) {
+    const label = store.address ? `${store.name} — ${store.address}` : store.name;
+    const haystack = `${store.brand ?? ""} ${store.name}`.toLowerCase();
+    const matched = enabledRetailers().find((r) =>
+      haystack.includes(r.displayName.toLowerCase()),
+    );
+    setPrefs((p) => ({
+      ...p,
+      currentStoreId: label,
+      currentRetailerId: matched ? (matched.id as RetailerId) : p.currentRetailerId,
+    }));
+    setStoresNote(
+      matched
+        ? null
+        : `Selected. OpenStreetMap does not say which banner "${store.name}" belongs to — choose it above.`,
+    );
+  }
 
   function save() {
     const normalized = normalizePostalCode(postalInput);
@@ -42,6 +133,9 @@ export default function SetupPage() {
     }
     const next = { ...prefs, postalCode: normalized };
     savePrefs(next);
+    // Fire-and-forget: the device is already saved, and navigation must not
+    // wait on Supabase.
+    void pushRemotePrefs(next);
     router.push("/");
   }
 
@@ -77,9 +171,28 @@ export default function SetupPage() {
           value={postalInput}
           onChange={(e) => setPostalInput(e.target.value)}
         />
+        {supabaseConfigured() ? (
+          <button
+            type="button"
+            onClick={useMyLocation}
+            disabled={locating}
+            className="mt-2 min-h-[48px] w-full rounded-xl border border-line bg-surface px-3 text-base font-semibold text-ink disabled:opacity-60"
+          >
+            {locating ? "Locating…" : "📍 Use my location"}
+          </button>
+        ) : null}
+
+        {locateNote ? (
+          <p className="mt-2 rounded-xl bg-warn/5 px-3 py-2 text-sm text-warn">
+            {locateNote}
+          </p>
+        ) : null}
+
         <p className="mt-2 text-xs text-muted">
-          Used to keep comparisons inside the Montreal market. It is the only
-          location detail CartMatch keeps.
+          Saved to your account, so it is already filled in on any device you
+          sign in on. Used to keep comparisons inside the Montreal market, and
+          it is the only location detail CartMatch keeps — locating you reads
+          GPS once to work out the postal code, then discards the coordinates.
         </p>
       </section>
 
@@ -119,6 +232,56 @@ export default function SetupPage() {
             setPrefs({ ...prefs, currentStoreId: e.target.value || null })
           }
         />
+
+        {supabaseConfigured() ? (
+          <button
+            type="button"
+            onClick={findStores}
+            disabled={storesBusy}
+            className="mt-2 min-h-[48px] w-full rounded-xl border border-line bg-surface px-3 text-base font-semibold text-ink disabled:opacity-60"
+          >
+            {storesBusy ? "Searching…" : "Find supermarkets near this postal code"}
+          </button>
+        ) : null}
+
+        {storesNote ? (
+          <p className="mt-2 rounded-xl bg-warn/5 px-3 py-2 text-sm text-warn">
+            {storesNote}
+          </p>
+        ) : null}
+
+        {stores && stores.length > 0 ? (
+          <div className="mt-3 space-y-2">
+            {stores.map((s) => {
+              const label = s.address ? `${s.name} — ${s.address}` : s.name;
+              const selected = prefs.currentStoreId === label;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => chooseStore(s)}
+                  className={`w-full rounded-xl border px-3 py-2 text-left transition ${
+                    selected
+                      ? "border-brand bg-brand/5"
+                      : "border-line bg-surface"
+                  }`}
+                >
+                  <span className="block text-base font-semibold">{s.name}</span>
+                  <span className="block text-sm text-muted">
+                    {s.address ?? "No address recorded"} ·{" "}
+                    {formatDistance(s.distanceM)}
+                  </span>
+                </button>
+              );
+            })}
+            <p className="text-xs text-muted">
+              {storesAttribution}. Community-maintained, so a shop may have
+              moved or closed — check it matches the one you are standing in,
+              and type it yourself if the list is wrong.
+            </p>
+          </div>
+        ) : null}
+
         <p className="mt-2 text-xs text-muted">
           Without a specific store, competitor prices are labelled
           &ldquo;Montreal-area online price&rdquo; rather than a guaranteed shelf

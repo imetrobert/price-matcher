@@ -3,8 +3,9 @@
 GitHub Pages (static site) + Supabase (auth, data, and the Gemini call).
 No third-party hosting account.
 
-**None of this has been executed.** I have no access to your DNS, your GitHub
-Pages settings, or your Supabase project. This is a runbook for you to run.
+**Executed once, on 2026-08-10.** The traps recorded below are ones that were
+actually hit, not ones imagined. I have no access to your DNS, your GitHub Pages
+settings, or your Supabase project — this is a runbook for you to run.
 
 ---
 
@@ -34,14 +35,18 @@ Design accordingly: never assume the UI is hiding something.
 
 ## 1. Database (once)
 
-In the Supabase SQL Editor, run **both** files from this repo, in order:
+In the Supabase SQL Editor, run these files from this repo, in order:
 
 1. `supabase/schema.sql` — creates the three `cartmatch_` tables. Alone it
    leaves the app non-functional on purpose: RLS on, no policies, nothing
    permitted.
 2. `supabase/policies.sql` — **required.** Adds `user_id` and the RLS policies.
+3. `supabase/prefs.sql` — per-user settings, so a postal code follows the
+   account to a new device instead of being typed again. The only table here
+   with an UPDATE policy, because settings are current state rather than an
+   append-only record.
 
-Both are safe to re-run, but read the header of `policies.sql` first if this
+All three are safe to re-run, but read the header of `policies.sql` first if this
 project was set up by someone else. Postgres OR-s permissive policies together,
 so a policy file whose `drop policy` names do not match what is actually
 deployed *adds* a second, wider grant instead of replacing the first.
@@ -76,23 +81,37 @@ where schemaname = 'public' and tablename like 'cartmatch%'
 order by tablename, policyname;
 ```
 
-## 2. Edge Function (once)
+## 2. Edge Functions (once)
 
-This is what holds your Gemini key.
+This is where the Gemini key lives, and the only place that talks to
+OpenStreetMap.
 
 ```bash
 npm install -g supabase
 supabase login
 supabase link --project-ref <your-project-ref>
 
-supabase functions deploy cartmatch-vision --no-verify-jwt
+supabase functions deploy cartmatch-vision   --no-verify-jwt
+supabase functions deploy cartmatch-location --no-verify-jwt
 
 supabase secrets set CARTMATCH_ALLOWED_ORIGINS=https://pricecheck.imetrobert.com
 ```
 
+There are **two** functions, deployed the same way:
+
+| Function | Holds / does |
+|---|---|
+| `cartmatch-vision` | the Gemini key; cart photo recognition |
+| `cartmatch-location` | postal code from GPS, and nearby supermarkets from OpenStreetMap |
+
 Or deploy from the dashboard: **Edge Functions → Deploy a new function → Via
-Editor**, name it `cartmatch-vision`, paste
-`supabase/functions/cartmatch-vision/index.ts`, and **turn "Verify JWT" off**.
+Editor**, name it exactly as above, paste the matching
+`supabase/functions/<name>/index.ts`, and **turn "Verify JWT" off**.
+
+`cartmatch-location` needs no secrets of its own. It exists because Nominatim's
+usage policy requires an identifying `User-Agent`, which a browser is forbidden
+to set — and routing through it means OpenStreetMap sees Supabase's address
+rather than the shopper's.
 
 ### Three things that actually went wrong doing this
 

@@ -21,7 +21,7 @@ refusing to state things it cannot back up, and the same standard applies here.
 
 | Area | Status |
 |---|---|
-| Product matching engine | **Real and tested.** 81 automated tests, including every discrimination case from the spec. |
+| Product matching engine | **Real and tested.** 93 automated tests, including every discrimination case from the spec. |
 | Money / savings arithmetic | **Real and tested.** Integer cents throughout. |
 | Freshness, eligibility, audit trail | **Real and tested.** |
 | Mobile UI, Checkout Mode, proof sheet | **Real.** Exercised against the built static export. |
@@ -83,9 +83,11 @@ about a page that was actually fetched — and never *"they will match it"*.
 PHOTO → IDENTIFY → CONFIRM → CANONICALISE → SEARCH → VERIFY → COMPARE → PROVE
 ```
 
-1. **Setup** — postal code, language, minimum savings. Stored in
-   `localStorage`; no account, no server-side user record.
-2. **Store selection** — which banner you are in, optionally which store.
+1. **Setup** — postal code, language, minimum savings. Cached on the device
+   and synced to your account, so a new phone starts already filled in. The
+   postal code can be typed or derived once from GPS.
+2. **Store selection** — which banner you are in, and optionally which store,
+   picked from supermarkets OpenStreetMap knows about near your postal code.
 3. **Photo** — one or more cart photos, camera or library.
 4. **Recognition** — Gemini returns strict structured JSON (never free text).
 5. **Confirmation** — every detection is editable; low-confidence ones are
@@ -352,8 +354,9 @@ src/                      → published to Pages, world-readable
   components/             UI (proof sheet, mock banner, auth guard, primitives)
   config/                 retailers, policies, thresholds, env
   fixtures/               product identities + clearly-marked mock prices
-  lib/                    money (integer cents), region, prefs, auth/, store/
+  lib/                    money (integer cents), region, prefs + sync, auth/, store/
   services/
+    location/             postal code + nearby stores (via the Edge Function)
     vision/               request/response shaping + mock, strict JSON schema
     products/             normalization, canonical identity
     matching/             scoring ladder + candidate ranking
@@ -365,8 +368,10 @@ src/                      → published to Pages, world-readable
 tests/                    vitest suites
 
 supabase/                 → runs on Supabase, never published
-  functions/vision/       holds GEMINI_API_KEY; verifies the JWT first
+  functions/cartmatch-vision/    holds the Gemini key; verifies the caller first
+  functions/cartmatch-location/  postal code + nearby stores, via OpenStreetMap
   schema.sql              tables
+  prefs.sql               per-user settings, synced across devices
   policies.sql            RLS — required for this deployment
 
 .github/workflows/        → build, test, leak-check, publish to Pages
@@ -410,7 +415,16 @@ audit trail, price observations, config, and the "Verify This Match" form.
 
 ## Privacy
 
-Postal code is the only location detail stored, and it lives in `localStorage`.
+Postal code is the only location detail stored. It lives in `localStorage` and,
+so it follows your account to a new device, in `cartmatch_user_prefs` under the
+same per-user RLS as everything else — with reads deliberately *not* widened for
+an `app_admin`, since an admin gains nothing from other people's postal codes.
+
+**"Use my location" never stores a coordinate.** It reads GPS once, sends the
+position to the Edge Function to derive a postal code, and the coordinates are
+discarded — not returned to the browser's storage, not written to a table, not
+logged. A kept latitude and longitude is location history; a postal code is a
+neighbourhood, and it is all the app needs.
 Photos go to the Edge Function, are forwarded to Gemini, and are never written
 to a database or a disk — no code path persists an image. No account beyond the
 Supabase login, no payment data, no precise location, no advertising
