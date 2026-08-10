@@ -53,6 +53,29 @@ create table if not exists public.cartmatch_user_prefs (
 -- cartmatch_ tables themselves — there, one person's delete could destroy
 -- someone else's history.
 
+-- updated_at belongs to the database, not the client -------------------------
+-- The default only applies on INSERT, so without this an UPDATE would leave a
+-- stale timestamp. The app could set it on every write, and did at first — but
+-- then the value reflects a phone's clock, which may be wrong, and is supplied
+-- by code that anyone holding the publishable key can call. A timestamp worth
+-- having is one the database wrote.
+--
+-- No `set search_path` here: this is an ordinary invoker-rights trigger, which
+-- runs as the calling user and is not subject to the definer-function hijack
+-- that setting exists to prevent.
+create or replace function public.cartmatch_touch_updated_at()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists cartmatch_user_prefs_touch on public.cartmatch_user_prefs;
+create trigger cartmatch_user_prefs_touch
+  before update on public.cartmatch_user_prefs
+  for each row execute function public.cartmatch_touch_updated_at();
+
 alter table public.cartmatch_user_prefs enable row level security;
 
 drop policy if exists "cartmatch_user_prefs select (cartmatch)" on public.cartmatch_user_prefs;

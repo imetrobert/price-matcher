@@ -176,4 +176,12 @@ describe("what gets sent to the database", () => {
     const sent = JSON.stringify(upsert.mock.calls[0]?.[0] ?? {});
     expect(sent).not.toMatch(/lat|lon|coord/i);
   });
+
+  it("leaves updated_at to the database", async () => {
+    // A trigger sets it from the database clock. Sending it from here would
+    // record whatever the phone thinks the time is, chosen by code that anyone
+    // with the publishable key can call.
+    await pushRemotePrefs({ ...DEFAULT_PREFS, postalCode: "H4A 1A1" });
+    expect(upsert.mock.calls[0]?.[0]).not.toHaveProperty("updated_at");
+  });
 });

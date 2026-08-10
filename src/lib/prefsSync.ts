@@ -83,13 +83,18 @@ export async function pushRemotePrefs(prefs: UserPreferences): Promise<void> {
     // Upsert on the primary key. user_id is set explicitly rather than left to
     // the column default, for the same reason as everywhere else: correctness
     // should not depend on a default nobody looks at.
+    // `updated_at` is deliberately absent: a BEFORE UPDATE trigger sets it from
+    // the database clock. Sending it from here would record a phone's clock —
+    // possibly wrong, and supplied by code anyone holding the publishable key
+    // can call.
     const { error } = await supabase.from(TABLE).upsert(
       {
         user_id: userId,
+        // The column has a format CHECK, and "" is not a postal code. An empty
+        // string would fail every sync for someone who has not set one yet.
         postal_code: prefs.postalCode || null,
         language: prefs.language,
         min_savings_cents: prefs.minSavingsCents,
-        updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" },
     );
