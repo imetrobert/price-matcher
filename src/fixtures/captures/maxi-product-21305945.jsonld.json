@@ -1,0 +1,23 @@
+{
+  "@context": "https://schema.org/",
+  "@type": "Product",
+  "url": "https://www.maxi.ca/en/greek-yogurt-plain-high-protein-0-m-f/p/21305945_EA?source=nspt",
+  "name": "Greek Yogurt, Plain, High Protein, 0% M.F.",
+  "image": [
+    "https://digital.loblaws.ca/PCX/21305945_EA/en/1/21305945_en_1_800.png",
+    "https://digital.loblaws.ca/PCX/21305945_EA/en/1/21305945_en_1_400.png",
+    "https://digital.loblaws.ca/PCX/21305945_EA/en/1/21305945_en_1_250.png"
+  ],
+  "description": "<p>Gone are the scary days when choosing the right snack meant suffering from blank page syndrome! Put your creativity to work and beat your cravings with Oikos High Protein Plain Greek yogurt. Enjoy the same great taste you know and love, now with even more protein and a thick texture! Made with 100% Canadian milk, the new Oikos High Protein Plain Greek yogurt boasts 13 grams of protein per 115 gram serving. Try it today!</p><ul><li>13g grams of protein per 115g serving</li><li>Value-sized 650g tub for breakfast, baking, and more!</li><li>Made with 100% Canadian milk</li><li>No artificial colors, flavours, or preservatives</li><li>Join the Greek yogurt movement</li></ul>",
+  "sku": "21305945_EA",
+  "brand": { "@type": "Thing", "name": "Oikos" },
+  "offers": {
+    "@type": "Offer",
+    "url": "https://www.maxi.ca/en/greek-yogurt-plain-high-protein-0-m-f/p/21305945_EA?source=nspt",
+    "priceCurrency": "CAD",
+    "price": 7.49,
+    "availability": "https://schema.org/InStock",
+    "itemCondition": "https://schema.org/NewCondition",
+    "seller": { "@type": "Organization", "name": "Maxi" }
+  }
+}
