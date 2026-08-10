@@ -84,7 +84,7 @@ describe("the first comparison built from two real pages", () => {
     variant: "Plain",
     fatPercentage: "0",
     size: "650 g",
-    identitySource: "RETAILER_PAGE",
+    identitySource: "RETAILER_PRODUCT_DATA",
   });
 
   const igaProduct = buildCanonicalProduct({
@@ -93,7 +93,7 @@ describe("the first comparison built from two real pages", () => {
     variant: "Plain",
     fatPercentage: "0",
     size: "650 g",
-    identitySource: "RETAILER_PAGE",
+    identitySource: "RETAILER_PRODUCT_DATA",
   });
 
   it("matches the two products at a level that can back a checkout claim", () => {
