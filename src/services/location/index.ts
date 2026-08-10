@@ -63,9 +63,20 @@ async function call<T>(body: unknown): Promise<LocationOutcome<T>> {
     }
     return { ok: true, data: data as T };
   } catch (err) {
+    // A rejected fetch means the request never completed — the browser blocked
+    // it or nothing answered. The raw message is useless to anyone: Safari says
+    // "Load failed", Chrome says "Failed to fetch", and neither hints at the
+    // cause. In practice it is one of two things, and both are worth naming
+    // because the fix is quick once you know which.
+    const raw = err instanceof Error ? err.message : String(err);
+    const networkish =
+      err instanceof TypeError ||
+      /load failed|failed to fetch|networkerror/i.test(raw);
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Lookup failed.",
+      error: networkish
+        ? "Could not reach the location service. Either the cartmatch-location Edge Function is not deployed, or its “Verify JWT” setting is on — which blocks the browser's preflight request. You can still type your postal code."
+        : raw,
     };
   }
 }

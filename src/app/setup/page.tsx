@@ -19,6 +19,18 @@ import {
 import { supabaseConfigured } from "@/config/env";
 import type { RetailerId, UserPreferences } from "@/types";
 
+/**
+ * Was "Stored on this device only. No account, no tracking." — which stopped
+ * being true the moment settings began syncing to the account.
+ *
+ * A privacy claim that has quietly gone stale is worse than none: it is the one
+ * line on the page a reader is entitled to take at face value. If preferences
+ * ever stop syncing, or start carrying more than a postal code, this string
+ * changes in the same commit.
+ */
+const SETTINGS_SUBTITLE =
+  "Saved to your account and to this device. Postal code only — never coordinates.";
+
 export default function SetupPage() {
   const router = useRouter();
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFS);
@@ -154,7 +166,7 @@ export default function SetupPage() {
     <main>
       <PageHeader
         title="Settings"
-        subtitle="Stored on this device only. No account, no tracking."
+        subtitle={SETTINGS_SUBTITLE}
         backHref="/"
       />
 
