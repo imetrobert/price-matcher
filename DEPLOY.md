@@ -93,11 +93,12 @@ supabase link --project-ref <your-project-ref>
 
 supabase functions deploy cartmatch-vision   --no-verify-jwt
 supabase functions deploy cartmatch-location --no-verify-jwt
+supabase functions deploy cartmatch-retailer --no-verify-jwt
 
 supabase secrets set CARTMATCH_ALLOWED_ORIGINS=https://pricecheck.imetrobert.com
 ```
 
-There are **two** functions, deployed the same way:
+There are **three** functions, deployed the same way:
 
 | Function | Holds / does |
 |---|---|
