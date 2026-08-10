@@ -53,11 +53,11 @@ export interface LoblawProduct {
   currency: "CAD";
   availability: Availability;
   /**
-   * Always null from this source. Present so callers handle the field rather
-   * than forgetting it exists, and so the day a size appears there is one
-   * place to fill in.
+   * Never from the JSON-LD, which has no size field. `parseLoblawProductPage`
+   * fills this from the markup; `parseLoblawProductJsonLd` alone always leaves
+   * it null.
    */
-  size: null;
+  size: string | null;
   /** Always null: this source carries no barcode. See the header. */
   gtin: null;
 }
