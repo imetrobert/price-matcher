@@ -16,6 +16,11 @@ import { activeBackend, recentAudit, recentObservations, saveValidation, validat
 import { visionProviderName, env } from "@/config/env";
 import { authConfigured } from "@/lib/auth/config";
 import { APP_NAME, checkAppAccess } from "@/lib/auth/access";
+import {
+  probeRetailerUrl,
+  summariseProbe,
+  type ProbeResult,
+} from "@/services/retailers/probe";
 import type {
   AuditRecord,
   MatchValidationReport,
@@ -91,6 +96,8 @@ function AdminView() {
           </pre>
         </section>
       ) : null}
+
+      <RetailerProbe />
 
       {lastRun ? (
         <section className="mb-6">
@@ -313,5 +320,95 @@ function ValidationForm({
         Record outcome
       </button>
     </div>
+  );
+}
+
+/**
+ * Can a server actually fetch a retailer page?
+ *
+ * Every parser here was written against pages captured in a browser. A request
+ * from a datacenter is a different situation, and this is the only thing in the
+ * app that finds out. It lives on the debug page because it is a question about
+ * the deployment, not about groceries.
+ *
+ * The URLs below are real product pages that were captured by hand, so a
+ * success here means the exact page the parsers were built against came back
+ * intact — not merely that something answered.
+ */
+function RetailerProbe() {
+  const KNOWN = [
+    {
+      label: "Maxi — Oikos 650 g",
+      url: "https://www.maxi.ca/en/greek-yogurt-plain-high-protein-0-m-f/p/21305945_EA",
+    },
+    {
+      label: "IGA — Oikos 650 g",
+      url: "https://www.iga.ca/products/oikos-fat-free-0--greek-yogurt-high-protein-plain-650-g",
+    },
+  ];
+
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ label: string; data: ProbeResult } | null>(
+    null,
+  );
+
+  async function run(label: string, url: string) {
+    setBusy(label);
+    setError(null);
+    setResult(null);
+    const outcome = await probeRetailerUrl(url);
+    setBusy(null);
+    if (!outcome.ok) {
+      setError(outcome.error);
+      return;
+    }
+    setResult({ label, data: outcome.result });
+  }
+
+  return (
+    <section className="card mb-4 text-sm">
+      <p className="mb-1 font-bold">Retailer fetch probe</p>
+      <p className="mb-3 text-xs text-muted">
+        Asks the Edge Function to fetch a real product page and reports what came
+        back. Answers the one question no parser can: whether a retailer serves
+        a datacenter the same page it serves your phone.
+      </p>
+
+      <div className="flex flex-wrap gap-2">
+        {KNOWN.map((k) => (
+          <button
+            key={k.url}
+            type="button"
+            disabled={busy !== null}
+            onClick={() => run(k.label, k.url)}
+            className="min-h-[44px] rounded-xl border border-line bg-surface px-3 text-sm font-semibold disabled:opacity-60"
+          >
+            {busy === k.label ? "Probing…" : k.label}
+          </button>
+        ))}
+      </div>
+
+      {error ? (
+        <p className="mt-3 rounded-xl bg-bad/5 px-3 py-2 text-sm text-bad">{error}</p>
+      ) : null}
+
+      {result ? (
+        <div className="mt-3">
+          <p
+            className={`rounded-xl px-3 py-2 text-sm font-semibold ${
+              result.data.hasJsonLdProduct
+                ? "bg-good/5 text-good"
+                : "bg-warn/5 text-warn"
+            }`}
+          >
+            {summariseProbe(result.data)}
+          </p>
+          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all text-xs text-muted">
+            {JSON.stringify(result.data, null, 2)}
+          </pre>
+        </div>
+      ) : null}
+    </section>
   );
 }

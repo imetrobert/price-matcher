@@ -103,6 +103,15 @@ There are **two** functions, deployed the same way:
 |---|---|
 | `cartmatch-vision` | the Gemini key; cart photo recognition |
 | `cartmatch-location` | postal code from GPS, and nearby supermarkets from OpenStreetMap |
+| `cartmatch-retailer` | fetches retailer pages. Currently only the `/admin` probe. |
+
+`cartmatch-retailer` fetches a URL the browser supplies, which is a
+server-side request forgery hole unless it is constrained — it runs inside
+Supabase's network, so cloud metadata endpoints and internal services are
+reachable from it even though they are not reachable from the caller. It is
+constrained three ways, none optional: an explicit host allowlist of the six
+retailers, https only, and redirects followed manually with every hop
+re-checked. Read the header before changing any of them.
 
 Or deploy from the dashboard: **Edge Functions → Deploy a new function → Via
 Editor**, name it exactly as above, paste the matching
