@@ -82,7 +82,14 @@ export const RETAILERS: Record<RetailerId, RetailerConfig> = {
     displayName: "IGA",
     enabled: true,
     region: "Quebec",
-    homepage: "https://www.iga.net",
+    // iga.ca, verified from a real product URL supplied by the owner:
+    //   https://www.iga.ca/products/oikos-fat-free-0--greek-yogurt-high-protein-plain-650-g
+    // This previously said iga.net, which was an assumption nobody had checked.
+    // Note the product path carries no article number, only a slug — unlike
+    // Loblaw, whose URLs end in /p/<id>_EA. A slug cannot be constructed from
+    // product attributes, so IGA product URLs must come from a search result
+    // rather than being built.
+    homepage: "https://www.iga.ca",
     supportsProductPages: true,
     supportsOnlinePricing: true,
     supportsStoreContext: true,
