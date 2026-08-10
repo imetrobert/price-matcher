@@ -172,7 +172,23 @@ async function authenticate(req: Request): Promise<AuthOutcome> {
 // ===========================================================================
 
 const NOMINATIM = "https://nominatim.openstreetmap.org";
-const OVERPASS = "https://overpass-api.de/api/interpreter";
+
+/**
+ * Overpass mirrors, tried in order.
+ *
+ * overpass-api.de is the instance every tutorial names, and it is consequently
+ * the most overloaded — 504 and 429 from it are routine rather than a sign of a
+ * bad query. Kumi's mirror is usually faster and less contended, so it goes
+ * first, with the well-known one as the fallback.
+ *
+ * These are free volunteer-run services. One request per store lookup, no
+ * retry storm: if both mirrors decline, the answer is "try again in a moment",
+ * not a third attempt.
+ */
+const OVERPASS_MIRRORS = [
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass-api.de/api/interpreter",
+];
 
 /**
  * Nominatim's usage policy requires this to identify the application and give
@@ -182,7 +198,14 @@ const OVERPASS = "https://overpass-api.de/api/interpreter";
 const USER_AGENT =
   "CartMatch/1.0 (grocery price-match assistant; https://pricecheck.imetrobert.com)";
 
+/** Nominatim is quick and single-shot; if it is slow, something is wrong. */
 const TIMEOUT_MS = 15_000;
+/**
+ * Per Overpass attempt. Two mirrors, so the worst case is roughly twice this
+ * before giving up — long enough to survive one busy instance, short enough
+ * that someone standing in an aisle gives up on the button rather than the app.
+ */
+const OVERPASS_ATTEMPT_MS = 10_000;
 /** Montreal is dense; 5 km reaches well past the nearest handful of banners. */
 const STORE_RADIUS_M = 5000;
 const MAX_STORES = 25;
@@ -194,6 +217,23 @@ interface StoreResult {
   brand: string | null;
   address: string | null;
   distanceM: number;
+}
+
+/**
+ * The shape Overpass returns, as far as this code relies on it.
+ *
+ * Every field is optional because it is someone else's JSON: a node has
+ * lat/lon, a way has `center` (because the query asks for `out center`), and
+ * any of them may be missing. Typing it honestly is what forces the checks
+ * below rather than letting `any` wave them through.
+ */
+interface OverpassElement {
+  type?: string;
+  id?: number;
+  lat?: number;
+  lon?: number;
+  center?: { lat?: number; lon?: number };
+  tags?: Record<string, unknown>;
 }
 
 Deno.serve(async (req: Request) => {
@@ -218,6 +258,10 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "Body must be JSON." }, 400, origin);
   }
 
+  // This controller bounds the Nominatim calls only. Overpass runs its own,
+  // one per mirror, because a single deadline across two fallback attempts
+  // would let a slow first mirror consume the whole budget and leave nothing
+  // for the second — which is the mirror that usually answers.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -377,40 +421,24 @@ async function handleStores(
   //
   // `out center` gives ways (buildings) a single coordinate, so nodes and
   // buildings can be treated identically below.
-  const query = `[out:json][timeout:20];
+  // `timeout:15` is Overpass's own budget and is deliberately shorter than the
+  // per-attempt abort below, so a slow instance gives up and says so rather
+  // than being cut off with no explanation.
+  const query = `[out:json][timeout:15];
 (
   node["shop"="supermarket"](around:${STORE_RADIUS_M},${lat},${lon});
   way["shop"="supermarket"](around:${STORE_RADIUS_M},${lat},${lon});
 );
 out center tags ${MAX_STORES * 4};`;
 
-  const res = await fetch(OVERPASS, {
-    method: "POST",
-    headers: {
-      "User-Agent": USER_AGENT,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: `data=${encodeURIComponent(query)}`,
-    signal,
-  });
-
-  if (!res.ok) {
-    console.error(`[cartmatch] overpass returned ${res.status}`);
-    return json(
-      {
-        ok: false,
-        error:
-          res.status === 429
-            ? "OpenStreetMap is rate-limiting requests. Wait a moment and try again."
-            : `Store lookup returned HTTP ${res.status}.`,
-      },
-      502,
-      origin,
-    );
+  const overpass = await fetchOverpass(query);
+  if (!overpass.ok) {
+    return json({ ok: false, error: overpass.error }, 502, origin);
   }
 
-  const body = await res.json();
-  const elements = Array.isArray(body?.elements) ? body.elements : [];
+  const elements = Array.isArray(overpass.body?.elements)
+    ? overpass.body.elements
+    : [];
 
   const stores: StoreResult[] = [];
   for (const el of elements) {
@@ -432,6 +460,7 @@ out center tags ${MAX_STORES * 4};`;
   }
 
   stores.sort((a, b) => a.distanceM - b.distanceM);
+  dedupe(stores);
 
   return json(
     {
@@ -448,13 +477,74 @@ out center tags ${MAX_STORES * 4};`;
 }
 
 /**
+ * Try each mirror once, in order.
+ *
+ * A 429 or 504 from a public Overpass instance means "busy", not "broken", and
+ * the useful response is to ask a different one rather than to retry the same
+ * one harder. If every mirror declines, say so in terms the person can act on —
+ * they are standing in a shop and the answer is to type the name.
+ */
+type OverpassOutcome =
+  | { ok: true; body: { elements?: OverpassElement[] } }
+  | { ok: false; error: string };
+
+async function fetchOverpass(
+  query: string,
+): Promise<OverpassOutcome> {
+  let lastStatus = 0;
+
+  for (const mirror of OVERPASS_MIRRORS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), OVERPASS_ATTEMPT_MS);
+    try {
+      const res = await fetch(mirror, {
+        method: "POST",
+        headers: {
+          "User-Agent": USER_AGENT,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: controller.signal,
+      });
+
+      if (res.ok) return { ok: true, body: await res.json() };
+
+      lastStatus = res.status;
+      // Host name only. Overpass echoes the query in its error bodies, and the
+      // query contains the caller's coordinates.
+      console.warn(`[cartmatch] overpass ${new URL(mirror).host} -> ${res.status}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[cartmatch] overpass ${new URL(mirror).host} failed: ${message}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  return {
+    ok: false,
+    error:
+      lastStatus === 429
+        ? "OpenStreetMap's servers are rate-limiting right now. Wait a minute, or type the store name."
+        : "OpenStreetMap's servers are busy — this happens with the free public ones. Try again shortly, or type the store name.",
+  };
+}
+
+/**
  * Whatever the tags actually contain, never a placeholder.
  *
  * A store with no address returns null and the UI shows the name alone. An
  * invented or partial-looking address is worse than none: this list exists so
  * someone can confirm which building they are standing in.
+ *
+ * `addr:full` is checked because a good share of Quebec addresses are mapped
+ * that way rather than as separate housenumber/street tags — omitting it is a
+ * large part of why entries come back with a name and nothing else.
  */
 function formatAddress(tags: Record<string, unknown>): string | null {
+  const full = str(tags["addr:full"]);
+  if (full !== "") return full;
+
   const num = str(tags["addr:housenumber"]);
   const street = str(tags["addr:street"]);
   const city = str(tags["addr:city"]);
@@ -462,6 +552,36 @@ function formatAddress(tags: Record<string, unknown>): string | null {
   const line = [num, street].filter(Boolean).join(" ").trim();
   const parts = [line, city].filter((p) => p !== "");
   return parts.length > 0 ? parts.join(", ") : null;
+}
+
+/**
+ * Collapse the same shop appearing twice, preferring the entry with an address.
+ *
+ * A supermarket is commonly mapped both as a point (the shop) and as a building
+ * outline, and only one of the two usually carries `addr:*`. Left alone the list
+ * shows "Maxi" twice, 20 m apart, one with an address and one without — which
+ * reads as two different shops and makes the useful entry harder to find.
+ *
+ * Mutates in place, and relies on the caller having sorted by distance first.
+ */
+function dedupe(stores: StoreResult[]): void {
+  const SAME_PLACE_M = 120;
+  for (let i = stores.length - 1; i > 0; i--) {
+    for (let j = 0; j < i; j++) {
+      if (
+        stores[i].name.toLowerCase() === stores[j].name.toLowerCase() &&
+        Math.abs(stores[i].distanceM - stores[j].distanceM) < SAME_PLACE_M
+      ) {
+        // Keep whichever knows the address; the survivor is the earlier (nearer)
+        // one, so copy the address across rather than dropping it.
+        if (!stores[j].address && stores[i].address) {
+          stores[j].address = stores[i].address;
+        }
+        stores.splice(i, 1);
+        break;
+      }
+    }
+  }
 }
 
 function str(v: unknown): string {
