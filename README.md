@@ -21,7 +21,7 @@ refusing to state things it cannot back up, and the same standard applies here.
 
 | Area | Status |
 |---|---|
-| Product matching engine | **Real and tested.** 93 automated tests, including every discrimination case from the spec. |
+| Product matching engine | **Real and tested.** 153 automated tests, including every discrimination case from the spec. |
 | Money / savings arithmetic | **Real and tested.** Integer cents throughout. |
 | Freshness, eligibility, audit trail | **Real and tested.** |
 | Mobile UI, Checkout Mode, proof sheet | **Real.** Exercised against the built static export. |
@@ -30,42 +30,51 @@ refusing to state things it cannot back up, and the same standard applies here.
 | Supabase persistence + RLS policies | **Applied and verified** on the live project: 6 policies, all gated on `has_app_access('cartmatch')`, no views. |
 | Supabase sign-in (credential exchange) | **Written, not yet exercised end to end.** |
 | Gemini cart recognition (Edge Function) | **Deployed.** `cartmatch-vision` is live and its JWT gate confirmed answering. No cart photo has been through it yet. |
-| **Retailer price integrations** | **NOT IMPLEMENTED.** See below. |
+| Retailer page **parsing** | **Real and tested against real captures.** Maxi and IGA product pages, and Maxi search results. |
+| Retailer page **fetching** | **BLOCKED — measured, not assumed.** Both retailers answer HTTP 403 to the Edge Function. |
 
-### The blocker: retailer egress is refused
+### The blocker: retailers refuse servers, and this was measured
 
-Every one of the six retailer domains is refused by the network policy of the
-environment this was built in — the proxy answers `403 Forbidden` to the
-`CONNECT` request:
+Two separate facts, and the second is the one that matters.
 
-```
-www.maxi.ca:443     -> 403
-www.superc.ca:443   -> 403
-www.walmart.ca:443  -> 403
-www.metro.ca:443    -> 403
-www.iga.net:443     -> 403
-www.provigo.ca:443  -> 403
-```
+**The development environment cannot reach retailer domains** — its proxy
+answers `403` to the `CONNECT`. That is a local constraint and it is why every
+page in `src/fixtures/captures/` was captured by hand in a browser.
 
-No retailer page has ever been fetched. That means no search URL, no product
-URL pattern, and no page structure has been observed. Writing CSS selectors
-against pages nobody has loaded would produce a scraper that *looks* finished
-and silently returns wrong prices — the exact failure this app exists to
-prevent.
+**The deployed Edge Function cannot either.** On 2026-08-10 the probe in
+`/admin` fetched the exact Maxi and IGA product URLs whose captures parse
+correctly, from Supabase's own network, and both returned **HTTP 403**. Not a
+challenge page, not a timeout — a flat refusal to a datacenter address.
 
-So, per the build spec's own instruction for this situation:
+So the parsers work and cannot be fed. Automated price fetching is not
+available from this deployment, and no parser improvement changes that. The
+probe is kept so the finding can be re-measured rather than remembered.
 
-- `LiveRetailerAdapter` implements the full adapter interface and reports
-  `UNAVAILABLE` with the real reason. It does a genuine reachability probe, so
-  the moment egress is permitted the status text changes on its own.
-- Every data method returns a typed `NOT_IMPLEMENTED` error rather than a price.
-- `MockRetailerAdapter` serves clearly-labelled fixtures so the pipeline and UI
-  are fully exercisable today.
-- **No price, URL, UPC, or retailer policy in this repository is a claim about
-  the real world.**
+What was NOT done in response: no browser impersonation, no rotating user
+agents, no proxy hunting. The `User-Agent` says CartMatch. If a retailer does
+not want automated reads, the correct outcome is to know that.
 
-`src/services/retailers/liveAdapter.ts` contains a step-by-step guide for
-implementing a retailer once you can reach it.
+### What *is* real, from those captures
+
+Parsing is finished and tested against pages that genuinely existed:
+
+| | Maxi (Loblaw) | IGA (Sobeys) |
+|---|---|---|
+| Product page → price, brand, stock | ✅ schema.org JSON-LD | ✅ schema.org JSON-LD |
+| Package size | ✅ from markup (`product-name__item--package-size`) | ✅ from the product name |
+| Search → candidates | ✅ from `__NEXT_DATA__` | ❌ fetched separately; not in the HTML |
+| Barcode / GTIN | ❌ not published | ❌ not published |
+
+The two product captures are **the same tub of yogurt on the same day**: $7.49
+at Maxi, $8.49 at IGA. `tests/igaProduct.test.ts` matches them at score ≥95 and
+computes the $1.00 saving from those two files. It is the only comparison in
+this repository made of real numbers.
+
+- `MockRetailerAdapter` still serves clearly-labelled fixtures so the pipeline
+  and UI are exercisable.
+- **No price, URL, UPC, or retailer policy outside `src/fixtures/captures/` is a
+  claim about the real world** — and the captures are snapshots, stale the
+  moment they were taken, used to pin parsing rather than to serve a price.
 
 ### Retailer policies are all `UNKNOWN`
 

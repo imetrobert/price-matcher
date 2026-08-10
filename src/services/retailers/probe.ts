@@ -14,6 +14,23 @@
 import { edgeFunctionUrl, env, supabaseConfigured } from "@/config/env";
 import { getAccessToken } from "@/lib/auth/session";
 
+/**
+ * ---------------------------------------------------------------------------
+ * THE ANSWER, MEASURED 2026-08-10
+ * ---------------------------------------------------------------------------
+ * Both maxi.ca and iga.ca returned **HTTP 403** to a request from a Supabase
+ * Edge Function, using the exact product URLs whose pages parse correctly when
+ * captured in a browser.
+ *
+ * Not a challenge page, not a timeout, not a parse failure: a flat refusal.
+ * Server-side price fetching from this deployment does not work, and no amount
+ * of parser improvement changes that.
+ *
+ * This function is kept so the finding can be re-measured rather than
+ * remembered. Retailers change their posture, and "we tried once in August"
+ * ages badly.
+ * ---------------------------------------------------------------------------
+ */
 export interface ProbeResult {
   finalUrl: string;
   status: number;
@@ -26,6 +43,7 @@ export interface ProbeResult {
   hops: string[];
   note: string | null;
   bodyPreview: string;
+  signals?: Record<string, string>;
 }
 
 export type ProbeOutcome =

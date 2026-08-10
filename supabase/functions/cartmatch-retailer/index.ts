@@ -304,7 +304,11 @@ async function probe(url: URL, origin: string | null): Promise<Response> {
         continue;
       }
 
-      const body = res.ok ? await res.text() : "";
+      // The body is read on failure too. A 403's body and headers say WHICH
+      // protection refused — Akamai, Cloudflare, PerimeterX all identify
+      // themselves — and "403 from something unnamed" is a much weaker finding
+      // to act on than "403 from a named WAF".
+      const body = await res.text().catch(() => "");
       return json({ ok: true, result: summarise(res, body, current, hops, null) }, 200, origin);
     }
 
@@ -345,7 +349,27 @@ interface ProbeResult {
   hops: string[];
   note: string | null;
   bodyPreview: string;
+  /** Headers that name the protection doing the refusing. */
+  signals: Record<string, string>;
 }
+
+/**
+ * Response headers worth recording. Each is a fingerprint of a particular
+ * protection vendor, and knowing which one refused is the difference between
+ * "blocked" and a finding someone can act on.
+ */
+const SIGNAL_HEADERS = [
+  "server",
+  "cf-ray",
+  "cf-mitigated",
+  "x-akamai-transformed",
+  "akamai-grn",
+  "x-iinfo",
+  "x-cdn",
+  "x-served-by",
+  "set-cookie",
+  "retry-after",
+];
 
 function summarise(
   res: Response,
@@ -358,7 +382,19 @@ function summarise(
   const markers = CHALLENGE_MARKERS.filter((m) => lower.includes(m));
   const product = firstJsonLdProduct(body);
 
+  const signals: Record<string, string> = {};
+  for (const name of SIGNAL_HEADERS) {
+    const value = res.headers.get(name);
+    if (value) {
+      // Cookies can carry session material even in a rejection; the name of the
+      // cookie identifies the vendor and the value never needs to leave the
+      // function.
+      signals[name] = name === "set-cookie" ? value.split("=")[0]! : value.slice(0, 120);
+    }
+  }
+
   return {
+    signals,
     finalUrl: url.toString(),
     status: res.status,
     contentType: res.headers.get("content-type") ?? "",
