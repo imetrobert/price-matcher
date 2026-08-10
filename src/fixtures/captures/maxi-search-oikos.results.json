@@ -1,0 +1,115 @@
+{
+  "_capture": {
+    "source": "maxi.ca search results, __NEXT_DATA__",
+    "query": "oikos",
+    "storeId": "7495",
+    "captured": "2026-08-10",
+    "note": "Two results verbatim, except sponsoredCreative values which are redacted — they are ad-serving identifiers and nothing in this codebase reads them. Both items happen to be SPONSORED, which is itself the point: a search for 'oikos' returns Yoplait ads."
+  },
+  "results": [
+    {
+      "promotions": [],
+      "ratings": null,
+      "productId": "21757961_EA",
+      "brand": "Yoplait",
+      "title": "YOP Drinkable Yogurt 1.5% M.F. Peach",
+      "description": "<p>This delicious drinkable yogurt comes in a variety of flavours and is perfect to enjoy at home or on-the-go. Take the great taste of YOP wherever you go!</p><ul><li>Good source of Calcium and Vitamin D</li><li>No colour added</li><li>No artificial sweeteners</li><li>Made with natural flavours</li><li>1.5% milk fat</li><li>Made in Canada</li></ul>",
+      "packageSizing": "200 ml, $0.50/100ml",
+      "pricing": {
+        "price": "1.00",
+        "wasPrice": null,
+        "displayPrice": "$1.00",
+        "memberOnlyPrice": null,
+        "mopDisplayPrice": null,
+        "ehfTotal": null,
+        "environmentalHandlingFee": null,
+        "taxInfo": "Plus tax"
+      },
+      "pricingUnits": {
+        "type": "SOLD_BY_EACH",
+        "unit": "ea",
+        "interval": 1,
+        "minOrderQuantity": 1,
+        "maxOrderQuantity": 25,
+        "weighted": false
+      },
+      "deal": null,
+      "mopDeal": null,
+      "pcoDeal": null,
+      "inventoryIndicator": { "indicatorId": "LOW", "text": "Low Stock" },
+      "offerType": "OG",
+      "offerId": "OG",
+      "action": null,
+      "isVariant": false,
+      "link": "/en/yop-drinkable-yogurt-1-5-m-f-peach/p/21757961_EA",
+      "productVendor": null,
+      "productVariant": null,
+      "textBadge": "low-inventory",
+      "variantTheme": null,
+      "articleNumber": "21757961",
+      "uom": "EA",
+      "sponsoredCreative": { "adGroupId": "REDACTED", "campaignId": "REDACTED" },
+      "isSponsored": true,
+      "isComplementarySponsored": false,
+      "complementarySponsoredBadgeText": null,
+      "productBadge": {
+        "badgeId": "SPONSORED",
+        "badgeClass": null,
+        "text": "Sponsored",
+        "icon": null
+      }
+    },
+    {
+      "promotions": [],
+      "ratings": null,
+      "productId": "21757962_EA",
+      "brand": "Yoplait",
+      "title": "YOP Drinkable Yogurt 1.5% M.F. Tropical",
+      "description": "<p>This delicious drinkable yogurt comes in a variety of flavours and is perfect to enjoy at home or on-the-go.</p>",
+      "packageSizing": "200 ml, $0.50/100ml",
+      "pricing": {
+        "price": "1.00",
+        "wasPrice": null,
+        "displayPrice": "$1.00",
+        "memberOnlyPrice": null,
+        "mopDisplayPrice": null,
+        "ehfTotal": null,
+        "environmentalHandlingFee": null,
+        "taxInfo": "Plus tax"
+      },
+      "pricingUnits": {
+        "type": "SOLD_BY_EACH",
+        "unit": "ea",
+        "interval": 1,
+        "minOrderQuantity": 1,
+        "maxOrderQuantity": 25,
+        "weighted": false
+      },
+      "deal": null,
+      "mopDeal": null,
+      "pcoDeal": null,
+      "inventoryIndicator": null,
+      "offerType": "OG",
+      "offerId": "OG",
+      "action": null,
+      "isVariant": false,
+      "link": "/en/yop-drinkable-yogurt-1-5-m-f-tropical/p/21757962_EA",
+      "productVendor": null,
+      "productVariant": null,
+      "textBadge": "",
+      "variantTheme": null,
+      "articleNumber": "21757962",
+      "uom": "EA",
+      "sponsoredCreative": { "adGroupId": "REDACTED", "campaignId": "REDACTED" },
+      "isSponsored": true,
+      "isComplementarySponsored": false,
+      "complementarySponsoredBadgeText": null,
+      "productBadge": {
+        "badgeId": "SPONSORED",
+        "badgeClass": null,
+        "text": "Sponsored",
+        "icon": null
+      }
+    }
+  ]
+}

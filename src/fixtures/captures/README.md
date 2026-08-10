@@ -31,3 +31,9 @@ never to be served as a price. Nothing in `src/` reads this directory at runtime
 | File | Source | Captured |
 |---|---|---|
 | `maxi-product-21305945.jsonld.json` | `maxi.ca` product page JSON-LD, store 7495 (Côte-Saint-Luc) | 2026-08-10 |
+| `maxi-search-oikos.results.json` | `maxi.ca` search results for "oikos", from `__NEXT_DATA__`, store 7495 | 2026-08-10 |
+
+Both results in the search capture are `isSponsored: true` — a search for
+*Oikos* returned two Yoplait drinks. That is not a quirk of the capture; it is
+what the endpoint does, and it is why the parser carries the flag through
+rather than treating list position as relevance.
