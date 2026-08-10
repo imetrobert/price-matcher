@@ -24,6 +24,33 @@
  *   available.
  *
  * `sku` here is "598017", a Sobeys article number. Still not a barcode.
+ *
+ * ---------------------------------------------------------------------------
+ * SEARCH CANNOT BE PARSED FROM THE PAGE — PROBED 2026-08-10
+ * ---------------------------------------------------------------------------
+ * The iga.ca search results page was probed and contains none of the three
+ * places a result list could hide: one JSON-LD block with no Product node, no
+ * `__NEXT_DATA__`, and no product markup. The results arrive by a separate
+ * request after load, so there is nothing in the HTML to read.
+ *
+ * That is worse here than the same finding would be at Maxi, because IGA
+ * product URLs are slugs the site invents and cannot be constructed from
+ * attributes. Without search there is no way to *find* an IGA product — only
+ * to read one whose URL is already known.
+ *
+ * Two ways forward, neither of them guesswork:
+ *
+ *   Capture the search API from a browser's network inspector, which needs a
+ *   desktop. Then IGA works exactly like Maxi.
+ *
+ *   Or map products once and remember them. The matcher already has a Level 2
+ *   for precisely this — "retailer product id already mapped to this canonical
+ *   product" — so a URL confirmed once is authoritative afterwards, and for a
+ *   household buying the same few dozen items that converges quickly. It is
+ *   also more accurate than search, since a human confirmed the identity.
+ *
+ * Until one of those exists, this module can price an IGA product but cannot
+ * discover one. Do not paper over that by constructing slugs from names.
  */
 
 import { parseSize } from "@/services/products/normalize";
