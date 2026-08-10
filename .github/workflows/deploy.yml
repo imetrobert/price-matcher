@@ -1,0 +1,112 @@
+name: Deploy to GitHub Pages
+
+# Builds the static export and publishes it.
+#
+# NEXT_PUBLIC_* values are inlined at BUILD time, so they are set here from
+# repository variables/secrets rather than at runtime — a static site has no
+# runtime configuration.
+#
+# WHAT MAY GO IN THIS FILE'S ENVIRONMENT:
+#   Only values that are safe to publish. Everything with a NEXT_PUBLIC_ prefix
+#   ends up readable in the deployed bundle, and this repository is public, so
+#   treat them as public regardless of whether GitHub calls them "secrets".
+#
+#   The Supabase publishable key belongs here (it is designed to be public and
+#   is powerless without a session + RLS).
+#
+#   The Supabase SECRET key and the Gemini key must NEVER appear here. They
+#   live in Supabase Edge Function secrets:
+#     supabase secrets set CARTMATCH_GEMINI_API_KEY=...
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two publishes race; cancel-in-progress is off so a queued deploy
+# still runs rather than being dropped.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Cheap insurance: a broken matcher must not reach a shopper. These are
+      # the tests that stop a near-miss product being shown at a till.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+
+      - name: Build static export
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_CARTMATCH_DATA_MODE: ${{ vars.NEXT_PUBLIC_CARTMATCH_DATA_MODE || 'MOCK' }}
+          # Set only when serving from <user>.github.io/<repo>/ instead of a
+          # custom domain. With pricecheck.imetrobert.com, leave it unset.
+          NEXT_PUBLIC_BASE_PATH: ${{ vars.NEXT_PUBLIC_BASE_PATH }}
+        run: npm run build
+
+      - name: Fail if a secret leaked into the bundle
+        # Static output is world-readable and this repository is public, so
+        # this is the last chance to catch a misnamed variable before it is
+        # published to the internet.
+        #
+        # The patterns require actual KEY MATERIAL after each prefix, not just
+        # the literal. The Supabase client library legitimately contains the
+        # strings "sb_secret_" and "service_role" in its own key-format
+        # detection code; matching on those alone fails every build and trains
+        # you to ignore the check, which is worse than not having one.
+        run: |
+          set -euo pipefail
+          PATTERN='sb_secret_[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{35}|"role"[[:space:]]*:[[:space:]]*"service_role"'
+          if grep -rlE "$PATTERN" out/ 2>/dev/null | head -5 | grep -q .; then
+            echo "::error::A value matching a secret-key pattern was found in the build output. Refusing to publish."
+            grep -rlE "$PATTERN" out/ | head -5
+            exit 1
+          fi
+          echo "No secret key material found in out/."
+
+      # Custom domain. GitHub Pages needs this file in the published artifact,
+      # or it forgets the domain on every deploy.
+      - name: Write CNAME
+        if: vars.PAGES_CUSTOM_DOMAIN != ''
+        run: echo "${{ vars.PAGES_CUSTOM_DOMAIN }}" > out/CNAME
+
+      # Stops GitHub running the output through Jekyll, which would drop any
+      # file or directory beginning with an underscore — including _next.
+      - name: Disable Jekyll
+        run: touch out/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,19 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+
+# Local runtime data (audit trail, observations, validation feedback)
+.data/
+
+.DS_Store
+*.log
+coverage/
