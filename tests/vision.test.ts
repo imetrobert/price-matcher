@@ -5,8 +5,9 @@
  * downstream, so it is tested for what it REFUSES as much as what it accepts.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
+import { env } from "@/config/env";
 import { parseVisionResponse } from "@/services/vision/schema";
 
 describe("vision response parsing", () => {
@@ -120,5 +121,56 @@ describe("vision response parsing", () => {
       { isMock: true },
     );
     expect(out[0]!.isMock).toBe(true);
+  });
+});
+
+describe("vision mode is decided separately from price data mode", () => {
+  const DATA = "NEXT_PUBLIC_CARTMATCH_DATA_MODE";
+  const VISION = "NEXT_PUBLIC_CARTMATCH_VISION_MODE";
+  const URL = "NEXT_PUBLIC_SUPABASE_URL";
+  const KEY = "NEXT_PUBLIC_SUPABASE_ANON_KEY";
+  const saved = { ...process.env };
+
+  afterEach(() => {
+    for (const k of [DATA, VISION, URL, KEY]) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  function configureSupabase() {
+    process.env[URL] = "https://example.supabase.co";
+    process.env[KEY] = "sb_publishable_test";
+  }
+
+  it("uses real recognition with mock prices — the state this app is in today", () => {
+    // The regression this guards: one flag used to control both, so MOCK
+    // prices silently forced MOCK recognition and the deployed Gemini function
+    // was never called. A shopper photographed their cart and got fixtures.
+    configureSupabase();
+    process.env[DATA] = "MOCK";
+    delete process.env[VISION];
+    expect(env.dataMode).toBe("MOCK");
+    expect(env.visionMode).toBe("LIVE");
+  });
+
+  it("falls back to mock recognition when there is no function to call", () => {
+    delete process.env[URL];
+    delete process.env[KEY];
+    delete process.env[VISION];
+    expect(env.visionMode).toBe("MOCK");
+  });
+
+  it("lets an explicit setting force fixtures on a configured project", () => {
+    configureSupabase();
+    process.env[VISION] = "MOCK";
+    expect(env.visionMode).toBe("MOCK");
+  });
+
+  it("never turns prices live just because recognition is", () => {
+    configureSupabase();
+    process.env[DATA] = "MOCK";
+    process.env[VISION] = "LIVE";
+    expect(env.dataMode).toBe("MOCK");
   });
 });

@@ -21,15 +21,15 @@ refusing to state things it cannot back up, and the same standard applies here.
 
 | Area | Status |
 |---|---|
-| Product matching engine | **Real and tested.** 76 automated tests, including every discrimination case from the spec. |
+| Product matching engine | **Real and tested.** 81 automated tests, including every discrimination case from the spec. |
 | Money / savings arithmetic | **Real and tested.** Integer cents throughout. |
 | Freshness, eligibility, audit trail | **Real and tested.** |
 | Mobile UI, Checkout Mode, proof sheet | **Real.** Exercised against the built static export. |
 | Static export + Pages workflow | **Real.** All 8 pages build and serve; the secret-leak guard is tested in both directions. |
 | Sign-in gate in the browser | **Real, but it is not a security control** — see [Where the security actually is](#where-the-security-actually-is). |
-| Supabase persistence + RLS policies | **Written, never run.** No Supabase project was reachable from the build environment. |
-| Supabase sign-in (credential exchange) | **Written, never run with a real project.** |
-| Gemini cart recognition (Edge Function) | **Written, never deployed.** No `GEMINI_API_KEY` and no Supabase project were available. |
+| Supabase persistence + RLS policies | **Applied and verified** on the live project: 6 policies, all gated on `has_app_access('cartmatch')`, no views. |
+| Supabase sign-in (credential exchange) | **Written, not yet exercised end to end.** |
+| Gemini cart recognition (Edge Function) | **Deployed.** `cartmatch-vision` is live and its JWT gate confirmed answering. No cart photo has been through it yet. |
 | **Retailer price integrations** | **NOT IMPLEMENTED.** See below. |
 
 ### The blocker: retailer egress is refused
@@ -273,7 +273,8 @@ public** regardless of whether GitHub stores it under "Variables" or "Secrets".
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Your project URL. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | The **publishable** key. Same project as your other apps = same credentials. Public by design. |
-| `NEXT_PUBLIC_CARTMATCH_DATA_MODE` | `MOCK` (fixtures, labelled) or `LIVE` (real adapters only — today that means no prices at all). |
+| `NEXT_PUBLIC_CARTMATCH_DATA_MODE` | Retailer **prices** only. `MOCK` (fixtures, labelled) or `LIVE` (real adapters only — today that means no prices at all). |
+| `NEXT_PUBLIC_CARTMATCH_VISION_MODE` | Photo **recognition**, decided separately. Leave unset: real recognition when Supabase is configured, fixtures otherwise. `MOCK` forces fixtures. |
 | `NEXT_PUBLIC_BASE_PATH` | Only for `<user>.github.io/<repo>/`. Leave unset on a custom domain. |
 
 ### Edge Function secrets (never in the bundle)

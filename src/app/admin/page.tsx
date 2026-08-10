@@ -54,7 +54,8 @@ function AdminView() {
       .catch(() => setData(null));
     checkAppAccess().then((access) =>
       setHealth({
-        dataMode: env.dataMode,
+        priceDataMode: env.dataMode,
+        visionMode: env.visionMode,
         vision: visionProviderName(),
         storageBackend: activeBackend(),
         authConfigured: authConfigured(),

@@ -46,10 +46,17 @@ export async function analyzeCartPhotos(
     return { ok: false, code: "NO_IMAGES", error: "No images supplied." };
   }
 
-  // In MOCK mode use fixtures even when everything is configured, so a mock
-  // run is reproducible and costs nothing.
-  if (env.dataMode === "MOCK") {
-    return mockRecognizeCart(images, { reason: "NEXT_PUBLIC_CARTMATCH_DATA_MODE=MOCK" });
+  // Gated on visionMode, NOT dataMode. Recognition and retailer prices are
+  // separate decisions: recognition works today, retailer integration does not
+  // exist. Tying them together meant a deployed Gemini function was never
+  // called, and the shopper got fixture products for a photo of their actual
+  // cart.
+  if (env.visionMode === "MOCK") {
+    return mockRecognizeCart(images, {
+      reason: supabaseConfigured()
+        ? "NEXT_PUBLIC_CARTMATCH_VISION_MODE=MOCK"
+        : "Supabase is not configured, so there is no vision function to call",
+    });
   }
 
   if (!supabaseConfigured()) {

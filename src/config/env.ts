@@ -32,6 +32,8 @@ export const env = {
     return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
   },
   /**
+   * Retailer PRICE data only.
+   *
    * MOCK serves fixtures, labelled as such everywhere.
    * LIVE permits only real adapters — which today means "no prices", because
    * no retailer adapter is implemented.
@@ -41,6 +43,30 @@ export const env = {
       "LIVE"
       ? "LIVE"
       : "MOCK";
+  },
+
+  /**
+   * Photo recognition, decided SEPARATELY from prices.
+   *
+   * These were one flag, and that was wrong: it meant the only way to use real
+   * cart recognition was to also demand real retailer prices, which do not
+   * exist. So a working Gemini deployment sat unused behind MOCK, handing back
+   * fixture products that had nothing to do with the photo just taken — in a
+   * shop, that is worse than an error, because it looks like an answer.
+   *
+   * They are not the same decision. Recognition is real and works today;
+   * retailer integration does not exist. The default reflects that: if a
+   * Supabase project is configured there is an Edge Function to call, so call
+   * it. Set NEXT_PUBLIC_CARTMATCH_VISION_MODE=MOCK to force fixtures — useful
+   * for UI work, and for a reproducible run that costs no quota.
+   *
+   * Mock PRICES stay mock either way. Recognising a real product never makes a
+   * fixture price real, and nothing mock-priced can reach Checkout Mode.
+   */
+  get visionMode(): DataMode {
+    const explicit = process.env.NEXT_PUBLIC_CARTMATCH_VISION_MODE;
+    if (explicit) return explicit.toUpperCase() === "LIVE" ? "LIVE" : "MOCK";
+    return supabaseConfigured() ? "LIVE" : "MOCK";
   },
 } as const;
 
@@ -73,8 +99,10 @@ export function visionAvailable(): boolean {
 }
 
 export function visionProviderName(): string {
-  if (env.dataMode === "MOCK") return "MOCK (fixtures)";
+  if (env.visionMode === "MOCK") {
+    return supabaseConfigured() ? "MOCK (forced by env)" : "MOCK (fixtures)";
+  }
   return supabaseConfigured()
-    ? "Gemini via Supabase Edge Function"
+    ? "Gemini via cartmatch-vision Edge Function"
     : "unavailable (Supabase not configured)";
 }

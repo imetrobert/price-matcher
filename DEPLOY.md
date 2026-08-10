@@ -120,8 +120,10 @@ stronger. The toggle also breaks
 the app outright, because browsers send an unauthenticated `OPTIONS` preflight
 before any cross-origin POST and the toggle rejects it.
 
-**Verify the paste landed whole.** The file is 474 lines and ends with a lone
-`}`. A truncated paste on a phone fails silently, later, looking like a bug.
+**Verify the paste landed whole.** A truncated paste on a phone is silent. The
+cheap check is the deploy itself: a cut-off TypeScript file will not compile, so
+a successful deploy means the file arrived complete. Counting lines in a chat
+window does not work — wrapping makes the number wrong.
 
 ### Confirming it works, from a phone
 
@@ -164,7 +166,7 @@ Under **Variables** (these are published in the bundle — that is expected):
 | Name | Value |
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | `https://<project>.supabase.co` |
-| `NEXT_PUBLIC_CARTMATCH_DATA_MODE` | `MOCK` |
+| `NEXT_PUBLIC_CARTMATCH_DATA_MODE` | `MOCK` — retailer **prices** only |
 | `PAGES_CUSTOM_DOMAIN` | `pricecheck.imetrobert.com` |
 
 Under **Secrets**:
@@ -184,6 +186,11 @@ Under **Secrets**:
 >
 > Leave `NEXT_PUBLIC_CARTMATCH_DATA_MODE` on `MOCK`. `LIVE` reports every
 > retailer as unavailable, because no retailer adapter exists (see README).
+>
+> This controls **prices only**. Photo recognition is separate and real: with
+> Supabase configured, cart photos go to the `cartmatch-vision` Edge Function
+> and Gemini. Do not set `NEXT_PUBLIC_CARTMATCH_VISION_MODE` unless you
+> deliberately want fixtures.
 
 The workflow refuses to publish if anything matching a secret-key pattern
 appears in the build output — a last check before it goes to the internet.
