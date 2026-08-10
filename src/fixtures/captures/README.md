@@ -32,6 +32,12 @@ never to be served as a price. Nothing in `src/` reads this directory at runtime
 |---|---|---|
 | `maxi-product-21305945.jsonld.json` | `maxi.ca` product page JSON-LD, store 7495 (Côte-Saint-Luc) | 2026-08-10 |
 | `maxi-search-oikos.results.json` | `maxi.ca` search results for "oikos", from `__NEXT_DATA__`, store 7495 | 2026-08-10 |
+| `iga-product-598017.jsonld.json` | `iga.ca` product page JSON-LD, Côte-Saint-Luc | 2026-08-10 |
+
+The Maxi and IGA product captures are the **same tub of yogurt on the same
+day** — $7.49 and $8.49. They are the only pair in this repository that
+supports a genuine comparison, and `tests/igaProduct.test.ts` computes the
+saving from them rather than from an invented number.
 
 Both results in the search capture are `isSponsored: true` — a search for
 *Oikos* returned two Yoplait drinks. That is not a quirk of the capture; it is

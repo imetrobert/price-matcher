@@ -20,10 +20,10 @@
 import { extractPackageSize } from "@/services/retailers/loblaw/packageSize";
 import {
   findProductNode,
-  parseLoblawProductJsonLd,
-  type LoblawProduct,
+  parseSchemaOrgProduct,
   type ParseOutcome,
-} from "@/services/retailers/loblaw/productJsonLd";
+  type SchemaOrgProduct,
+} from "@/services/retailers/schemaOrg/product";
 
 /**
  * Pulls every `application/ld+json` block out of a page.
@@ -62,13 +62,13 @@ export function parseLoblawProductPage(html: string): ParseOutcome {
     };
   }
 
-  const outcome = parseLoblawProductJsonLd(node);
+  const outcome = parseSchemaOrgProduct(node);
   if (!outcome.ok) return outcome;
 
   // Size is additive. Failing to find it must never invalidate a price that
   // parsed correctly — it only means this observation cannot reach Level 3.
   const size = extractPackageSize(html);
 
-  const product: LoblawProduct = { ...outcome.product, size };
+  const product: SchemaOrgProduct = { ...outcome.product, size };
   return { ok: true, product };
 }

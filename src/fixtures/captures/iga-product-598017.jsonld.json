@@ -1,0 +1,57 @@
+{
+  "@context": "https://schema.org/",
+  "@type": "Product",
+  "name": "Oikos Fat-Free 0% Greek Yogurt High Protein Plain 650 g",
+  "image": [
+    "https://media.sobeys.com/original/598017_EA_en_primary_front_NA_071426_VOILA_ae147887892b35a34123140cf0718cc25010fcb3.JPG"
+  ],
+  "description": "Gone are the scary days when choosing the right snack meant suffering from blank page syndrome! Put your creativity to work and beat your cravings with Oikos High Protein Plain Greek yogurt. Enjoy the same great taste you know and love, now with even more protein and a thick texture! Made with 100% Canadian milk, the new Oikos High Protein Plain Greek yogurt boasts 13 grams of protein per 115 gram serving. Try it today!",
+  "sku": "598017",
+  "brand": { "@type": "Brand", "name": "Oikos" },
+  "offers": {
+    "@type": "Offer",
+    "url": "https://www.iga.ca/products/oikos-fat-free-0--greek-yogurt-high-protein-plain-650-g",
+    "priceCurrency": "CAD",
+    "availability": "https://schema.org/InStoreOnly",
+    "itemCondition": "https://schema.org/NewCondition",
+    "seller": { "@type": "Organization", "name": "iga" },
+    "price": "8.49"
+  },
+  "nutrition": {
+    "@type": "NutritionInformation",
+    "servingSize": "3/4 cup (175 g)",
+    "calories": 100,
+    "transFatContent": 0,
+    "cholesterolContent": 15,
+    "sodiumContent": "75 g",
+    "carbohydrateContent": "6 g",
+    "sugarContent": "5 g",
+    "proteinContent": "19 g",
+    "calciumContent": "250 g",
+    "potassiumContent": "350 g"
+  },
+  "breadcrumb": {
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      { "@type": "ListItem", "name": "IGA", "item": "https://www.iga.ca", "position": 1 },
+      {
+        "@type": "ListItem",
+        "name": "Dairy & Eggs",
+        "item": "https://www.iga.ca/products/category/Dairy%20&%20Eggs",
+        "position": 2
+      },
+      {
+        "@type": "ListItem",
+        "name": "Yogurt",
+        "item": "https://www.iga.ca/products/category/Dairy%20&%20Eggs/Yogurt",
+        "position": 3
+      },
+      {
+        "@type": "ListItem",
+        "name": "Oikos Fat-Free 0% Greek Yogurt High Protein Plain 650 g",
+        "item": "https://www.iga.ca/products/oikos-fat-free-0--greek-yogurt-high-protein-plain-650-g",
+        "position": 4
+      }
+    ]
+  }
+}

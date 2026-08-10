@@ -13,11 +13,11 @@ import { describe, expect, it } from "vitest";
 import capture from "@/fixtures/captures/maxi-product-21305945.jsonld.json";
 import {
   findProductNode,
-  parseLoblawProductJsonLd,
-} from "@/services/retailers/loblaw/productJsonLd";
+  parseSchemaOrgProduct,
+} from "@/services/retailers/schemaOrg/product";
 
 function parsed() {
-  const outcome = parseLoblawProductJsonLd(capture);
+  const outcome = parseSchemaOrgProduct(capture);
   if (!outcome.ok) throw new Error(`fixture failed to parse: ${outcome.reason}`);
   return outcome.product;
 }
@@ -81,7 +81,7 @@ describe("picking the Product block out of a page", () => {
   });
 
   it("refuses a non-Product node rather than half-reading it", () => {
-    const outcome = parseLoblawProductJsonLd({ "@type": "WebSite", name: "maxi" });
+    const outcome = parseSchemaOrgProduct({ "@type": "WebSite", name: "maxi" });
     expect(outcome.ok).toBe(false);
   });
 });
@@ -96,7 +96,7 @@ describe("refusing to guess", () => {
   it("rejects a price in a currency that is not CAD", () => {
     // A USD number treated as dollars understates every comparison, and the
     // error looks like a bargain rather than a bug.
-    const outcome = parseLoblawProductJsonLd(
+    const outcome = parseSchemaOrgProduct(
       withOffer({ priceCurrency: "USD", price: 7.49, url: "https://x.test/p" }),
     );
     expect(outcome).toMatchObject({ ok: false });
@@ -105,7 +105,7 @@ describe("refusing to guess", () => {
 
   it("rejects a price it cannot read unambiguously", () => {
     for (const price of ["2 for $5", "$7.49", "7,49", "", null, undefined]) {
-      const outcome = parseLoblawProductJsonLd(
+      const outcome = parseSchemaOrgProduct(
         withOffer({ priceCurrency: "CAD", price, url: "https://x.test/p" }),
       );
       expect(outcome.ok, `price ${JSON.stringify(price)} must be refused`).toBe(
@@ -115,7 +115,7 @@ describe("refusing to guess", () => {
   });
 
   it("accepts a price given as a decimal string", () => {
-    const outcome = parseLoblawProductJsonLd(
+    const outcome = parseSchemaOrgProduct(
       withOffer({ priceCurrency: "CAD", price: "7.49", url: "https://x.test/p" }),
     );
     expect(outcome).toMatchObject({ ok: true });
@@ -123,7 +123,7 @@ describe("refusing to guess", () => {
   });
 
   it("reports UNKNOWN availability rather than assuming in stock", () => {
-    const outcome = parseLoblawProductJsonLd(
+    const outcome = parseSchemaOrgProduct(
       withOffer({
         priceCurrency: "CAD",
         price: 7.49,
@@ -137,7 +137,7 @@ describe("refusing to guess", () => {
 
   it("refuses a product with no offers block at all", () => {
     const { offers: _omitted, ...noOffers } = base;
-    const outcome = parseLoblawProductJsonLd(noOffers);
+    const outcome = parseSchemaOrgProduct(noOffers);
     expect(outcome).toMatchObject({ ok: false });
   });
 });
