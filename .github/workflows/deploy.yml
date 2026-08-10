@@ -56,6 +56,27 @@ jobs:
       - name: Test
         run: npm run test
 
+      # A missing NEXT_PUBLIC_* value does not fail the build — Next.js inlines
+      # an empty string and the site publishes looking fine, then fails at
+      # runtime with "Sign-in is not configured" and silently drops photo
+      # recognition back to fixtures.
+      #
+      # The specific trap: these come from `vars.`, which reads ONLY the
+      # Variables tab. Storing them as repository Secrets is invisible here and
+      # produces exactly that silent failure — which is what happened on the
+      # first real deploy of this repo.
+      - name: Refuse to publish an unconfigured bundle
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "${{ vars.NEXT_PUBLIC_SUPABASE_URL }}" ] || missing="$missing NEXT_PUBLIC_SUPABASE_URL(variable)"
+          [ -n "${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}" ] || missing="$missing NEXT_PUBLIC_SUPABASE_ANON_KEY(secret)"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing:$missing — set under Settings > Secrets and variables > Actions. Note which TAB each belongs to; a value in the wrong tab is not read."
+            exit 1
+          fi
+          echo "Supabase URL and publishable key are both present."
+
       - name: Build static export
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
@@ -88,9 +109,20 @@ jobs:
 
       # Custom domain. GitHub Pages needs this file in the published artifact,
       # or it forgets the domain on every deploy.
+      #
+      # Skipping is legitimate — a project-URL deployment has no custom domain —
+      # so this cannot be an error. It says so out loud instead, because a
+      # silently skipped step looks identical to a step that ran.
       - name: Write CNAME
-        if: vars.PAGES_CUSTOM_DOMAIN != ''
-        run: echo "${{ vars.PAGES_CUSTOM_DOMAIN }}" > out/CNAME
+        run: |
+          set -euo pipefail
+          DOMAIN="${{ vars.PAGES_CUSTOM_DOMAIN }}"
+          if [ -z "$DOMAIN" ]; then
+            echo "::warning::PAGES_CUSTOM_DOMAIN variable is not set, so no CNAME was written. Pages will forget any custom domain on this deploy. Ignore if you are serving from the <user>.github.io/<repo>/ URL — but then NEXT_PUBLIC_BASE_PATH must be set, or every asset 404s."
+          else
+            echo "$DOMAIN" > out/CNAME
+            echo "CNAME written: $DOMAIN"
+          fi
 
       # Stops GitHub running the output through Jekyll, which would drop any
       # file or directory beginning with an underscore — including _next.

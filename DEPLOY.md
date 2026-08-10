@@ -161,6 +161,14 @@ happen.
 
 **Settings → Secrets and variables → Actions.**
 
+⚠️ **The tab matters.** The workflow reads three of these from `vars.`, which
+sees *only* the Variables tab. A value stored as a repository Secret is
+invisible to it — the build still succeeds and publishes a site with no
+Supabase configured, which surfaces as "Sign-in is not configured" and photo
+recognition silently dropping back to fixtures. This happened on the first real
+deploy of this repo. There is now a step that fails the build instead, but put
+them in the right tab and it never fires.
+
 Under **Variables** (these are published in the bundle — that is expected):
 
 | Name | Value |
