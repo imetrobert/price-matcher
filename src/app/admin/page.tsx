@@ -17,8 +17,10 @@ import { visionProviderName, env } from "@/config/env";
 import { authConfigured } from "@/lib/auth/config";
 import { APP_NAME, checkAppAccess } from "@/lib/auth/access";
 import {
+  lookupBarcode,
   probeRetailerUrl,
   summariseProbe,
+  type BarcodeLookup,
   type ProbeResult,
 } from "@/services/retailers/probe";
 import type {
@@ -98,6 +100,8 @@ function AdminView() {
       ) : null}
 
       <RetailerProbe />
+
+      <BarcodeLookupPanel />
 
       {lastRun ? (
         <section className="mb-6">
@@ -408,6 +412,92 @@ function RetailerProbe() {
             {JSON.stringify(result.data, null, 2)}
           </pre>
         </div>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * Barcode -> canonical identity, from Open Food Facts.
+ *
+ * This is the only route found to a GTIN. Neither Maxi nor IGA publishes one,
+ * so every match between them currently rests on brand, name and size — good,
+ * but inferred. A barcode is the product's identity rather than a description
+ * of it, and it is what makes a Level 1 match possible.
+ *
+ * On the debug page rather than in the shopping flow because it is not wired
+ * into matching yet: this proves the source works before anything depends on it.
+ */
+function BarcodeLookupPanel() {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<BarcodeLookup | null>(null);
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    const outcome = await lookupBarcode(code);
+    setBusy(false);
+    if (!outcome.ok) {
+      setError(outcome.error);
+      return;
+    }
+    setResult(outcome.result);
+  }
+
+  return (
+    <section className="card mb-4 text-sm">
+      <p className="mb-1 font-bold">Barcode lookup (Open Food Facts)</p>
+      <p className="mb-3 text-xs text-muted">
+        Neither Maxi nor IGA publishes a barcode, so matches between them rest on
+        brand, name and size. A GTIN is the product&rsquo;s identity rather than a
+        description of it — this checks whether an open database can supply one.
+      </p>
+
+      <div className="flex gap-2">
+        <input
+          className="field flex-1"
+          inputMode="numeric"
+          placeholder="8, 12, 13 or 14 digits"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+        />
+        <button
+          type="button"
+          onClick={run}
+          disabled={busy || code.trim() === ""}
+          className="min-h-[44px] shrink-0 rounded-xl border border-line bg-surface px-3 text-sm font-semibold disabled:opacity-60"
+        >
+          {busy ? "…" : "Look up"}
+        </button>
+      </div>
+
+      {error ? (
+        <p className="mt-3 rounded-xl bg-bad/5 px-3 py-2 text-sm text-bad">{error}</p>
+      ) : null}
+
+      {result ? (
+        result.found ? (
+          <div className="mt-3 rounded-xl bg-good/5 px-3 py-2">
+            <p className="text-sm font-semibold text-good">
+              Found — a real GTIN, which unlocks Level 1 matching.
+            </p>
+            <p className="mt-1 text-sm">
+              {[result.brand, result.name, result.quantity]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+            <p className="mt-1 text-xs text-muted">{result.attribution}</p>
+          </div>
+        ) : (
+          <p className="mt-3 rounded-xl bg-warn/5 px-3 py-2 text-sm text-warn">
+            Not in Open Food Facts. That is an ordinary outcome for a
+            crowd-sourced database, not a failure — the product simply has not
+            been added yet.
+          </p>
+        )
       ) : null}
     </section>
   );

@@ -108,3 +108,67 @@ export function summariseProbe(r: ProbeResult): string {
   }
   return `HTTP ${r.status}, ${r.bytes} bytes, but no schema.org Product block. The page loaded and is not what we parse.`;
 }
+
+// ---------------------------------------------------------------------------
+// Open Food Facts barcode lookup
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical product identity from a barcode.
+ *
+ * The reason this matters: neither Maxi nor IGA publishes a GTIN, so matching
+ * between them currently rests on brand, name and size — Level 3 at best. A
+ * real barcode makes Level 1 reachable, which is the only match this app treats
+ * as certain rather than inferred.
+ *
+ * Open Food Facts is ODbL and crowd-sourced. `notFound` is an ordinary answer,
+ * not an error, and `quantity` is free text exactly as someone typed it — the
+ * app's own size parser decides whether it is usable.
+ */
+export interface BarcodeLookup {
+  found: boolean;
+  gtin: string;
+  name?: string | null;
+  brand?: string | null;
+  quantity?: string | null;
+  attribution?: string;
+}
+
+export type BarcodeOutcome =
+  | { ok: true; result: BarcodeLookup }
+  | { ok: false; error: string };
+
+export async function lookupBarcode(gtin: string): Promise<BarcodeOutcome> {
+  if (!supabaseConfigured()) {
+    return { ok: false, error: "Supabase is not configured." };
+  }
+  const token = await getAccessToken();
+  if (!token) return { ok: false, error: "Sign in first." };
+
+  try {
+    const res = await fetch(edgeFunctionUrl("cartmatch-retailer"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        apikey: env.supabaseAnonKey,
+      },
+      body: JSON.stringify({ action: "barcode", gtin }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) {
+      return { ok: false, error: data?.error ?? `Lookup failed (HTTP ${res.status}).` };
+    }
+    return { ok: true, result: data as BarcodeLookup };
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : String(err);
+    const networkish =
+      err instanceof TypeError || /load failed|failed to fetch/i.test(raw);
+    return {
+      ok: false,
+      error: networkish
+        ? "Could not reach the lookup service. cartmatch-retailer may need redeploying — the barcode action is newer than the probe."
+        : raw,
+    };
+  }
+}

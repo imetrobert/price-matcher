@@ -170,6 +170,11 @@ const ALLOWED_HOSTS = new Set([
   "www.metro.ca",
   "www.walmart.ca",
   "www.provigo.ca",
+  // Open Food Facts. Not a retailer — an openly licensed product database that
+  // WANTS to be queried, unlike the six above. It is the only source found that
+  // publishes barcodes, which is the one identifier neither retailer provides.
+  "world.openfoodfacts.org",
+  "prices.openfoodfacts.org",
 ]);
 
 const MAX_REDIRECTS = 3;
@@ -220,8 +225,17 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "Body must be JSON." }, 400, origin);
   }
 
+  if (payload.action === "barcode") {
+    const code = typeof payload.gtin === "string" ? payload.gtin.trim() : "";
+    return await lookupBarcode(code, origin);
+  }
+
   if (payload.action !== "probe") {
-    return json({ ok: false, error: 'action must be "probe".' }, 400, origin);
+    return json(
+      { ok: false, error: 'action must be "probe" or "barcode".' },
+      400,
+      origin,
+    );
   }
 
   const target = typeof payload.url === "string" ? payload.url : "";
@@ -426,4 +440,121 @@ function firstJsonLdProduct(html: string): unknown | null {
     }
   }
   return null;
+}
+
+// ===========================================================================
+// SECTION 4 — OPEN FOOD FACTS BARCODE LOOKUP
+// ===========================================================================
+/**
+ * Barcode -> canonical product identity, from an openly licensed database.
+ *
+ * This exists because neither Maxi nor IGA publishes a GTIN. Their `sku` fields
+ * are internal article numbers, so matching between them rests on brand, name
+ * and size — Level 3 at best. A real barcode makes Level 1 reachable, which is
+ * the only match this app treats as certain rather than inferred.
+ *
+ * Open Food Facts is ODbL. Attribution is required wherever its data is shown,
+ * and it travels in the response so the UI cannot forget it.
+ *
+ * Two honest limits, both surfaced rather than smoothed over:
+ *
+ *   COVERAGE IS CROWD-SOURCED. A product missing from the database is an
+ *   ordinary outcome, not an error, and is reported as "not found" rather than
+ *   as a failure.
+ *
+ *   FIELDS ARE USER-SUBMITTED. `quantity` is free text — "650 g", "650g",
+ *   "650 gr" — so it is returned as written and left for the app's own size
+ *   parser to interpret or reject. Nothing here reformats it into something
+ *   that looks more authoritative than it is.
+ */
+async function lookupBarcode(code: string, origin: string | null): Promise<Response> {
+  const digits = code.replace(/[^0-9]/g, "");
+  // A barcode is 8, 12, 13 or 14 digits. Anything else is a typo or a
+  // misread scan, and asking a public API about it wastes their capacity.
+  if (![8, 12, 13, 14].includes(digits.length)) {
+    return json(
+      { ok: false, error: `"${code}" is not a barcode — expected 8, 12, 13 or 14 digits.` },
+      400,
+      origin,
+    );
+  }
+
+  const url =
+    `https://world.openfoodfacts.org/api/v2/product/${digits}.json` +
+    `?fields=code,product_name,product_name_fr,brands,quantity,countries_tags`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+      signal: controller.signal,
+    });
+
+    if (res.status === 404) {
+      return json({ ok: true, found: false, gtin: digits }, 200, origin);
+    }
+    if (!res.ok) {
+      return json(
+        { ok: false, error: `Open Food Facts returned HTTP ${res.status}.` },
+        502,
+        origin,
+      );
+    }
+
+    const body = await res.json();
+    // status 0 is Open Food Facts for "no such product", returned with HTTP 200.
+    // Treating that as success is how a lookup silently returns an empty
+    // product that then matches nothing and explains nothing.
+    if (body?.status === 0 || !body?.product) {
+      return json({ ok: true, found: false, gtin: digits }, 200, origin);
+    }
+
+    const p = body.product;
+    return json(
+      {
+        ok: true,
+        found: true,
+        gtin: typeof p.code === "string" ? p.code : digits,
+        name: pick(p.product_name, p.product_name_fr),
+        brand: firstBrand(p.brands),
+        quantity: pick(p.quantity),
+        attribution: "Data from Open Food Facts, ODbL",
+      },
+      200,
+      origin,
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return json(
+      {
+        ok: false,
+        error: message.toLowerCase().includes("abort")
+          ? "Open Food Facts did not respond in time."
+          : `Barcode lookup failed: ${message}`,
+      },
+      502,
+      origin,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function pick(...values: unknown[]): string | null {
+  for (const v of values) {
+    if (typeof v === "string" && v.trim() !== "") return v.trim();
+  }
+  return null;
+}
+
+/**
+ * `brands` is a comma-separated free-text list, most-specific first. Only the
+ * first is taken: the rest are parent companies and sub-brands, and joining
+ * them produces a "brand" that matches nothing.
+ */
+function firstBrand(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const first = value.split(",")[0]?.trim();
+  return first || null;
 }
