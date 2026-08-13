@@ -19,6 +19,7 @@ import { APP_NAME, checkAppAccess } from "@/lib/auth/access";
 import {
   lookupBarcode,
   probeRetailerUrl,
+  probeSucceeded,
   summariseProbe,
   type BarcodeLookup,
   type ProbeResult,
@@ -359,8 +360,24 @@ function RetailerProbe() {
     },
   ];
 
+  /**
+   * The four Montreal flyer viewers.
+   *
+   * A different question from the product probes above. These pages have no
+   * schema.org Product block and never will — what decides whether a weekly
+   * import is possible is whether the HTML carries the page images, so the
+   * verdict for these is read off `flyerImages`, not off product data.
+   */
+  const FLYERS = [
+    { label: "Maxi flyer", url: "https://www.maxi.ca/en/print-flyer" },
+    { label: "IGA flyer", url: "https://www.iga.ca/flyer" },
+    { label: "Walmart flyer", url: "https://www.walmart.ca/en/flyer" },
+    { label: "Super C flyer", url: "https://www.superc.ca/en/flyer" },
+  ];
+
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [custom, setCustom] = useState("");
   const [result, setResult] = useState<{ label: string; data: ProbeResult } | null>(
     null,
   );
@@ -382,9 +399,9 @@ function RetailerProbe() {
     <section className="card mb-4 text-sm">
       <p className="mb-1 font-bold">Retailer fetch probe</p>
       <p className="mb-3 text-xs text-muted">
-        Asks the Edge Function to fetch a real product page and reports what came
-        back. Answers the one question no parser can: whether a retailer serves
-        a datacenter the same page it serves your phone.
+        Asks the Edge Function to fetch a real page and reports what came back.
+        Answers the one question no parser can: whether a retailer serves a
+        datacenter the same page it serves your phone.
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -401,6 +418,49 @@ function RetailerProbe() {
         ))}
       </div>
 
+      <p className="mb-2 mt-4 text-xs font-semibold text-muted">
+        Weekly flyers — does the viewer page carry its page images?
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {FLYERS.map((f) => (
+          <button
+            key={f.url}
+            type="button"
+            disabled={busy !== null}
+            onClick={() => run(f.label, f.url)}
+            className="min-h-[44px] rounded-xl border border-line bg-surface px-3 text-sm font-semibold disabled:opacity-60"
+          >
+            {busy === f.label ? "Probing…" : f.label}
+          </button>
+        ))}
+      </div>
+
+      {/*
+        Any URL, so a new target does not need a code change and a deploy to
+        measure. The Edge Function still enforces the host allowlist — this
+        field widens what can be ASKED, never what can be reached.
+      */}
+      <div className="mt-4 flex gap-2">
+        <input
+          className="field flex-1"
+          inputMode="url"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          placeholder="Any URL on an allowed host"
+          value={custom}
+          onChange={(e) => setCustom(e.target.value)}
+        />
+        <button
+          type="button"
+          disabled={busy !== null || custom.trim() === ""}
+          onClick={() => run("Custom URL", custom.trim())}
+          className="min-h-[44px] rounded-xl border border-line bg-surface px-3 text-sm font-semibold disabled:opacity-60"
+        >
+          {busy === "Custom URL" ? "Probing…" : "Probe"}
+        </button>
+      </div>
+
       {error ? (
         <p className="mt-3 rounded-xl bg-bad/5 px-3 py-2 text-sm text-bad">{error}</p>
       ) : null}
@@ -409,7 +469,7 @@ function RetailerProbe() {
         <div className="mt-3">
           <p
             className={`rounded-xl px-3 py-2 text-sm font-semibold ${
-              result.data.hasJsonLdProduct
+              probeSucceeded(result.data)
                 ? "bg-good/5 text-good"
                 : "bg-warn/5 text-warn"
             }`}

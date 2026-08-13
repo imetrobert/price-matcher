@@ -44,6 +44,31 @@ export interface ProbeResult {
   note: string | null;
   bodyPreview: string;
   signals?: Record<string, string>;
+  /**
+   * Candidate flyer page-image URLs found in the body.
+   *
+   * Optional because an older deployment of the Edge Function does not send it.
+   * Absent and empty mean different things — "this deployment cannot answer"
+   * versus "answered, found none" — and `summariseProbe` keeps them apart.
+   */
+  flyerImages?: string[];
+}
+
+/** Does this look like a flyer viewer rather than a product page? */
+function isFlyerTarget(r: ProbeResult): boolean {
+  return /\/(print-)?flyer|circulaire/i.test(r.finalUrl);
+}
+
+/**
+ * Did the probe get what it went for?
+ *
+ * Two targets, two definitions of success, and conflating them would paint
+ * every working flyer fetch red: a product page succeeds when product data
+ * survives, a flyer viewer when its page images are in the HTML.
+ */
+export function probeSucceeded(r: ProbeResult): boolean {
+  if (isFlyerTarget(r)) return (r.flyerImages?.length ?? 0) > 0;
+  return r.hasJsonLdProduct;
 }
 
 export type ProbeOutcome =
@@ -94,6 +119,21 @@ export async function probeRetailerUrl(url: string): Promise<ProbeOutcome> {
  * confidently returning nothing.
  */
 export function summariseProbe(r: ProbeResult): string {
+  // A flyer viewer is judged on different evidence. It has no Product block and
+  // never will, so the product-page verdict would call every success a failure.
+  if (isFlyerTarget(r) && r.status < 400) {
+    if (r.flyerImages === undefined) {
+      return `HTTP ${r.status}, ${r.bytes} bytes. This deployment of the Edge Function predates flyer-image detection — redeploy it to get an answer.`;
+    }
+    if (r.flyerImages.length > 0) {
+      return `Flyer page came through with ${r.flyerImages.length} page image${r.flyerImages.length === 1 ? "" : "s"} in the HTML. A weekly import has a supply line.`;
+    }
+    if (r.looksLikeChallenge) {
+      return `Blocked. The retailer served a challenge rather than the flyer.`;
+    }
+    return `HTTP ${r.status}, ${r.bytes} bytes, no page images in the HTML. The viewer fetches its page list separately — that call is the next thing to find.`;
+  }
+
   if (r.hasJsonLdProduct) {
     return `Fetch works. Product data survived, price ${r.priceFromJsonLd}.`;
   }
