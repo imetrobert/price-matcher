@@ -45,6 +45,14 @@ export interface ProbeResult {
   bodyPreview: string;
   signals?: Record<string, string>;
   /**
+   * Which build of the Edge Function answered.
+   *
+   * Optional because a deployment older than the marker cannot report one —
+   * which is itself the answer. A paste that does not take is otherwise
+   * invisible: the old code keeps answering, honestly and staler.
+   */
+  functionBuild?: string;
+  /**
    * Candidate flyer page-image URLs found in the body.
    *
    * Optional because an older deployment of the Edge Function does not send it.
@@ -123,7 +131,7 @@ export function summariseProbe(r: ProbeResult): string {
   // never will, so the product-page verdict would call every success a failure.
   if (isFlyerTarget(r) && r.status < 400) {
     if (r.flyerImages === undefined) {
-      return `HTTP ${r.status}, ${r.bytes} bytes. This deployment of the Edge Function predates flyer-image detection — redeploy it to get an answer.`;
+      return `HTTP ${r.status}, ${r.bytes} bytes — but the Edge Function answering is build "${r.functionBuild ?? "older than build markers"}", which cannot look for page images. The retailer is fine; the deploy did not take.`;
     }
     if (r.flyerImages.length > 0) {
       return `Flyer page came through with ${r.flyerImages.length} page image${r.flyerImages.length === 1 ? "" : "s"} in the HTML. A weekly import has a supply line.`;

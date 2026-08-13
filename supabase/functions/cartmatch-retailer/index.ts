@@ -184,6 +184,20 @@ const ALLOWED_HOSTS = new Set([
   "www.flipp.com",
 ]);
 
+/**
+ * Which build of this file answered.
+ *
+ * This function is deployed by pasting it into the dashboard editor, and a
+ * paste that does not take is invisible: the old code keeps answering, quite
+ * happily, and every result it returns is honest about the retailer and silent
+ * about being stale. Two rounds of debugging were spent on a deploy that had
+ * not landed, reading a missing field as a finding about Walmart.
+ *
+ * So every response now says which build produced it. Bump this string
+ * whenever the file changes in a way a caller could notice.
+ */
+const FUNCTION_BUILD = "2026-08-13-flyer-images";
+
 const MAX_REDIRECTS = 3;
 const TIMEOUT_MS = 20_000;
 /** Enough to diagnose a challenge page; far short of storing the page. */
@@ -357,6 +371,8 @@ async function probe(url: URL, origin: string | null): Promise<Response> {
 }
 
 interface ProbeResult {
+  /** Which build of this function answered. See FUNCTION_BUILD. */
+  functionBuild: string;
   finalUrl: string;
   status: number;
   contentType: string;
@@ -428,6 +444,7 @@ function summarise(
   }
 
   return {
+    functionBuild: FUNCTION_BUILD,
     signals,
     finalUrl: url.toString(),
     status: res.status,
