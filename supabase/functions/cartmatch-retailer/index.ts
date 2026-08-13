@@ -175,6 +175,13 @@ const ALLOWED_HOSTS = new Set([
   // publishes barcodes, which is the one identifier neither retailer provides.
   "world.openfoodfacts.org",
   "prices.openfoodfacts.org",
+  // Flipp, for measurement only. Whether a server can read a flyer item page is
+  // an open question, and the answer decides whether anything downstream is
+  // even possible. Being on this list permits ONE honest request with a
+  // truthful User-Agent — it is not a licence to collect, and Flipp's own terms
+  // are unread. The probe reports what came back; it never routes around it.
+  "flipp.com",
+  "www.flipp.com",
 ]);
 
 const MAX_REDIRECTS = 3;

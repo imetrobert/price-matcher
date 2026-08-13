@@ -349,6 +349,14 @@ function RetailerProbe() {
       label: "IGA — Oikos 650 g",
       url: "https://www.iga.ca/products/oikos-fat-free-0--greek-yogurt-high-protein-plain-650-g",
     },
+    {
+      // Measurement only. A flyer item page is a different kind of target from
+      // a product page: Flipp is a React app, so the interesting outcome is not
+      // "403" but "200 with nothing in it" — which would mean server fetching
+      // cannot work here at all, whatever the terms say.
+      label: "Flipp — IGA flyer item",
+      url: "https://flipp.com/en-ca/cote-saintluc-qc/item/1032309099-iga-quebec-weekly-eflyer?postal_code=H4V2L5",
+    },
   ];
 
   const [busy, setBusy] = useState<string | null>(null);
