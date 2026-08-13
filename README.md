@@ -21,7 +21,7 @@ refusing to state things it cannot back up, and the same standard applies here.
 
 | Area | Status |
 |---|---|
-| Product matching engine | **Real and tested.** 153 automated tests, including every discrimination case from the spec. |
+| Product matching engine | **Real and tested.** 167 automated tests, including every discrimination case from the spec. |
 | Money / savings arithmetic | **Real and tested.** Integer cents throughout. |
 | Freshness, eligibility, audit trail | **Real and tested.** |
 | Mobile UI, Checkout Mode, proof sheet | **Real.** Exercised against the built static export. |
@@ -75,6 +75,39 @@ this repository made of real numbers.
 - **No price, URL, UPC, or retailer policy outside `src/fixtures/captures/` is a
   claim about the real world** — and the captures are snapshots, stale the
   moment they were taken, used to pin parsing rather than to serve a price.
+
+### Flyer offers — the shape the product is moving to
+
+Automated catalogue prices are unavailable (above). Flyers are a smaller
+dataset and a **stronger kind of evidence**, so `src/types/flyer.ts` models them
+as a first-class thing rather than as a degraded price observation.
+
+Price-match policies overwhelmingly ask for a competitor's *advertised* price.
+A cashier looks at a flyer, checks the dates, checks the size. A product-page
+printout is not the artefact that process expects — so a flyer reference is not
+a downgrade from a product URL; at the till it is the document that works. It
+also concentrates the dataset on items where the gap is worth crossing the
+street for.
+
+What the model refuses to do, and why each refusal is a real flyer behaviour:
+
+| Offer | Treatment |
+|---|---|
+| Plain advertised price | Comparable, and can back a checkout claim |
+| `2 for $5` | Shown, never subtracted — buying one costs full price |
+| Loyalty-card price | Shown, never subtracted — needs a card, sometimes a loaded offer |
+| No flyer link | Cannot be shown to a cashier; a price with no document is what gets declined |
+| No end date | Cannot be shown; "still valid?" is the first thing checked |
+| Past its end date | `EXPIRED`, however recently it was fetched — see freshness |
+
+Conditions are displayed in the **flyer's own wording**. Paraphrasing a
+condition is how a saving evaporates at the till.
+
+`src/services/flyers/adapter.ts` defines where offers come from — a licensed
+feed, a person typing what they see, or fixtures — all producing the same type.
+**No feed exists today**, and `NoFlyerSource` says so rather than returning an
+empty list: "nothing is on sale" and "we could not look" are different answers,
+and collapsing them lets an outage read as good news.
 
 ### Retailer policies are all `UNKNOWN`
 
