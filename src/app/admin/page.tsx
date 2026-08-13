@@ -13,7 +13,7 @@ import { RETAILERS } from "@/config/retailers";
 import { formatCents } from "@/lib/money";
 import { loadLastResult } from "@/lib/prefs";
 import { activeBackend, recentAudit, recentObservations, saveValidation, validationSummary } from "@/lib/store";
-import { visionProviderName, env } from "@/config/env";
+import { visionProviderName, env, edgeFunctionUrl } from "@/config/env";
 import { authConfigured } from "@/lib/auth/config";
 import { APP_NAME, checkAppAccess } from "@/lib/auth/access";
 import {
@@ -67,7 +67,17 @@ function AdminView() {
         vision: visionProviderName(),
         storageBackend: activeBackend(),
         authConfigured: authConfigured(),
-        supabaseUrl: env.supabaseUrl ? "configured" : "not configured",
+        // The project REF, not a credential — it is in the URL of every request
+        // the browser already makes. Shown because "configured" cannot tell you
+        // WHICH project, and deploying an Edge Function into the wrong project
+        // of several is invisible from both ends: the dashboard reports
+        // success, and the app keeps getting answers from the old one.
+        supabaseProject: env.supabaseUrl
+          ? (env.supabaseUrl.match(/https?:\/\/([^.]+)\./)?.[1] ?? env.supabaseUrl)
+          : "not configured",
+        retailerFunction: env.supabaseUrl
+          ? edgeFunctionUrl("cartmatch-retailer")
+          : "not configured",
         // Which app_access grant this session holds. `app_admin` is the reason
         // the rows below might not all be yours — worth seeing on this page.
         [`app_access(${APP_NAME})`]:
