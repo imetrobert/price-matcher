@@ -370,6 +370,19 @@ interface ProbeResult {
   hops: string[];
   note: string | null;
   bodyPreview: string;
+  /**
+   * Candidate flyer page-image URLs found in the body.
+   *
+   * The right question to ask a FLYER page, as opposed to a product page. The
+   * four retailers publish an HTML viewer with a print button, not a PDF — so
+   * there is no file to download, and "can we fetch the PDF weekly" is not a
+   * question with an answer. What decides whether a weekly import is possible
+   * is whether the page carries the page images, and at what resolution.
+   *
+   * Reported, never followed. This function fetches exactly the URL it was
+   * given; finding an image is a finding, not an instruction.
+   */
+  flyerImages: string[];
   /** Headers that name the protection doing the refusing. */
   signals: Record<string, string>;
 }
@@ -429,7 +442,36 @@ function summarise(
     hops,
     note,
     bodyPreview: body.slice(0, BODY_PREVIEW),
+    flyerImages: findFlyerImages(body),
   };
+}
+
+/**
+ * Image URLs in the body that look like flyer pages.
+ *
+ * Deliberately loose on where it looks — `src`, `srcset` and bare URLs inside
+ * JSON blobs, since flyer viewers are single-page apps that carry their page
+ * list as data rather than as markup — and deliberately strict on what counts,
+ * because a page of any retailer site is full of logos and product thumbnails.
+ * A flyer page is a big JPEG whose URL almost always says so.
+ *
+ * A miss here is not a verdict. It means the viewer fetches its page list
+ * separately, which is a different finding, not a dead end.
+ */
+function findFlyerImages(body: string): string[] {
+  const found = new Set<string>();
+  // Lazy up to the extension, so one long JSON line yields each URL rather than
+  // one match spanning all of them.
+  const url = /https?:(?:\\?\/){2}[^\s"'<>]{8,300}?\.(?:jpe?g|png|webp)/gi;
+  const looksLikeFlyer = /flyer|circulaire|publication|page[-_/]?\d|sfml|wishabi/i;
+
+  let match: RegExpExecArray | null;
+  while ((match = url.exec(body)) !== null && found.size < 12) {
+    // JSON inside HTML escapes its slashes; unescape so the URL is usable.
+    const candidate = match[0].replace(/\\\//g, "/");
+    if (looksLikeFlyer.test(candidate)) found.add(candidate);
+  }
+  return [...found];
 }
 
 function firstJsonLdProduct(html: string): unknown | null {
