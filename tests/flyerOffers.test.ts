@@ -35,6 +35,7 @@ function offer(patch: Partial<FlyerOffer> = {}): FlyerOffer {
     conditionText: null,
     source: "PARTNER_FEED",
     flyerUrl: "https://example.test/flyer/page/3",
+    flyerDocumentRef: null,
     flyerPage: 3,
     storeId: null,
     observedAt: "2026-08-10T09:00:00Z",

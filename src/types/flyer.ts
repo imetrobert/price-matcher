@@ -58,6 +58,13 @@ export type OfferCondition =
 export type FlyerSource =
   /** A licensed feed from an aggregator or the retailer itself. */
   | "PARTNER_FEED"
+  /**
+   * Read out of a flyer PDF the shopper received, and corroborated against that
+   * page's own text layer or confirmed by the shopper. See
+   * `services/flyers/pdf` — an extraction that cleared neither bar never
+   * becomes an offer at all, so this source always means "checked twice".
+   */
+  | "FLYER_PDF"
   /** Typed in by a person reading a flyer. Real, but unverified by anyone else. */
   | "USER_ENTERED"
   /** Fixture data. Can never back a checkout claim. */
@@ -101,6 +108,13 @@ export interface FlyerOffer {
   source: FlyerSource;
   /** Link to the flyer page carrying this offer — what a cashier is shown. */
   flyerUrl: string | null;
+  /**
+   * Pointer to a stored flyer document carrying this offer — the other way to
+   * put the page in front of a cashier, and the better one when it exists,
+   * because it is the flyer itself rather than a link to a site that may have
+   * rotated to next week's.
+   */
+  flyerDocumentRef: string | null;
   /** Page number within the flyer, when the source provides one. */
   flyerPage: number | null;
 
@@ -127,8 +141,8 @@ export function isDirectlyComparable(offer: FlyerOffer): boolean {
  *
  *   Mock data never can, under any circumstances.
  *   A conditional price is not the price, so it cannot be presented as one.
- *   Without a flyer reference there is nothing to show; a price with no
- *     document is exactly what a cashier declines.
+ *   Without a flyer reference — a link or a stored page — there is nothing to
+ *     show; a price with no document is exactly what a cashier declines.
  *   Without an end date there is no way to demonstrate the offer is current,
  *     and "still valid" is the first thing checked at the till.
  *
@@ -140,7 +154,7 @@ export function isDirectlyComparable(offer: FlyerOffer): boolean {
 export function offerCanSupportCheckoutProof(offer: FlyerOffer): boolean {
   if (offer.source === "MOCK_FIXTURE") return false;
   if (!isDirectlyComparable(offer)) return false;
-  if (!offer.flyerUrl) return false;
+  if (!offer.flyerUrl && !offer.flyerDocumentRef) return false;
   if (!offer.validity.endsAt) return false;
   return true;
 }
