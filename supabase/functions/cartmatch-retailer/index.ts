@@ -437,7 +437,7 @@ function summarise(
     // The whole point: a price proves the page came through intact. A 200 with
     // no product is a challenge or a placeholder, however healthy it looks.
     priceFromJsonLd: product ? String(product) : null,
-    looksLikeChallenge: markers.length > 0 || (res.status === 200 && body.length < 2000),
+    looksLikeChallenge: looksLikeChallenge(res.status, body.length, markers),
     challengeMarkers: markers,
     hops,
     note,
@@ -472,6 +472,33 @@ function findFlyerImages(body: string): string[] {
     if (looksLikeFlyer.test(candidate)) found.add(candidate);
   }
   return [...found];
+}
+
+/**
+ * A challenge page is SMALL. That is the part of the signal that was missing.
+ *
+ * Matching a marker anywhere in the body was too eager: walmart.ca returned a
+ * genuine 97 KB flyer page that mentions "captcha" somewhere in a preloaded
+ * script reference, and it was reported as blocked. Calling a working fetch
+ * blocked is the more expensive error of the two — it closes off a route that
+ * is actually open.
+ *
+ * So a marker only convicts when the page is too small to be the real thing.
+ * The markers themselves are still reported either way, because "this page
+ * mentions a captcha" is worth seeing even when the page came through.
+ */
+const CHALLENGE_MAX_BYTES = 20_000;
+
+function looksLikeChallenge(
+  status: number,
+  bytes: number,
+  markers: string[],
+): boolean {
+  // Any refusal that also names a protection is a challenge, whatever its size.
+  if (status >= 400 && markers.length > 0) return true;
+  // A 200 too small to be a page is a challenge even with nothing to match on.
+  if (status === 200 && bytes < 2000) return true;
+  return markers.length > 0 && bytes < CHALLENGE_MAX_BYTES;
 }
 
 function firstJsonLdProduct(html: string): unknown | null {
