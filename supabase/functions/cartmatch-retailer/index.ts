@@ -196,7 +196,7 @@ const ALLOWED_HOSTS = new Set([
  * So every response now says which build produced it. Bump this string
  * whenever the file changes in a way a caller could notice.
  */
-const FUNCTION_BUILD = "2026-08-13-flyer-images";
+const FUNCTION_BUILD = "2026-08-13-body-diagnostics";
 
 const MAX_REDIRECTS = 3;
 const TIMEOUT_MS = 20_000;
@@ -263,7 +263,13 @@ Deno.serve(async (req: Request) => {
   const check = validateTarget(target);
   if (!check.ok) return json({ ok: false, error: check.error }, 400, origin);
 
-  return await probe(check.url, origin);
+  // A plain substring to look for in the body, capped. Deliberately NOT a
+  // regular expression: a caller-supplied pattern against a 250 KB body is a
+  // denial-of-service waiting to happen, and nothing here needs one.
+  const find =
+    typeof payload.find === "string" ? payload.find.slice(0, 80) : "";
+
+  return await probe(check.url, origin, find);
 });
 
 type TargetCheck = { ok: true; url: URL } | { ok: false; error: string };
@@ -289,7 +295,11 @@ function validateTarget(raw: string): TargetCheck {
   return { ok: true, url };
 }
 
-async function probe(url: URL, origin: string | null): Promise<Response> {
+async function probe(
+  url: URL,
+  origin: string | null,
+  find = "",
+): Promise<Response> {
   const hops: string[] = [];
   let current = url;
 
@@ -314,7 +324,7 @@ async function probe(url: URL, origin: string | null): Promise<Response> {
         const location = res.headers.get("location");
         if (!location) {
           return json(
-            { ok: true, result: summarise(res, "", current, hops, "redirect with no location") },
+            { ok: true, result: summarise(res, "", current, hops, "redirect with no location", find) },
             200,
             origin,
           );
@@ -344,7 +354,7 @@ async function probe(url: URL, origin: string | null): Promise<Response> {
       // themselves — and "403 from something unnamed" is a much weaker finding
       // to act on than "403 from a named WAF".
       const body = await res.text().catch(() => "");
-      return json({ ok: true, result: summarise(res, body, current, hops, null) }, 200, origin);
+      return json({ ok: true, result: summarise(res, body, current, hops, null, find) }, 200, origin);
     }
 
     return json(
@@ -399,6 +409,12 @@ interface ProbeResult {
    * given; finding an image is a finding, not an instruction.
    */
   flyerImages: string[];
+  /** Host -> count for every image URL in the body. Diagnoses an empty list. */
+  imageHosts: Record<string, number>;
+  /** A few image URLs verbatim and unfiltered, for a human to judge. */
+  sampleImages: string[];
+  /** Context around a caller-supplied substring, when one was given. */
+  matches: string[];
   /** Headers that name the protection doing the refusing. */
   signals: Record<string, string>;
 }
@@ -427,6 +443,7 @@ function summarise(
   url: URL,
   hops: string[],
   note: string | null,
+  find = "",
 ): ProbeResult {
   const lower = body.slice(0, 20000).toLowerCase();
   const markers = CHALLENGE_MARKERS.filter((m) => lower.includes(m));
@@ -460,6 +477,9 @@ function summarise(
     note,
     bodyPreview: body.slice(0, BODY_PREVIEW),
     flyerImages: findFlyerImages(body),
+    imageHosts: imageHostCounts(body),
+    sampleImages: sampleImageUrls(body),
+    matches: find ? contextAround(body, find) : [],
   };
 }
 
@@ -516,6 +536,70 @@ function looksLikeChallenge(
   // A 200 too small to be a page is a challenge even with nothing to match on.
   if (status === 200 && bytes < 2000) return true;
   return markers.length > 0 && bytes < CHALLENGE_MAX_BYTES;
+}
+
+/**
+ * Every image URL in the body, however it is written.
+ *
+ * Shared by the reporters below so they cannot disagree about what counts as
+ * an image URL. A flyer filter stricter than the sample would make an empty
+ * `flyerImages` impossible to interpret, which is exactly the position this
+ * investigation reached on superc.ca.
+ */
+function allImageUrls(body: string): string[] {
+  const pattern = /https?:(?:\\?\/){2}[^\s"'<>]{8,300}?\.(?:jpe?g|png|webp)/gi;
+  const out: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(body)) !== null && out.length < 4000) {
+    out.push(match[0].replace(/\\\//g, "/"));
+  }
+  return out;
+}
+
+/**
+ * Which hosts serve the images on this page, and how many each.
+ *
+ * The diagnostic that settles an empty `flyerImages`. A viewer whose pages come
+ * from a CDN path with no telling word in it looks identical to one carrying no
+ * page images at all — until you see forty images from one unfamiliar host.
+ */
+function imageHostCounts(body: string): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const url of allImageUrls(body)) {
+    try {
+      const host = new URL(url).hostname;
+      counts[host] = (counts[host] ?? 0) + 1;
+    } catch {
+      // Not a URL once unescaped. Ignored rather than guessed at.
+    }
+  }
+  return counts;
+}
+
+/** A handful of image URLs verbatim and unfiltered, so a person can judge. */
+function sampleImageUrls(body: string): string[] {
+  return [...new Set(allImageUrls(body))].slice(0, 8);
+}
+
+/**
+ * What surrounds a substring in the body.
+ *
+ * So the next question can be asked without a code change and a deploy. Every
+ * round of this investigation has cost one of each, and the questions are not
+ * predictable enough to enumerate in advance.
+ */
+function contextAround(body: string, needle: string): string[] {
+  const out: string[] = [];
+  const hay = body.toLowerCase();
+  const lower = needle.toLowerCase();
+  let from = 0;
+  while (out.length < 5) {
+    const at = hay.indexOf(lower, from);
+    if (at === -1) break;
+    out.push(body.slice(Math.max(0, at - 140), at + 200));
+    from = at + lower.length;
+  }
+  return out;
 }
 
 function firstJsonLdProduct(html: string): unknown | null {

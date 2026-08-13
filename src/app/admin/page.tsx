@@ -388,6 +388,7 @@ function RetailerProbe() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [custom, setCustom] = useState("");
+  const [find, setFind] = useState("");
   const [result, setResult] = useState<{ label: string; data: ProbeResult } | null>(
     null,
   );
@@ -396,7 +397,7 @@ function RetailerProbe() {
     setBusy(label);
     setError(null);
     setResult(null);
-    const outcome = await probeRetailerUrl(url);
+    const outcome = await probeRetailerUrl(url, find.trim());
     setBusy(null);
     if (!outcome.ok) {
       setError(outcome.error);
@@ -470,6 +471,21 @@ function RetailerProbe() {
           {busy === "Custom URL" ? "Probing…" : "Probe"}
         </button>
       </div>
+
+      {/*
+        Asks what surrounds a word in the fetched page. Every round of this
+        investigation has cost a code change and two deploys to ask one more
+        question about a body we had already downloaded.
+      */}
+      <input
+        className="field mt-2 w-full"
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+        placeholder="Optional: find this text in the page (e.g. .jpg, flyer, publication)"
+        value={find}
+        onChange={(e) => setFind(e.target.value)}
+      />
 
       {error ? (
         <p className="mt-3 rounded-xl bg-bad/5 px-3 py-2 text-sm text-bad">{error}</p>

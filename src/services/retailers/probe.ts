@@ -60,6 +60,18 @@ export interface ProbeResult {
    * versus "answered, found none" — and `summariseProbe` keeps them apart.
    */
   flyerImages?: string[];
+  /**
+   * Host -> count for every image URL in the body.
+   *
+   * What tells an empty `flyerImages` apart from a filter that is too strict.
+   * superc.ca returned 227 KB of server-rendered HTML and no flyer images,
+   * which could mean either — and the two lead in opposite directions.
+   */
+  imageHosts?: Record<string, number>;
+  /** A few image URLs verbatim and unfiltered, to judge rather than infer. */
+  sampleImages?: string[];
+  /** Context around a substring the caller asked about. */
+  matches?: string[];
 }
 
 /** Does this look like a flyer viewer rather than a product page? */
@@ -83,7 +95,10 @@ export type ProbeOutcome =
   | { ok: true; result: ProbeResult }
   | { ok: false; error: string };
 
-export async function probeRetailerUrl(url: string): Promise<ProbeOutcome> {
+export async function probeRetailerUrl(
+  url: string,
+  find = "",
+): Promise<ProbeOutcome> {
   if (!supabaseConfigured()) {
     return { ok: false, error: "Supabase is not configured." };
   }
@@ -98,7 +113,7 @@ export async function probeRetailerUrl(url: string): Promise<ProbeOutcome> {
         Authorization: `Bearer ${token}`,
         apikey: env.supabaseAnonKey,
       },
-      body: JSON.stringify({ action: "probe", url }),
+      body: JSON.stringify({ action: "probe", url, find }),
     });
     const data = await res.json().catch(() => null);
     if (!res.ok || !data?.ok) {
@@ -139,7 +154,14 @@ export function summariseProbe(r: ProbeResult): string {
     if (r.looksLikeChallenge) {
       return `Blocked. The retailer served a challenge rather than the flyer.`;
     }
-    return `HTTP ${r.status}, ${r.bytes} bytes, no page images in the HTML. The viewer fetches its page list separately — that call is the next thing to find.`;
+    const hosts = Object.entries(r.imageHosts ?? {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([host, n]) => `${host} (${n})`);
+    if (hosts.length === 0) {
+      return `HTTP ${r.status}, ${r.bytes} bytes, and not one image URL anywhere in the HTML. The viewer builds itself entirely in the browser.`;
+    }
+    return `HTTP ${r.status}, ${r.bytes} bytes. No image URL looks like a flyer page, but the page does carry images: ${hosts.join(", ")}. Check whether the pages live on one of those before concluding they are not here.`;
   }
 
   if (r.hasJsonLdProduct) {
