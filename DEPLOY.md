@@ -114,9 +114,31 @@ constrained three ways, none optional: an explicit host allowlist of the six
 retailers, https only, and redirects followed manually with every hop
 re-checked. Read the header before changing any of them.
 
-Or deploy from the dashboard: **Edge Functions → Deploy a new function → Via
-Editor**, name it exactly as above, paste the matching
-`supabase/functions/<name>/index.ts`, and **turn "Verify JWT" off**.
+### Preferred: let CI deploy them
+
+`.github/workflows/functions.yml` deploys all three on every push to `main`
+that touches `supabase/functions/**`. Two repository secrets, set once:
+
+| Secret | Where to get it |
+|---|---|
+| `SUPABASE_ACCESS_TOKEN` | <https://supabase.com/dashboard/account/tokens> |
+| `SUPABASE_PROJECT_REF` | the `<ref>` in your dashboard URL, and what the debug page prints as `supabaseProject` |
+
+Use this rather than the dashboard editor. The editor failed twice in ways
+that are invisible from outside: a phone paste dropped the final `}`, and four
+consecutive deploys of `cartmatch-retailer` silently did not take at all — the
+old build kept answering, and its results read as findings about retailers
+rather than as a stale deploy.
+
+### Fallback: the dashboard editor
+
+**Edge Functions → Deploy a new function → Via Editor**, name it exactly as
+above, paste the matching `supabase/functions/<name>/index.ts`, and **turn
+"Verify JWT" off**.
+
+If you use it, verify the deploy took rather than assuming. Every probe result
+carries `functionBuild`; compare it against `FUNCTION_BUILD` in the source you
+just pasted. They match or the deploy did not happen.
 
 `cartmatch-location` needs no secrets of its own. It exists because Nominatim's
 usage policy requires an identifying `User-Agent`, which a browser is forbidden

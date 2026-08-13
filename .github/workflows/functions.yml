@@ -1,0 +1,103 @@
+# Deploy the Edge Functions from git, rather than by pasting into a browser.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS EXISTS
+# ---------------------------------------------------------------------------
+# The dashboard editor was the deployment path for these three functions, and
+# it failed in two ways that are both invisible from the outside:
+#
+#   A paste from a phone dropped the last line, producing "Expected '}', got
+#   '<eof>'" — that one at least announced itself.
+#
+#   Four consecutive deploys of cartmatch-retailer did not take at all. The old
+#   build kept answering, honestly, and every result it returned looked like a
+#   finding about a retailer rather than a stale deploy. Two rounds of
+#   investigation were spent on it before the function was made to state its own
+#   build number.
+#
+# Neither failure is possible here. The functions deploy from the committed
+# source, on push, with no copying involved.
+#
+# ---------------------------------------------------------------------------
+# SETUP — two secrets, once
+# ---------------------------------------------------------------------------
+#   SUPABASE_ACCESS_TOKEN  a personal access token from
+#                          https://supabase.com/dashboard/account/tokens
+#   SUPABASE_PROJECT_REF   the project ref — the <ref> in
+#                          https://supabase.com/dashboard/project/<ref>, and the
+#                          same value the debug page prints as supabaseProject.
+#
+# Both go in Settings -> Secrets and variables -> Actions -> Secrets. The ref is
+# not a credential, but keeping the pair together is simpler than explaining
+# which half is which.
+#
+# ---------------------------------------------------------------------------
+# WHY --no-verify-jwt
+# ---------------------------------------------------------------------------
+# NOT because these functions are unauthenticated. Each one checks the bearer
+# token itself and then calls has_app_access('cartmatch'), which is a stronger
+# check than the platform's: it verifies the caller is a CartMatch user, not
+# merely someone with a valid token for a project shared by six apps.
+#
+# The flag is required because the gateway's own check rejects the browser's
+# preflight before the function runs, and a CORS preflight carries no
+# Authorization header by design. This mirrors "Verify JWT: off" in the
+# dashboard, which is what these functions have always been deployed with.
+
+name: Deploy Edge Functions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/functions/**"
+      - ".github/workflows/functions.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # Fail loudly and early. A missing secret otherwise surfaces as a CLI
+      # error several steps later that reads like a network problem, and the
+      # entire point of this workflow is that a failed deploy must be visible.
+      - name: Check secrets are set
+        env:
+          TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          missing=""
+          [ -z "$TOKEN" ] && missing="$missing SUPABASE_ACCESS_TOKEN"
+          [ -z "$REF" ] && missing="$missing SUPABASE_PROJECT_REF"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing"
+            echo "Add them under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          echo "Deploying to project $REF"
+
+      - name: Deploy functions
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          for fn in cartmatch-retailer cartmatch-vision cartmatch-location; do
+            echo "::group::$fn"
+            supabase functions deploy "$fn" --project-ref "$REF" --no-verify-jwt
+            echo "::endgroup::"
+          done
+
+      # The build marker is only useful if someone reads it. Printing it here
+      # means the run's own log says which build was shipped, so a later "is it
+      # deployed?" is answered by the log rather than by another probe.
+      - name: Report the build marker that was shipped
+        run: |
+          grep -h 'FUNCTION_BUILD = ' supabase/functions/*/index.ts || \
+            echo "No FUNCTION_BUILD marker found."
