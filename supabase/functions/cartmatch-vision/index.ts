@@ -491,3 +491,15 @@ function extractImages(payload: unknown): IncomingImage[] {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// END OF FILE — the lines below are deliberately comments.
+//
+// This function is deployed by pasting it into the Supabase dashboard editor,
+// and a paste from a phone silently loses the tail. When the last thing in the
+// file was a closing brace, losing it produced "Expected '}', got '<eof>'" —
+// which happened, and cost a deploy cycle to diagnose.
+//
+// Ending on comment lines means a truncated paste most likely drops commentary
+// rather than code, and the file still compiles. Keep something harmless here.
+// ---------------------------------------------------------------------------

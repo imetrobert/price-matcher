@@ -149,10 +149,23 @@ stronger. The toggle also breaks
 the app outright, because browsers send an unauthenticated `OPTIONS` preflight
 before any cross-origin POST and the toggle rejects it.
 
-**Verify the paste landed whole.** A truncated paste on a phone is silent. The
-cheap check is the deploy itself: a cut-off TypeScript file will not compile, so
-a successful deploy means the file arrived complete. Counting lines in a chat
-window does not work — wrapping makes the number wrong.
+**A truncated paste is normal on a phone, and the deploy catches it.** Selecting
+all in a mobile textarea routinely drops the last characters. It happened here:
+566 of 567 lines arrived and the missing piece was the final `}`, producing
+
+```
+Failed to deploy edge function: Expected '}', got '<eof>'
+```
+
+**The fix is not to re-paste.** Tap at the end of the code in the editor, type
+the missing character, and deploy. Re-pasting usually truncates again.
+
+Every function file now ends in `//` comment lines for this reason, so a
+truncated paste most likely loses commentary rather than code. Keep it that way:
+a file ending in a closing brace turns a lost character into a failed deploy.
+
+Counting lines in a chat window to verify a paste does not work — wrapping makes
+the number wrong. The deploy itself is the check.
 
 ### Confirming it works, from a phone
 
