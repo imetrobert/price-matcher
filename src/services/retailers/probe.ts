@@ -154,7 +154,13 @@ export function summariseProbe(r: ProbeResult): string {
     if (r.looksLikeChallenge) {
       return `Blocked. The retailer served a challenge rather than the flyer.`;
     }
-    const hosts = Object.entries(r.imageHosts ?? {})
+    // Absent is not empty. An older build cannot report image hosts, and
+    // reading its silence as "no images on the page" states a finding nobody
+    // measured — the same mistake this function exists to avoid.
+    if (r.imageHosts === undefined) {
+      return `HTTP ${r.status}, ${r.bytes} bytes, no flyer-looking image URLs. Build "${r.functionBuild ?? "unknown"}" cannot say what other images the page carries — redeploy for that.`;
+    }
+    const hosts = Object.entries(r.imageHosts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3)
       .map(([host, n]) => `${host} (${n})`);
