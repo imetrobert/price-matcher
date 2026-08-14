@@ -16,7 +16,8 @@
     "types": ["node"],
     "plugins": [{ "name": "next" }],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@shared/*": ["./supabase/functions/_shared/*"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
@@ -26,6 +27,12 @@
     // module resolution (jsr:/npm: specifiers, .ts import paths). Typechecking
     // them with this config produces only noise. `supabase functions deploy`
     // typechecks them with Deno's own config, which is the one that matters.
-    "supabase/functions"
+    //
+    // _shared is deliberately NOT excluded. It holds the offer parser, which
+    // the browser and the scheduled worker both run, and it is written to
+    // import nothing so it compiles under either. Excluding it would let the
+    // app's copy of those rules drift from the worker's, which is the one
+    // divergence this project cannot afford.
+    "supabase/functions/cartmatch-*"
   ]
 }

@@ -75,6 +75,131 @@ export interface SaveFlyerInput extends StoredFlyer {
   pageImages: Map<number, string>;
 }
 
+/**
+ * Upload a flyer's pages and queue them to be read later.
+ *
+ * The half of the job only a browser can do: the PDF is rendered here and
+ * never leaves the device, the page images go up, and a row per page goes into
+ * the queue. Two minutes, and then the tab can close — a scheduled worker
+ * reads the pages afterwards, whether or not anybody is watching.
+ *
+ * Both sizes are uploaded, for different lifetimes. The extraction-sized image
+ * is what the model reads and the worker deletes it once the page is done; the
+ * proof-sized one is what a cashier is shown and stays for the flyer's run.
+ * Keeping only the small one would save storage and cost the model the fine
+ * print, which on a flyer is the size and the unit.
+ */
+export async function queueFlyerForReading(input: {
+  flyer: StoredFlyer;
+  pages: { pageNumber: number; extractionDataUrl: string; proofDataUrl: string }[];
+  keepProofPages: boolean;
+  onProgress?: (uploaded: number, total: number) => void;
+}): Promise<{ ok: true; queued: number } | { ok: false; error: string }> {
+  const supabase = client();
+  if (!supabase) return { ok: false, error: "Supabase is not configured." };
+
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth?.user?.id;
+  if (!userId) return { ok: false, error: "Sign in first." };
+
+  const { error: flyerError } = await supabase.from("cartmatch_flyers").upsert(
+    {
+      id: input.flyer.id,
+      user_id: userId,
+      retailer_id: input.flyer.retailerId,
+      valid_from: input.flyer.validFrom,
+      valid_to: input.flyer.validTo,
+      page_count: input.flyer.pageCount,
+      // Zero until the worker reports otherwise. Claiming pages are read
+      // because they are uploaded is the same lie as calling a run complete
+      // when nothing was read.
+      pages_read: 0,
+      source_filename: input.flyer.sourceFilename,
+      validity_source: input.flyer.validitySource,
+    },
+    { onConflict: "id" },
+  );
+  if (flyerError) return { ok: false, error: flyerError.message };
+
+  // A re-import replaces the previous reading of this flyer entirely.
+  await supabase.from("cartmatch_flyer_offers").delete().eq("flyer_id", input.flyer.id);
+  await supabase.from("cartmatch_flyer_pages").delete().eq("flyer_id", input.flyer.id);
+
+  let queued = 0;
+  for (const page of input.pages) {
+    const extractionPath = `${userId}/${input.flyer.id}/read-p${String(page.pageNumber).padStart(2, "0")}.jpg`;
+
+    const extraction = dataUrlToBlob(page.extractionDataUrl);
+    if (!extraction) continue;
+
+    const { error: upErr } = await supabase.storage
+      .from(FLYER_BUCKET)
+      .upload(extractionPath, extraction, {
+        contentType: "image/jpeg",
+        upsert: true,
+      });
+    if (upErr) return { ok: false, error: `Uploading page ${page.pageNumber}: ${upErr.message}` };
+
+    if (input.keepProofPages) {
+      const proof = dataUrlToBlob(page.proofDataUrl);
+      if (proof) {
+        await supabase.storage
+          .from(FLYER_BUCKET)
+          .upload(pagePath(userId, input.flyer.id, page.pageNumber), proof, {
+            contentType: "image/jpeg",
+            upsert: true,
+          });
+      }
+    }
+
+    const { error: queueErr } = await supabase.from("cartmatch_flyer_pages").insert({
+      id: `${input.flyer.id}:p${page.pageNumber}`,
+      flyer_id: input.flyer.id,
+      user_id: userId,
+      page_number: page.pageNumber,
+      storage_path: extractionPath,
+    });
+    if (queueErr) return { ok: false, error: queueErr.message };
+
+    queued += 1;
+    input.onProgress?.(queued, input.pages.length);
+  }
+
+  return { ok: true, queued };
+}
+
+/** How a queued flyer is progressing, for the screen that queued it. */
+export interface QueueProgress {
+  pending: number;
+  reading: number;
+  done: number;
+  failed: number;
+  offers: number;
+}
+
+export async function queueProgress(flyerId: string): Promise<QueueProgress> {
+  const empty: QueueProgress = { pending: 0, reading: 0, done: 0, failed: 0, offers: 0 };
+  const supabase = client();
+  if (!supabase) return empty;
+
+  const { data } = await supabase
+    .from("cartmatch_flyer_pages")
+    .select("status, offers_found")
+    .eq("flyer_id", flyerId);
+  if (!data) return empty;
+
+  const out = { ...empty };
+  for (const row of data) {
+    const status = String(row.status);
+    if (status === "PENDING") out.pending += 1;
+    else if (status === "READING") out.reading += 1;
+    else if (status === "DONE") out.done += 1;
+    else if (status === "FAILED") out.failed += 1;
+    out.offers += Number(row.offers_found ?? 0);
+  }
+  return out;
+}
+
 export type SaveOutcome =
   | { ok: true; offersSaved: number; pagesSaved: number }
   | { ok: false; error: string };

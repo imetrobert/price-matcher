@@ -45,7 +45,7 @@ import {
 } from "./pdf/renderPages";
 import { readFlyerPages, type ReadFlyerResult } from "./pdf/readPage";
 import { validityFromPages } from "./pdf/validityFromText";
-import { flyerId, saveFlyer } from "./storage";
+import { flyerId, queueFlyerForReading, saveFlyer } from "./storage";
 
 export type BatchStage =
   | "WAITING"
@@ -227,7 +227,18 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
     current = { ...current, pages, stage: "READING", detail: "Reading prices…" };
     options.onUpdate(current);
 
-    const result = await readFlyerPages(pages, {
+    // ------------------------------------------------------------------
+    // Page one only, in the browser.
+    //
+    // The store logo and the run dates live on the cover, and both are needed
+    // before anything can be stored — a flyer with no retailer or no dates is
+    // not something a till would accept. Reading one page costs seconds and
+    // tells the person which flyer they just handed over.
+    //
+    // The other sixteen go to the queue. That is the whole point: the tab can
+    // close, and the work continues.
+    // ------------------------------------------------------------------
+    const result = await readFlyerPages(pages.slice(0, 1), {
       signal: options.signal,
       onProgress: (progress) => {
         const { page, pageCount, offersSoFar } = progress;
@@ -284,41 +295,50 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
     const validFrom = current.validFrom ?? result.validFrom;
     const validTo = current.validTo ?? result.validTo;
 
-    // Save before releasing the pages. This is the only moment both the offers
-    // and the page images exist together — after this the images are gone, and
-    // an offer with no page behind it cannot be shown to a cashier.
-    //
-    // Three things must be known to store a flyer at all: which retailer, and
-    // both dates. Without them there is nothing a till would accept, so the
-    // read still stands and the row says what is missing.
+    // Upload and queue. Three things must be known first — which retailer, and
+    // both dates — because without them there is nothing a till would accept,
+    // and queueing seventeen pages to produce offers that can never be shown
+    // would spend a quota on nothing.
     let saved: { offers: number; pages: number } | null = null;
     let saveError: string | null = null;
 
     if (!retailerId) {
-      saveError = "Not saved: the store could not be identified. Set it and read again.";
+      saveError = "Not queued: the store could not be identified. Set it and try again.";
     } else if (!validFrom || !validTo) {
-      saveError = "Not saved: no run dates were found, and an offer with no end date cannot be shown at a till.";
+      saveError = "Not queued: no run dates were found, and an offer with no end date cannot be shown at a till.";
     } else {
-      const outcome = await saveFlyer({
-        id: flyerId(retailerId, validFrom),
-        retailerId,
-        validFrom,
-        validTo,
-        pageCount: pages.length,
-        pagesRead: pagesActuallyRead(result, pages.length),
-        sourceFilename: current.file.name,
-        validitySource: current.validityFrom === "FILENAME" ? "FILENAME" : "COVER",
-        offers: result.offers,
-        // Proof size, not extraction size. See renderPages. Empty when the
-        // shopper has turned pictures off — the citation still works from the
-        // page number, which is stored on every offer regardless.
-        pageImages:
-          options.keepPages === false
-            ? new Map<number, string>()
-            : new Map(pages.map((p) => [p.pageNumber, p.proofDataUrl])),
+      current = { ...current, detail: "Uploading pages…" };
+      options.onUpdate(current);
+
+      const outcome = await queueFlyerForReading({
+        flyer: {
+          id: flyerId(retailerId, validFrom),
+          retailerId,
+          validFrom,
+          validTo,
+          pageCount: pages.length,
+          pagesRead: 0,
+          sourceFilename: current.file.name,
+          validitySource:
+            current.validityFrom === "FILENAME" ? "FILENAME" : "COVER",
+        },
+        pages: pages.map((p) => ({
+          pageNumber: p.pageNumber,
+          extractionDataUrl: p.imageDataUrl,
+          proofDataUrl: p.proofDataUrl,
+        })),
+        keepProofPages: options.keepPages !== false,
+        onProgress: (uploaded, total) => {
+          current = {
+            ...current,
+            detail: `Uploading page ${uploaded} of ${total}…`,
+          };
+          options.onUpdate(current);
+        },
       });
+
       if (outcome.ok) {
-        saved = { offers: outcome.offersSaved, pages: outcome.pagesSaved };
+        saved = { offers: 0, pages: outcome.queued };
       } else {
         saveError = outcome.error;
       }
@@ -345,7 +365,7 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
         ? `Filename says ${RETAILERS[retailerId!].displayName}, page 1 shows ${RETAILERS[fromLogo!].displayName} — check this one`
         : saveError
           ? saveError
-          : `${summarise(result, pages.length)} · saved`,
+          : `${pages.length} pages queued — reading continues without this tab open`,
       // Page images are released here. The offers carry the page numbers, and
       // holding five flyers' worth of full-size images is how the tab dies.
       pages: null,

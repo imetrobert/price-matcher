@@ -112,7 +112,7 @@ jobs:
           REF: ${{ secrets.SUPABASE_PROJECT_REF }}
         run: |
           set -euo pipefail
-          for fn in cartmatch-retailer cartmatch-vision cartmatch-location; do
+          for fn in cartmatch-retailer cartmatch-vision cartmatch-location cartmatch-flyer-worker; do
             echo "::group::$fn"
             supabase functions deploy "$fn" --project-ref "$REF" --no-verify-jwt
             echo "::endgroup::"
