@@ -143,6 +143,17 @@ export function scoreMatch(
   const sizeConfirmed = bothSizesKnown && sizesMatch(a.size, b.size);
 
   if (namesMatch && sizeConfirmed) {
+    // No cap for a translated name here, and that is deliberate rather than an
+    // oversight. The worry was "beurre 454 g" against "butter 454 g" with no
+    // brand — two different dairies scoring as the same product. But
+    // `brandsMatch` already treats an unknown brand on either side as a hard
+    // blocker, so this rung is unreachable unless both sides name a brand and
+    // the brands agree. At that point a translated noun is corroboration, not
+    // the whole case.
+    //
+    // A guard was written for this and then deleted: unreachable code that
+    // looks like a safety check is worse than none, because the next reader
+    // trusts it.
     reasons.push(`Brand match ("${a.brand}")`);
     reasons.push("Product name match");
     reasons.push(

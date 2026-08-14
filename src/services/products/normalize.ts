@@ -21,6 +21,15 @@ import type {
 /** Lowercase, strip accents and punctuation, collapse whitespace. */
 export function normalizeText(input: string): string {
   return input
+    // œ and æ are LETTERS in Unicode, not ligatures, so no normalisation form
+    // decomposes them — NFKD leaves "bœuf" exactly as it found it, the
+    // character class below then strips the œ as punctuation, and the word
+    // arrives as "b uf". Walmart prints "porc et bœuf" and Maxi prints "bœuf
+    // haché", so this silently destroyed the one token naming the animal.
+    .replace(/\u0153/g, "oe")
+    .replace(/\u0152/g, "OE")
+    .replace(/\u00e6/g, "ae")
+    .replace(/\u00c6/g, "AE")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
@@ -29,9 +38,77 @@ export function normalizeText(input: string): string {
     .trim();
 }
 
+/**
+ * Multi-word terms that must be translated whole, before anything is split.
+ *
+ * "pommes de terre" is a potato. Tokenised first, it becomes "pommes" — which
+ * this file maps to apple — and a bag of potatoes quietly turns into a bag of
+ * apples. A phrase whose meaning is not the sum of its words has to be caught
+ * before the words exist.
+ *
+ * Kept deliberately tiny. Every entry is a phrase where the token-by-token
+ * reading is not merely incomplete but WRONG, which is a much smaller set than
+ * "phrases that could be translated".
+ */
+const PHRASE_EQUIVALENTS: [RegExp, string][] = [
+  [/\bpommes? de terre\b/g, "potato"],
+  [/\bcreme glacee\b/g, "ice-cream"],
+  [/\bessuie tout\b/g, "paper-towels"],
+  [/\bfines herbes\b/g, "herbs"],
+  [/\bpetits pois\b/g, "pea"],
+  [/\bharicots verts\b/g, "green-bean"],
+  [/\bhauts? de cuisse\b/g, "thigh"],
+];
+
+/** Apply the phrase pass to already-normalised text. */
+function applyPhrases(text: string): string {
+  let out = text;
+  for (const [pattern, replacement] of PHRASE_EQUIVALENTS) {
+    out = out.replace(pattern, replacement);
+  }
+  return out;
+}
+
 export function tokenize(input: string): string[] {
-  const t = normalizeText(input);
-  return t === "" ? [] : t.split(" ").filter(Boolean);
+  const t = applyPhrases(normalizeText(input));
+  if (t === "") return [];
+  return (
+    t
+      .split(" ")
+      // Flyer copy is written in sentences — "Chac. Produit du Canada." — so
+      // tokens arrive wearing full stops. The dot is kept INSIDE a token,
+      // because "m.f." is a real marker, and dropped from the end, because
+      // "canada." and "canada" are one word.
+      .map((token) => token.replace(/\.+$/, ""))
+      .filter(Boolean)
+  );
+}
+
+/**
+ * Did these two strings only line up because one was translated?
+ *
+ * The lexicon makes "beurre" and "butter" the same token, which is the point —
+ * and it also erases the difference between a match on the retailer's own
+ * words and a match this file manufactured. Those deserve different
+ * confidence: two tiles that literally both say "butter" agree; a French tile
+ * and an English one agree only as far as this map is right.
+ *
+ * True when the two share meaningful tokens AFTER canonicalisation and none
+ * before it.
+ */
+export function dependsOnTranslation(a: string, b: string): boolean {
+  const literal = (input: string) =>
+    new Set(
+      tokenize(input).filter((t) => !NOISE_TOKENS.has(t) && t.length > 1),
+    );
+  const la = literal(a);
+  const lb = literal(b);
+  for (const t of la) if (lb.has(t)) return false;
+
+  const ca = new Set(meaningfulTokens(a));
+  const cb = new Set(meaningfulTokens(b));
+  for (const t of ca) if (cb.has(t)) return true;
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,8 +179,66 @@ const NOISE_TOKENS = new Set([
   // itself is noise.
   "m.f.",
   "m.g.",
+  // Trailing dots are stripped by `tokenize`, so both spellings must be here.
+  "m.f",
+  "m.g",
   "mf",
   "mg",
+  // Flyer boilerplate, taken from the words that actually recur in a real
+  // week's offers. Measured on 257 Maxi offers: "certaines" and "varietes"
+  // appear 28 times each, "produit" 23, "limite" 22, "categorie" 12. None of
+  // them says anything about which product a price belongs to, and leaving
+  // them in inflates token overlap between two unrelated tiles that both say
+  // "certaines varietes".
+  "certaines",
+  "selectionnees",
+  "selectionnee",
+  "selected",
+  "varietes",
+  "variete",
+  "varieties",
+  "variety",
+  "assorties",
+  "assortis",
+  "assorted",
+  "produit",
+  "produits",
+  "each",
+  "chacun",
+  "chaque",
+  // Flyers abbreviate relentlessly: "Chac." is on almost every Maxi tile.
+  "chac",
+  "sel",
+  "paq",
+  "paquet",
+  "limite",
+  "limit",
+  "categorie",
+  "grade",
+  "apres",
+  "after",
+  "voir",
+  "see",
+  "magasin",
+  "store",
+  "consigne",
+  "deposit",
+  "prix",
+  "price",
+  "reg",
+  "sans",
+  "avec",
+  "pour",
+  "des",
+  "au",
+  "aux",
+  "ou",
+  "or",
+  "selection",
+  "quantites",
+  "quantities",
+  "epuisement",
+  "stocks",
 ]);
 
 /**
@@ -174,6 +309,132 @@ const TERM_EQUIVALENTS: Record<string, string> = {
   erable: "maple",
   original: "original",
   originale: "original",
+
+  // ---------------------------------------------------------------------
+  // Added from the real week-33 Montreal flyers, not from a dictionary.
+  //
+  // Every pair below appears in the 257 offers read off Maxi's flyer or the
+  // bilingual tiles on Walmart's, so each one is a translation this matcher
+  // was actually going to need. Words that only LOOK translatable were left
+  // out on purpose — see the note above this map.
+  // ---------------------------------------------------------------------
+
+  // Meat, fish, deli
+  poulet: "chicken",
+  poitrines: "breast",
+  poitrine: "breast",
+  hauts: "thigh",
+  cuisse: "thigh",
+  cuisses: "thigh",
+  pilons: "drumstick",
+  pilon: "drumstick",
+  boeuf: "beef",
+  porc: "pork",
+  jambon: "ham",
+  saucisses: "sausage",
+  saucisse: "sausage",
+  bacon: "bacon",
+  saumon: "salmon",
+  filet: "fillet",
+  filets: "fillet",
+  crevettes: "shrimp",
+  hache: "ground",
+  hachee: "ground",
+  peau: "skin",
+  desosse: "boneless",
+  desossees: "boneless",
+
+  // Produce
+  tomates: "tomato",
+  tomate: "tomato",
+  laitue: "lettuce",
+  chou: "cabbage",
+  carottes: "carrot",
+  carotte: "carrot",
+  oignons: "onion",
+  oignon: "onion",
+  courgettes: "zucchini",
+  courgette: "zucchini",
+  betteraves: "beet",
+  concombre: "cucumber",
+  concombres: "cucumber",
+  poivron: "pepper",
+  poivrons: "pepper",
+  champignons: "mushroom",
+  avocats: "avocado",
+  avocat: "avocado",
+  kiwis: "kiwi",
+  raisins: "grape",
+  raisin: "grape",
+  melon: "melon",
+  pasteque: "watermelon",
+  ananas: "pineapple",
+  bananes: "banana",
+  banane: "banana",
+  epinards: "spinach",
+  brocoli: "broccoli",
+  mais: "corn",
+  nectarines: "nectarine",
+  prunes: "plum",
+  figues: "fig",
+  cantaloup: "cantaloupe",
+
+  // "pommes de terre" is potato; "pommes" alone is apple. Both are kept, and
+  // the two-word form is handled by the phrase pass rather than here, because
+  // mapping "pommes" to apple and "terre" to earth would turn a bag of
+  // potatoes into a bag of apples.
+  pommes: "apple",
+  pomme: "apple",
+
+  // Dairy, bakery, pantry
+  creme: "cream",
+  oeufs: "egg",
+  oeuf: "egg",
+  pain: "bread",
+  bagels: "bagel",
+  farine: "flour",
+  sucre: "sugar",
+  huile: "oil",
+  riz: "rice",
+  haricots: "bean",
+  pois: "pea",
+  soupe: "soup",
+  croustilles: "chips",
+  barres: "bar",
+  barre: "bar",
+  bonbons: "candy",
+  glacee: "ice-cream",
+  glace: "ice-cream",
+  surgelee: "frozen",
+  surgeles: "frozen",
+  surgele: "frozen",
+  congele: "frozen",
+  biere: "beer",
+  canettes: "can",
+  canette: "can",
+  bouteilles: "bottle",
+  bouteille: "bottle",
+  eau: "water",
+  the: "tea",
+
+  // Colours and descriptors that distinguish one product from another
+  blanc: "white",
+  blanche: "white",
+  blanches: "white",
+  rouge: "red",
+  rouges: "red",
+  vert: "green",
+  verts: "green",
+  jaune: "yellow",
+  jaunes: "yellow",
+  noir: "black",
+  noire: "black",
+  petites: "small",
+  petit: "small",
+  gros: "large",
+  grosse: "large",
+  frais: "fresh",
+  fraiche: "fresh",
 
   // Product-line words that must stay identity-bearing in both languages
   biologique: "organic",
