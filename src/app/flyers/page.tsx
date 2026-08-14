@@ -39,6 +39,7 @@ import {
   countBatchPages,
   newBatchItem,
   runBatch,
+  saveLater,
   type BatchItem,
 } from "@/services/flyers/batch";
 import {
@@ -291,6 +292,33 @@ function FlyerImport() {
                     ),
                   )
                 }
+                onDates={(validFrom, validTo) =>
+                  setItems((prev) =>
+                    prev.map((it) =>
+                      it.id === item.id
+                        ? { ...it, validFrom, validTo, validityFrom: "COVER" as const }
+                        : it,
+                    ),
+                  )
+                }
+                onSave={async () => {
+                  const outcome = await saveLater(item);
+                  setItems((prev) =>
+                    prev.map((it) =>
+                      it.id === item.id
+                        ? outcome.ok
+                          ? {
+                              ...it,
+                              saved: { offers: outcome.offers, pages: 0 },
+                              saveError: null,
+                              detail: `${outcome.offers} offers saved`,
+                            }
+                          : { ...it, saveError: outcome.error }
+                        : it,
+                    ),
+                  );
+                  void measureStoredPages().then(setUsage).catch(() => undefined);
+                }}
               />
             ))}
           </div>
@@ -299,10 +327,18 @@ function FlyerImport() {
 
       {finishedAt ? (
         <section className="card mb-4 text-sm">
-          <p className="mb-1 text-lg font-bold text-good">
-            {totals.flyersIncomplete + totals.flyersFailed === 0
-              ? "Done — every flyer read in full"
-              : "Finished, with gaps"}
+          <p
+            className={`mb-1 text-lg font-bold ${
+              totals.flyersIncomplete + totals.flyersFailed === 0 && totals.offers > 0
+                ? "text-good"
+                : "text-warn"
+            }`}
+          >
+            {totals.offers === 0
+              ? "Finished, but nothing was read"
+              : totals.flyersIncomplete + totals.flyersFailed === 0
+                ? "Done — every flyer read in full"
+                : "Finished, with gaps"}
           </p>
           <p className="mb-2 font-bold">
             {totals.offers} offers from{" "}
@@ -394,12 +430,16 @@ function FlyerRow({
   expanded,
   onToggle,
   onRetailer,
+  onDates,
+  onSave,
 }: {
   item: BatchItem;
   locked: boolean;
   expanded: boolean;
   onToggle: () => void;
   onRetailer: (id: RetailerId) => void;
+  onDates: (from: string, to: string) => void;
+  onSave: () => void | Promise<void>;
 }) {
   const busy = item.stage === "RENDERING" || item.stage === "READING";
   const border =
@@ -486,6 +526,58 @@ function FlyerRow({
         ) : null}
       </p>
 
+      {/*
+        Everything needed to rescue a flyer the run could not store, without
+        reading it again. The offers are still here; only a store name or a
+        pair of dates was missing, and asking somebody to spend another half
+        hour and another quota on that would be absurd.
+      */}
+      {item.stage === "DONE" && !item.saved && item.result ? (
+        <div className="mt-2 rounded-xl border border-line p-2">
+          <p className="mb-2 text-xs font-semibold">
+            {item.result.offers.length} offers are read and waiting. Fill in
+            what is missing and save — no need to read the flyer again.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-xs text-muted" htmlFor={`from-${item.id}`}>
+              Valid from
+            </label>
+            <input
+              id={`from-${item.id}`}
+              type="date"
+              className="field py-1 text-sm"
+              value={item.validFrom ?? ""}
+              onChange={(e) => onDates(e.target.value, item.validTo ?? "")}
+            />
+            <label className="text-xs text-muted" htmlFor={`to-${item.id}`}>
+              to
+            </label>
+            <input
+              id={`to-${item.id}`}
+              type="date"
+              className="field py-1 text-sm"
+              value={item.validTo ?? ""}
+              onChange={(e) => onDates(item.validFrom ?? "", e.target.value)}
+            />
+          </div>
+          <button
+            type="button"
+            disabled={
+              locked || !item.retailerId || !item.validFrom || !item.validTo
+            }
+            onClick={() => void onSave()}
+            className="btn-secondary mt-2 disabled:opacity-50"
+          >
+            Save these offers
+          </button>
+          <p className="mt-1 text-xs text-muted">
+            The page pictures were released when the flyer finished, so this
+            saves the prices and their page numbers. Reading again is what
+            recovers the pictures.
+          </p>
+        </div>
+      ) : null}
+
       {item.saved ? (
         <p className="mt-1 text-xs text-good">
           Saved — {item.saved.offers} offers
@@ -495,6 +587,14 @@ function FlyerRow({
         </p>
       ) : item.saveError ? (
         <p className="mt-1 text-xs text-bad">{item.saveError}</p>
+      ) : null}
+
+      {item.result && item.result.failedPages.length > 0 ? (
+        <p className="mt-2 rounded-lg bg-bad/5 px-2 py-1 text-xs text-bad">
+          {item.result.failedPages.length} page
+          {item.result.failedPages.length === 1 ? "" : "s"} refused:{" "}
+          {item.result.failedPages[0]!.error}
+        </p>
       ) : null}
 
       {item.result && item.result.notAttempted.length > 0 ? (

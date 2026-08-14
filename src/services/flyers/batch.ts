@@ -266,7 +266,7 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
         validFrom,
         validTo,
         pageCount: pages.length,
-        pagesRead: pages.length - result.notAttempted.length,
+        pagesRead: pagesActuallyRead(result, pages.length),
         sourceFilename: current.file.name,
         validitySource: current.validityFrom === "FILENAME" ? "FILENAME" : "COVER",
         offers: result.offers,
@@ -300,7 +300,7 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
           : validFrom
             ? "COVER"
             : "UNKNOWN",
-      pagesRead: pages.length - result.notAttempted.length,
+      pagesRead: pagesActuallyRead(result, pages.length),
       stage: "DONE",
       detail: disagrees
         ? `Filename says ${RETAILERS[retailerId!].displayName}, page 1 shows ${RETAILERS[fromLogo!].displayName} — check this one`
@@ -328,11 +328,34 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
 }
 
 function summarise(result: ReadFlyerResult, pageCount: number): string {
-  const read = pageCount - result.failedPages.length - result.notAttempted.length;
+  const read = pagesActuallyRead(result, pageCount);
+  // The failure reason leads when there is one. A run that reported "0 offers
+  // from 0 of 17 pages" and then "Done — every flyer read in full" happened,
+  // and the reason every page had failed was nowhere on the screen.
+  if (result.failedPages.length > 0) {
+    return `${result.offers.length} offers from ${read} of ${pageCount} pages — ${result.failedPages.length} refused: ${result.failedPages[0]!.error}`;
+  }
   if (result.notAttempted.length > 0) {
     return `${result.offers.length} offers from ${read} of ${pageCount} pages — incomplete`;
   }
   return `${result.offers.length} offers from ${read} of ${pageCount} pages`;
+}
+
+/**
+ * Pages that produced a reading.
+ *
+ * Both subtractions matter. Counting only pages never attempted treated a
+ * flyer whose every page was refused as fully read, which is how a run with
+ * zero offers announced itself as complete.
+ */
+export function pagesActuallyRead(
+  result: ReadFlyerResult,
+  pageCount: number,
+): number {
+  return Math.max(
+    0,
+    pageCount - result.failedPages.length - result.notAttempted.length,
+  );
 }
 
 /**
@@ -389,6 +412,50 @@ export async function runBatch(
   return done;
 }
 
+/**
+ * Save a flyer that could not be saved during the run.
+ *
+ * The run refuses to store a flyer without a retailer and both dates, because
+ * neither an unattributed price nor an undated one is anything a till would
+ * accept. But refusing is not the same as discarding: the offers are still in
+ * memory, and asking somebody to re-read seventeen pages because a filename
+ * lacked a date is thirty wasted minutes and a quota spent for nothing.
+ *
+ * So the missing fields can be supplied afterwards and the same offers saved.
+ * Only the page IMAGES are gone by then — they are released as each flyer
+ * finishes, since five flyers of them at once kills the tab — so this stores
+ * the prices and their page numbers, and the citation still reads "IGA flyer,
+ * page 7". Re-reading is what recovers the pictures, and it is a choice rather
+ * than a toll.
+ */
+export async function saveLater(
+  item: BatchItem,
+): Promise<{ ok: true; offers: number } | { ok: false; error: string }> {
+  if (!item.result) return { ok: false, error: "Nothing was read from this flyer." };
+  if (!item.retailerId) return { ok: false, error: "Set the store first." };
+  if (!item.validFrom || !item.validTo) {
+    return { ok: false, error: "Set both dates first." };
+  }
+
+  const outcome = await saveFlyer({
+    id: flyerId(item.retailerId, item.validFrom),
+    retailerId: item.retailerId,
+    validFrom: item.validFrom,
+    validTo: item.validTo,
+    pageCount: item.pageCount ?? item.result.offers.length,
+    pagesRead: item.pagesRead,
+    sourceFilename: item.file.name,
+    validitySource: item.validityFrom === "FILENAME" ? "FILENAME" : "MANUAL",
+    offers: item.result.offers,
+    // Empty: the images were released when the flyer finished.
+    pageImages: new Map<number, string>(),
+  });
+
+  return outcome.ok
+    ? { ok: true, offers: outcome.offersSaved }
+    : { ok: false, error: outcome.error };
+}
+
 /** Everything the batch produced, for the summary line. */
 export function batchTotals(items: BatchItem[]): {
   offers: number;
@@ -420,7 +487,12 @@ export function batchTotals(items: BatchItem[]): {
     if (item.stage === "FAILED") flyersFailed += 1;
     if (item.stage === "DONE") {
       offers += item.result?.offers.length ?? 0;
-      if ((item.result?.notAttempted.length ?? 0) > 0) flyersIncomplete += 1;
+      // Refused and never-attempted both mean pages are missing. Only counting
+      // the second called a flyer complete when every page of it had failed.
+      const missing =
+        (item.result?.notAttempted.length ?? 0) +
+        (item.result?.failedPages.length ?? 0);
+      if (missing > 0) flyersIncomplete += 1;
       else flyersDone += 1;
     }
     if (item.retailerId === null) needsRetailer += 1;
