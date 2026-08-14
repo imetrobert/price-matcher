@@ -572,9 +572,36 @@ Deno.serve(async (req: Request) => {
         Number.isFinite(thinkingBudget) ? thinkingBudget : 0,
         controller.signal,
       );
+      // A 400 on a request carrying thinkingConfig is far more likely to be
+      // that config than the photograph. Retry once without it before
+      // blaming anything else — this drops the request to the same shape the
+      // flyer worker sends, which is known to work on this key.
+      //
+      // Deliberately not conditioned on the error text mentioning "thinking".
+      // The previous version was, and Google's message is the generic
+      // "Request contains an invalid argument" — so the recovery written for
+      // exactly this case sat there and never fired.
+      if (!res.ok && res.status === 400 && supportsThinking(candidate)) {
+        console.warn(`[cartmatch] ${candidate} rejected thinkingConfig; retrying without it.`);
+        res = await callGemini(
+          apiKey,
+          candidate,
+          parts,
+          flyerMode,
+          false,
+          0,
+          controller.signal,
+        );
+      }
+
       if (res.ok) break;
       // 404 means this key cannot call that id at all — try the next one
       // rather than reporting a name the caller never chose.
+      //
+      // A 400 that survives the retry above is not the model's fault: the
+      // request is the same shape every model gets, so it is the image or the
+      // schema, and walking seven models to be told so seven times is six
+      // wasted requests out of a daily allowance of twenty.
       if (res.status !== 503 && res.status !== 429 && res.status !== 404) break;
       if (candidate !== models[models.length - 1]) {
         console.warn(`[cartmatch] ${candidate} returned ${res.status}; trying next model.`);
@@ -612,24 +639,6 @@ Deno.serve(async (req: Request) => {
           res = retry;
           used = suggested;
         }
-      }
-    }
-
-    // thinkingConfig only exists on 2.5+. If the gate guessed wrong for a
-    // future model family, drop it and retry rather than failing a scan.
-    if (!res.ok && res.status === 400 && supportsThinking(used)) {
-      const detail = await res.text();
-      if (/thinking/i.test(detail)) {
-        console.warn(
-          `[cartmatch] ${used} rejected thinkingConfig; retrying without it.`,
-        );
-        res = await callGemini(apiKey, used, parts, flyerMode, false, 0, controller.signal);
-      } else {
-        return json(
-          { ok: false, error: `Gemini returned HTTP 400. ${detail.slice(0, 400)}` },
-          502,
-          origin,
-        );
       }
     }
 
@@ -862,9 +871,18 @@ function callGemini(
 }
 
 function supportsThinking(model: string): boolean {
-  const m = model.toLowerCase();
-  if (m.includes("2.0") || m.includes("1.5") || m.includes("1.0")) return false;
-  return /gemini-(\d+)\.(\d+)/.test(m);
+  // Only the family this was written for.
+  //
+  // It used to return true for every gemini-N.N, on the assumption that a
+  // newer family keeps an older family's knobs. Gemini 3 does not: it rejects
+  // thinkingConfig outright with "Request contains an invalid argument", which
+  // is a 400, which broke the model loop before any other model was tried. A
+  // scan died on a parameter the request did not need, while the flyer worker
+  // — which never sends thinkingConfig — read pages all night on the same key.
+  //
+  // Widen this only for a family measured to accept it. Assuming forward
+  // compatibility is what produced the bug.
+  return model.toLowerCase().includes("2.5");
 }
 
 function extractImages(payload: unknown): IncomingImage[] {
