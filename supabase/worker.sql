@@ -174,10 +174,22 @@ $$;
 --         'Content-Type', 'application/json',
 --         'x-cartmatch-worker-key', '<worker-key>'
 --       ),
---       body := '{}'::jsonb
+--       body := '{}'::jsonb,
+--       timeout_milliseconds := 300000
 --     );
 --     $job$
 --   );
+--
+-- THE TIMEOUT IS NOT OPTIONAL. net.http_post defaults to five seconds, and a
+-- tick that reads three pages takes minutes. pg_net then stops waiting and
+-- writes a row with a null status_code and null content — which does NOT stop
+-- the function, so the work carries on invisibly and net._http_response shows
+-- nothing but nulls.
+--
+-- That combination cost an evening: the worker was running the whole time and
+-- the only window onto it showed empty rows, so every reading of "it is stuck"
+-- was made without evidence. Five minutes is longer than any tick and short
+-- enough that a genuinely hung request is still reported.
 --
 -- Every minute, because the worker reads a couple of pages per tick and then
 -- returns. Long-running work in a scheduled function is how a function gets
