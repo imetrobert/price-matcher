@@ -92,6 +92,8 @@ describe("what the batch reports when it is done", () => {
       validFrom: "2026-08-13",
       validTo: "2026-08-19",
       validityFrom: "FILENAME",
+      saved: { offers: 0, pages: 17 },
+      saveError: null,
       retailerId: "maxi",
       retailerFrom: "FILENAME",
       stage: "DONE",
@@ -156,6 +158,16 @@ describe("what the batch reports when it is done", () => {
   it("reports zero rather than nonsense before counting finishes", () => {
     const totals = batchTotals([item({ pageCount: null, pagesRead: 0 })]);
     expect(totals.percent).toBe(0);
+  });
+
+  it("counts a flyer that was read but not stored", () => {
+    // Read and not saved is the worst outcome to leave quiet: the offers are
+    // on screen, look complete, and vanish when the page closes.
+    const totals = batchTotals([
+      item({ saved: null, saveError: "no dates" }),
+      item({}),
+    ]);
+    expect(totals.notSaved).toBe(1);
   });
 
   it("counts flyers still missing a store", () => {

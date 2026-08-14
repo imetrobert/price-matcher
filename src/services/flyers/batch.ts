@@ -44,6 +44,7 @@ import {
   type RenderedFlyerPage,
 } from "./pdf/renderPages";
 import { readFlyerPages, type ReadFlyerResult } from "./pdf/readPage";
+import { flyerId, saveFlyer } from "./storage";
 
 export type BatchStage =
   | "WAITING"
@@ -64,6 +65,9 @@ export interface BatchItem {
   validTo: string | null;
   /** Where those dates came from, since one source is a model and one is not. */
   validityFrom: "FILENAME" | "COVER" | "UNKNOWN";
+  /** What happened when this flyer was saved, if it could be. */
+  saved: { offers: number; pages: number } | null;
+  saveError: string | null;
   /** Best current guess, and what the run will use unless overridden. */
   retailerId: RetailerId | null;
   /** How that guess was arrived at, shown so it can be judged. */
@@ -167,6 +171,8 @@ export function newBatchItem(file: File, index: number): BatchItem {
       : "Store will be read from page 1",
     pages: null,
     result: null,
+    saved: null,
+    saveError: null,
     error: null,
   };
 }
@@ -234,11 +240,48 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
     const validFrom = current.validFrom ?? result.validFrom;
     const validTo = current.validTo ?? result.validTo;
 
+    // Save before releasing the pages. This is the only moment both the offers
+    // and the page images exist together — after this the images are gone, and
+    // an offer with no page behind it cannot be shown to a cashier.
+    //
+    // Three things must be known to store a flyer at all: which retailer, and
+    // both dates. Without them there is nothing a till would accept, so the
+    // read still stands and the row says what is missing.
+    let saved: { offers: number; pages: number } | null = null;
+    let saveError: string | null = null;
+
+    if (!retailerId) {
+      saveError = "Not saved: the store could not be identified. Set it and read again.";
+    } else if (!validFrom || !validTo) {
+      saveError = "Not saved: no run dates were found, and an offer with no end date cannot be shown at a till.";
+    } else {
+      const outcome = await saveFlyer({
+        id: flyerId(retailerId, validFrom),
+        retailerId,
+        validFrom,
+        validTo,
+        pageCount: pages.length,
+        pagesRead: pages.length - result.notAttempted.length,
+        sourceFilename: current.file.name,
+        validitySource: current.validityFrom === "FILENAME" ? "FILENAME" : "COVER",
+        offers: result.offers,
+        // Proof size, not extraction size. See renderPages.
+        pageImages: new Map(pages.map((p) => [p.pageNumber, p.proofDataUrl])),
+      });
+      if (outcome.ok) {
+        saved = { offers: outcome.offersSaved, pages: outcome.pagesSaved };
+      } else {
+        saveError = outcome.error;
+      }
+    }
+
     current = {
       ...current,
       retailerId,
       retailerFrom,
       result,
+      saved,
+      saveError,
       validFrom,
       validTo,
       validityFrom:
@@ -251,7 +294,9 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
       stage: "DONE",
       detail: disagrees
         ? `Filename says ${RETAILERS[retailerId!].displayName}, page 1 shows ${RETAILERS[fromLogo!].displayName} — check this one`
-        : summarise(result, pages.length),
+        : saveError
+          ? saveError
+          : `${summarise(result, pages.length)} · saved`,
       // Page images are released here. The offers carry the page numbers, and
       // holding five flyers' worth of full-size images is how the tab dies.
       pages: null,
@@ -342,6 +387,7 @@ export function batchTotals(items: BatchItem[]): {
   flyersFailed: number;
   needsRetailer: number;
   needsDates: number;
+  notSaved: number;
   pagesTotal: number;
   pagesRead: number;
   percent: number;
@@ -352,6 +398,7 @@ export function batchTotals(items: BatchItem[]): {
   let flyersFailed = 0;
   let needsRetailer = 0;
   let needsDates = 0;
+  let notSaved = 0;
   let pagesTotal = 0;
   let pagesRead = 0;
 
@@ -359,6 +406,7 @@ export function batchTotals(items: BatchItem[]): {
     pagesTotal += item.pageCount ?? 0;
     pagesRead += item.pagesRead;
     if (item.stage === "DONE" && !item.validTo) needsDates += 1;
+    if (item.stage === "DONE" && item.saved === null) notSaved += 1;
     if (item.stage === "FAILED") flyersFailed += 1;
     if (item.stage === "DONE") {
       offers += item.result?.offers.length ?? 0;
@@ -375,6 +423,7 @@ export function batchTotals(items: BatchItem[]): {
     flyersFailed,
     needsRetailer,
     needsDates,
+    notSaved,
     pagesTotal,
     pagesRead,
     // Zero rather than NaN before counting finishes. A progress bar that

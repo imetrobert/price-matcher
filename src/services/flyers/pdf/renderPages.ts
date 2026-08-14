@@ -71,6 +71,19 @@ export interface RenderedFlyerPage extends FlyerPdfPage {
    * tab dies, and the grid only ever needs to be recognisable.
    */
   thumbDataUrl: string;
+  /**
+   * A middle-sized version, kept as the evidence a cashier is shown.
+   *
+   * Not the extraction image: at 1600px each page is around a megabyte, and
+   * five sixteen-page flyers a week is a hundred megabytes of storage for
+   * pictures nobody will look at twice. At 1000px a page is closer to 250 KB
+   * and is still comfortably readable when pinched on a phone at a till, which
+   * is the only thing it has to be.
+   *
+   * Not the thumbnail either — 320px is for recognising a page in a grid, and
+   * a cashier needs to read the price and the product name off it.
+   */
+  proofDataUrl: string;
   widthPx: number;
   heightPx: number;
   /** Size of `imageDataUrl` in kilobytes — what an upload will actually cost. */
@@ -199,7 +212,8 @@ export async function renderFlyerPdf(
         pageNumber: n,
         text,
         imageDataUrl,
-        thumbDataUrl: makeThumbnail(canvas),
+        thumbDataUrl: scaledJpeg(canvas, 320, 0.7),
+        proofDataUrl: scaledJpeg(canvas, 1000, 0.8),
         widthPx: canvas.width,
         heightPx: canvas.height,
         // Base64 carries four characters per three bytes, so the string length
@@ -222,23 +236,26 @@ export async function renderFlyerPdf(
 }
 
 /**
- * A grid-sized copy of a rendered page.
+ * A smaller copy of a rendered page.
  *
- * Deliberately taken from the already-rendered canvas rather than by rendering
- * the page again: the second render would cost as much as the first, and this
- * is only ever going to be looked at from arm's length.
+ * Taken from the already-rendered canvas rather than by rendering the page
+ * again: a second render costs as much as the first, and downscaling a
+ * finished raster is nearly free.
  */
-function makeThumbnail(source: HTMLCanvasElement): string {
-  const THUMB_WIDTH = 320;
+function scaledJpeg(
+  source: HTMLCanvasElement,
+  width: number,
+  quality: number,
+): string {
   const canvas = document.createElement("canvas");
-  const scale = Math.min(1, THUMB_WIDTH / source.width);
+  const scale = Math.min(1, width / source.width);
   canvas.width = Math.max(1, Math.round(source.width * scale));
   canvas.height = Math.max(1, Math.round(source.height * scale));
 
   const context = canvas.getContext("2d");
   if (!context) return "";
   context.drawImage(source, 0, 0, canvas.width, canvas.height);
-  const url = canvas.toDataURL("image/jpeg", 0.7);
+  const url = canvas.toDataURL("image/jpeg", quality);
 
   canvas.width = 0;
   canvas.height = 0;

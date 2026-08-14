@@ -276,6 +276,16 @@ function FlyerImport() {
         </div>
       ) : null}
 
+      {finishedAt && totals.notSaved > 0 ? (
+        <div className="mb-4">
+          <Notice tone="error" title="Some flyers were not saved">
+            {totals.notSaved} of these were read but not stored, so their
+            prices will be gone when this page closes. Each row says why —
+            usually a missing store or missing dates. Fix those and read again.
+          </Notice>
+        </div>
+      ) : null}
+
       {finishedAt && totals.needsDates > 0 ? (
         <div className="mb-4">
           <Notice tone="warn" title="Some flyers have no dates">
@@ -412,6 +422,15 @@ function FlyerRow({
           </span>
         ) : null}
       </p>
+
+      {item.saved ? (
+        <p className="mt-1 text-xs text-good">
+          Saved — {item.saved.offers} offers, {item.saved.pages} pages kept for
+          the till
+        </p>
+      ) : item.saveError ? (
+        <p className="mt-1 text-xs text-bad">{item.saveError}</p>
+      ) : null}
 
       {item.result && item.result.notAttempted.length > 0 ? (
         <p className="mt-2 rounded-lg bg-warn/5 px-2 py-1 text-xs text-warn">
