@@ -148,6 +148,31 @@ function Home() {
           </p>
           <p className="mt-1 text-sm text-muted">{flyers.detail}</p>
 
+          {/*
+            Today, on the card, beside the window it has to fall inside.
+
+            The app already filters to flyers covering today, so a shopper
+            could take "loaded" on trust. Printing the date turns that into
+            something checkable at a glance — and the window is the one thing
+            here that goes stale on its own while nobody touches the app, so
+            it is worth being able to check rather than believe.
+          */}
+          {flyers.validTo ? (
+            <p className="mt-2 text-xs text-muted">
+              Today is {flyers.today}
+              {flyers.daysLeft === 1 ? (
+                <span className="font-semibold text-warn">
+                  {" "}
+                  — last day of this window
+                </span>
+              ) : flyers.daysLeft > 1 ? (
+                <> — {flyers.daysLeft} days left, through {flyers.validTo ? dayLabel(flyers.validTo) : ""}</>
+              ) : null}
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-muted">Today is {flyers.today}.</p>
+          )}
+
           {flyers.readiness === "PARTIAL" ? (
             <div
               className="mt-2 h-2 overflow-hidden rounded-full bg-line"
@@ -314,6 +339,17 @@ function Home() {
       </Link>
     </main>
   );
+}
+
+/** The same reading of a date the status uses, for the end of the window. */
+function dayLabel(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString("en-CA", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 function Row({ label, value }: { label: string; value: string }) {

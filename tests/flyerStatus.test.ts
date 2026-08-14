@@ -205,3 +205,45 @@ describe("waiting on something outside the queue", () => {
     expect(status.waitingReason).toBeNull();
   });
 });
+
+describe("today, as a fixed point to check the window against", () => {
+  // The app filters to flyers covering today, so a shopper could take
+  // "loaded" on trust. Printing the date makes it checkable instead — and the
+  // window is the one thing on that card which goes stale on its own while
+  // nobody touches the app.
+
+  it("reports today and how much of the window is left", () => {
+    const status = flyerStatus([flyer()], DURING);
+    expect(status.today).toBe("Aug 15");
+    // Aug 15 through Aug 19, counting today.
+    expect(status.daysLeft).toBe(5);
+  });
+
+  it("counts the last day as one, not zero", () => {
+    // Today is still a shopping day. Zero would read as expired.
+    const status = flyerStatus([flyer()], new Date("2026-08-19T12:00:00Z"));
+    expect(status.daysLeft).toBe(1);
+  });
+
+  it("counts the first day as the whole window", () => {
+    const status = flyerStatus([flyer()], new Date("2026-08-13T12:00:00Z"));
+    expect(status.daysLeft).toBe(7);
+  });
+
+  it("still names today when nothing covers it", () => {
+    // The Thursday-morning case. "Nothing covers today" is more useful beside
+    // the date it is talking about.
+    const status = flyerStatus([flyer()], AFTER);
+    expect(status.readiness).toBe("NONE");
+    expect(status.today).toBe("Aug 21");
+    expect(status.daysLeft).toBe(0);
+  });
+
+  it("reads a date near midnight as the day it is, not the day before", () => {
+    // Noon UTC throughout, so a late-evening scan in Montreal does not shift
+    // the window by a day.
+    expect(flyerStatus([flyer()], new Date("2026-08-15T03:30:00Z")).today).toBe(
+      "Aug 15",
+    );
+  });
+});

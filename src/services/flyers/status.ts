@@ -78,6 +78,17 @@ export interface FlyerStatus {
    * "nearly there" rather than "tomorrow".
    */
   waitingReason: string | null;
+  /** Today, as the shopper reads it — the fixed point everything else is relative to. */
+  today: string;
+  /**
+   * Days this window still has, counting today. 1 means today is the last day;
+   * 0 or less means nothing covers today at all.
+   *
+   * A flyer's window is the one thing on this card that goes stale on its own
+   * while nobody touches the app, so the number that matters is not the end
+   * date but the distance to it.
+   */
+  daysLeft: number;
   /** One line, written to be shown as-is. */
   headline: string;
   detail: string;
@@ -96,6 +107,15 @@ function day(iso: string): string {
     day: "numeric",
     timeZone: "UTC",
   });
+}
+
+/** Whole days from `from` to `to` inclusive, both read at noon UTC. */
+function daysBetween(from: string, to: string): number {
+  const at = (iso: string) => {
+    const [y, m, d] = iso.split("-").map(Number);
+    return Date.UTC(y!, m! - 1, d!, 12);
+  };
+  return Math.round((at(to) - at(from)) / 86_400_000) + 1;
 }
 
 function names(retailers: RetailerId[]): string {
@@ -135,6 +155,8 @@ export function flyerStatus(
       stalled: false,
       pagesFailed: 0,
       waitingReason: null,
+      today: day(today),
+      daysLeft: 0,
       headline: "Upload the latest flyers",
       detail: previous
         ? `The newest flyers held ran to ${day(previous.validTo)} and have expired. Nothing covers today.`
@@ -188,6 +210,8 @@ export function flyerStatus(
       percent,
       stalled,
       pagesFailed: counts?.failed ?? 0,
+      today: day(today),
+      daysLeft: daysBetween(today, validTo),
       waitingReason: stalled ? null : (counts?.reason ?? null),
       headline: stalled
         ? `Reading stopped — ${percent}% of ${window}`
@@ -212,6 +236,8 @@ export function flyerStatus(
     stalled: false,
     pagesFailed: counts?.failed ?? 0,
     waitingReason: null,
+    today: day(today),
+    daysLeft: daysBetween(today, validTo),
     headline: `Flyers loaded — ${window}`,
     detail: `${names(retailers)}, all ${pagesTotal} pages read.`,
   };
