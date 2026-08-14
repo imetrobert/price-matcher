@@ -69,6 +69,9 @@ function Home() {
         >
           Scan cart
         </Link>
+        <Link href="/deals" className="btn-secondary">
+          Cheaper elsewhere this week
+        </Link>
         <Link href="/flyers" className="btn-secondary">
           Import this week&rsquo;s flyers
         </Link>

@@ -31,6 +31,7 @@ import { createClient } from "@/lib/auth/client";
 import { supabaseConfigured } from "@/config/env";
 import type { RetailerId } from "@/types";
 import type { ExtractedOffer } from "./pdf/types";
+import type { OfferCondition, PriceBasis } from "@/types/flyer";
 
 /**
  * The browser client, or null when Supabase is not configured.
@@ -278,6 +279,76 @@ export async function loadCurrentFlyers(
 
   if (error || !data) return [];
   return data.map(rowToFlyer);
+}
+
+/** One stored offer, with the flyer it came from. */
+export interface StoredOffer {
+  id: string;
+  flyerId: string;
+  retailerId: RetailerId;
+  advertisedText: string;
+  brand: string | null;
+  size: string | null;
+  retailerSku: string | null;
+  price: number;
+  basis: PriceBasis;
+  regularPrice: number | null;
+  regularBasis: PriceBasis | null;
+  condition: OfferCondition;
+  conditionText: string | null;
+  flyerPage: number;
+  confirmedAt: string | null;
+  validFrom: string;
+  validTo: string;
+}
+
+/**
+ * Every offer from every flyer running today.
+ *
+ * The date filter is a join condition rather than an afterthought: an offer
+ * whose flyer has closed is not a stale price, it is not a price, and the
+ * surest way to keep one out of a comparison is for it never to be fetched.
+ */
+export async function loadCurrentOffers(
+  on: Date = new Date(),
+): Promise<StoredOffer[]> {
+  const supabase = client();
+  if (!supabase) return [];
+  const today = isoDay(on);
+
+  const { data, error } = await supabase
+    .from("cartmatch_flyer_offers")
+    .select("*, cartmatch_flyers!inner(retailer_id, valid_from, valid_to)")
+    .lte("cartmatch_flyers.valid_from", today)
+    .gte("cartmatch_flyers.valid_to", today);
+
+  if (error || !data) return [];
+
+  return data.map((row: Record<string, unknown>) => {
+    const flyer = row.cartmatch_flyers as Record<string, unknown>;
+    return {
+      id: String(row.id),
+      flyerId: String(row.flyer_id),
+      retailerId: String(flyer.retailer_id) as RetailerId,
+      advertisedText: String(row.advertised_text),
+      brand: row.brand ? String(row.brand) : null,
+      size: row.size ? String(row.size) : null,
+      retailerSku: row.retailer_sku ? String(row.retailer_sku) : null,
+      price: Number(row.price_cents),
+      basis: String(row.basis) as PriceBasis,
+      regularPrice:
+        row.regular_price_cents === null ? null : Number(row.regular_price_cents),
+      regularBasis: row.regular_basis
+        ? (String(row.regular_basis) as PriceBasis)
+        : null,
+      condition: String(row.condition) as OfferCondition,
+      conditionText: row.condition_text ? String(row.condition_text) : null,
+      flyerPage: Number(row.flyer_page),
+      confirmedAt: row.confirmed_at ? String(row.confirmed_at) : null,
+      validFrom: String(flyer.valid_from),
+      validTo: String(flyer.valid_to),
+    };
+  });
 }
 
 /** Every flyer held, current or not — for the management screen. */
