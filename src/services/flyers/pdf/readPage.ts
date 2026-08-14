@@ -38,6 +38,9 @@ export type ReadPageOutcome =
       model: string;
       /** Store branding read off this page, verbatim. Usually only page 1. */
       retailerName: string | null;
+      /** Run dates printed on this page, YYYY-MM-DD. Usually only page 1. */
+      validFrom: string | null;
+      validTo: string | null;
     }
   | { ok: false; error: string; code?: string };
 
@@ -206,15 +209,15 @@ async function readFlyerPageOnce(
       };
     }
 
-    const { offers, rejected, retailerName } = parseFlyerExtraction(
-      data.raw,
-      page.pageNumber,
-    );
+    const { offers, rejected, retailerName, validFrom, validTo } =
+      parseFlyerExtraction(data.raw, page.pageNumber);
     return {
       ok: true,
       offers,
       rejected,
       retailerName,
+      validFrom,
+      validTo,
       model: String(data.model ?? "unknown"),
     };
   } catch (err) {
@@ -254,6 +257,9 @@ export interface ReadFlyerResult {
   model: string | null;
   /** Store branding read off the pages, for confirming which flyer this is. */
   retailerName: string | null;
+  /** The run dates printed in the flyer, YYYY-MM-DD. */
+  validFrom: string | null;
+  validTo: string | null;
 }
 
 /**
@@ -279,6 +285,8 @@ export async function readFlyerPages(
   const failedPages: { pageNumber: number; error: string }[] = [];
   let model: string | null = null;
   let retailerName: string | null = null;
+  let validFrom: string | null = null;
+  let validTo: string | null = null;
   let stoppedAt = -1;
   let lastRequestAt = 0;
   let interval = MIN_REQUEST_INTERVAL_MS;
@@ -331,6 +339,13 @@ export async function readFlyerPages(
     // and supplier logos, and overwriting with those would end up deciding a
     // Maxi flyer belongs to whoever advertised on page nine.
     retailerName ??= outcome.retailerName;
+    // Same first-wins rule as the store name, for the same reason: later pages
+    // carry section dates and coupon expiries, and the flyer's own window is
+    // printed on the cover.
+    if (validFrom === null && outcome.validFrom && outcome.validTo) {
+      validFrom = outcome.validFrom;
+      validTo = outcome.validTo;
+    }
   }
 
   return {
@@ -343,5 +358,7 @@ export async function readFlyerPages(
         : pages.slice(stoppedAt).map((p) => p.pageNumber),
     model,
     retailerName,
+    validFrom,
+    validTo,
   };
 }

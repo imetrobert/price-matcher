@@ -297,6 +297,11 @@ const FLYER_PROMPT =
   "printed; WITH_PURCHASE when it depends on buying something else.\n" +
   "- conditionText: the qualifying words exactly as printed (\"limite 4\", " +
   "\"2 for $5\", \"avec carte\"), otherwise null.\n\n" +
+  "Also report validFrom and validTo: the dates this flyer runs, as YYYY-MM-DD, " +
+  "if they are printed on this page — flyers print them as \"du 13 au 19 aout\" " +
+  "or \"valid August 13 to 19\". Use ONLY the year printed on the page; if no " +
+  "year is printed, return null for both rather than assuming the current one. " +
+  "Return null for both if no dates appear on this page.\n\n" +
   "Also report retailerName: the name of the store whose logo or branding " +
   "appears on this page — Maxi, IGA, Walmart, Metro, Super C, Provigo — or " +
   "null if no store branding is visible. Report the brand printed on the page, " +
@@ -309,6 +314,8 @@ const FLYER_SCHEMA = {
   type: "object",
   properties: {
     retailerName: { type: "string", nullable: true },
+    validFrom: { type: "string", nullable: true },
+    validTo: { type: "string", nullable: true },
     offers: {
       type: "array",
       items: {

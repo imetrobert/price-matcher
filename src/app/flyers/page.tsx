@@ -36,6 +36,7 @@ import { RETAILERS } from "@/config/retailers";
 import { formatCents } from "@/lib/money";
 import {
   batchTotals,
+  countBatchPages,
   newBatchItem,
   runBatch,
   type BatchItem,
@@ -73,9 +74,19 @@ function FlyerImport() {
     setStartedAt(Date.now());
     setFinishedAt(null);
 
+    // Count first. Without a page total the bar can only count files, and "2 of
+    // 5 flyers" moves once every eight minutes — not something a person can
+    // read a decision off. Counting costs a fraction of a second per file.
+    const counted = await countBatchPages(items, (updated) =>
+      setItems((prev) =>
+        prev.map((it) => (it.id === updated.id ? updated : it)),
+      ),
+    );
+    setItems(counted);
+
     // Each item reports its own progress, so the list updates in place rather
     // than only at the end of a half-hour run.
-    const done = await runBatch(items, {
+    const done = await runBatch(counted, {
       signal: controller.signal,
       onUpdate: (updated) =>
         setItems((prev) =>
@@ -89,6 +100,16 @@ function FlyerImport() {
   }, [items]);
 
   const totals = useMemo(() => batchTotals(items), [items]);
+
+  // Re-rendered on every item update, which is every few seconds while a page
+  // is read — often enough for a clock without a timer of its own.
+  const remaining = useMemo(() => {
+    if (!running || startedAt === null) return null;
+    if (totals.pagesRead < 2 || totals.pagesTotal === 0) return null;
+    const perPage = (Date.now() - startedAt) / totals.pagesRead;
+    const left = Math.max(0, totals.pagesTotal - totals.pagesRead);
+    return Math.ceil((perPage * left) / 60000);
+  }, [running, startedAt, totals.pagesRead, totals.pagesTotal]);
   const elapsedMin =
     startedAt === null || finishedAt === null
       ? null
@@ -146,13 +167,41 @@ function FlyerImport() {
       </section>
 
       {running ? (
-        <div className="mb-4">
-          <Notice tone="info" title="Reading — this takes a while">
+        <section className="card mb-4">
+          <div className="mb-2 flex items-baseline justify-between gap-3">
+            <p className="font-bold">
+              {totals.percent}% — page {totals.pagesRead} of {totals.pagesTotal || "…"}
+            </p>
+            <p className="text-sm text-muted">
+              {/*
+                Measured from this run's own pace rather than from a constant.
+                The rate changes with the quota, so a fixed estimate would be
+                wrong in exactly the runs where someone is watching it.
+              */}
+              {remaining === null
+                ? "estimating…"
+                : remaining <= 1
+                  ? "under a minute left"
+                  : `about ${remaining} min left`}
+            </p>
+          </div>
+          <div
+            className="h-3 overflow-hidden rounded-full bg-line"
+            role="progressbar"
+            aria-valuenow={totals.percent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <div
+              className="h-full rounded-full bg-good transition-[width] duration-500"
+              style={{ width: `${totals.percent}%` }}
+            />
+          </div>
+          <p className="mt-2 text-xs text-muted">
             Pages go one at a time, spaced out so the API quota is not tripped.
-            A five-flyer week is roughly half an hour. Leave this open and come
-            back; closing the tab stops it.
-          </Notice>
-        </div>
+            Leave this open and come back; closing the tab stops it.
+          </p>
+        </section>
       ) : null}
 
       {items.length > 0 ? (
@@ -187,10 +236,16 @@ function FlyerImport() {
 
       {finishedAt ? (
         <section className="card mb-4 text-sm">
+          <p className="mb-1 text-lg font-bold text-good">
+            {totals.flyersIncomplete + totals.flyersFailed === 0
+              ? "Done — every flyer read in full"
+              : "Finished, with gaps"}
+          </p>
           <p className="mb-2 font-bold">
             {totals.offers} offers from{" "}
             {totals.flyersDone + totals.flyersIncomplete} flyer
-            {totals.flyersDone + totals.flyersIncomplete === 1 ? "" : "s"}
+            {totals.flyersDone + totals.flyersIncomplete === 1 ? "" : "s"},{" "}
+            {totals.pagesRead} of {totals.pagesTotal} pages
           </p>
           <Row
             label="Time taken"
@@ -217,6 +272,17 @@ function FlyerImport() {
             {totals.needsRetailer} could not be matched to a retailer from the
             filename or the logo on page 1. Set the store on each, otherwise
             their prices cannot be compared against anything.
+          </Notice>
+        </div>
+      ) : null}
+
+      {finishedAt && totals.needsDates > 0 ? (
+        <div className="mb-4">
+          <Notice tone="warn" title="Some flyers have no dates">
+            {totals.needsDates} of these printed no run dates the app could
+            read, and an offer with no end date cannot be shown to a cashier —
+            &ldquo;still valid?&rdquo; is the first thing asked at the till. Set
+            them by hand, or re-read the flyer so page 1 is seen.
           </Notice>
         </div>
       ) : null}
@@ -328,6 +394,25 @@ function FlyerRow({
         </span>
       </div>
 
+      <p className="mt-2 text-xs">
+        {item.validFrom && item.validTo ? (
+          <>
+            <span className="font-semibold">
+              Valid {formatDay(item.validFrom)} – {formatDay(item.validTo)}
+            </span>
+            <span className="text-muted">
+              {" "}
+              ({item.validityFrom === "FILENAME" ? "from filename" : "from cover"})
+            </span>
+          </>
+        ) : item.stage === "DONE" ? (
+          <span className="text-warn">
+            No run dates found — offers from this flyer cannot back a checkout
+            claim until dates are set
+          </span>
+        ) : null}
+      </p>
+
       {item.result && item.result.notAttempted.length > 0 ? (
         <p className="mt-2 rounded-lg bg-warn/5 px-2 py-1 text-xs text-warn">
           Pages never read: {item.result.notAttempted.join(", ")}
@@ -359,6 +444,22 @@ function FlyerRow({
       ) : null}
     </div>
   );
+}
+
+/**
+ * A date as a shopper reads it, not as a database stores it.
+ *
+ * Deliberately parsed as UTC noon. "2026-08-13" parsed as local midnight lands
+ * on the 12th west of Greenwich, and a flyer shown as expiring a day early is
+ * a flyer nobody takes to the till.
+ */
+function formatDay(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d!, 12)).toLocaleDateString("en-CA", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 function Row({ label, value }: { label: string; value: string }) {

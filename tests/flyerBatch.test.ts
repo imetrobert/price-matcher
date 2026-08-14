@@ -13,6 +13,7 @@ import {
   batchTotals,
   retailerFromFilename,
   retailerFromLogo,
+  validityFromFilename,
   type BatchItem,
 } from "@/services/flyers/batch";
 
@@ -60,11 +61,37 @@ describe("reading the retailer off the logo on page 1", () => {
   });
 });
 
+describe("run dates in a filename", () => {
+  it("reads the window Metro Inc writes into its filenames", () => {
+    expect(
+      validityFromFilename("SuperC Weekly Flyer 2 Valid 13-08-26 - 19-08-26.pdf"),
+    ).toEqual({ from: "2026-08-13", to: "2026-08-19" });
+  });
+
+  it("says nothing about filenames that carry no dates", () => {
+    expect(validityFromFilename("PDF_wk33-2026-SA V6.pdf")).toBeNull();
+  });
+
+  it("refuses a window that runs backwards", () => {
+    expect(validityFromFilename("Flyer 19-08-26 - 13-08-26.pdf")).toBeNull();
+  });
+
+  it("refuses a month that does not exist", () => {
+    // Guards against a day-month-year file being read as month-day-year.
+    expect(validityFromFilename("Flyer 13-19-26 - 19-20-26.pdf")).toBeNull();
+  });
+});
+
 describe("what the batch reports when it is done", () => {
   const item = (patch: Partial<BatchItem>): BatchItem =>
     ({
       id: "x",
       file: new File([], "f.pdf"),
+      pageCount: 17,
+      pagesRead: 17,
+      validFrom: "2026-08-13",
+      validTo: "2026-08-19",
+      validityFrom: "FILENAME",
       retailerId: "maxi",
       retailerFrom: "FILENAME",
       stage: "DONE",
@@ -77,6 +104,8 @@ describe("what the batch reports when it is done", () => {
         notAttempted: [],
         model: "m",
         retailerName: null,
+        validFrom: null,
+        validTo: null,
       },
       error: null,
       ...patch,
@@ -95,11 +124,38 @@ describe("what the batch reports when it is done", () => {
           notAttempted: [3, 4, 5],
           model: "m",
           retailerName: null,
+          validFrom: null,
+          validTo: null,
         },
       }),
     ]);
     expect(totals.flyersDone).toBe(1);
     expect(totals.flyersIncomplete).toBe(1);
+  });
+
+  it("counts flyers whose dates were never found", () => {
+    // An offer with no end date cannot back a checkout claim, so this is a
+    // gap worth interrupting for rather than a cosmetic blank.
+    const totals = batchTotals([
+      item({ validTo: null }),
+      item({}),
+    ]);
+    expect(totals.needsDates).toBe(1);
+  });
+
+  it("reports progress in pages rather than in files", () => {
+    const totals = batchTotals([
+      item({ pageCount: 17, pagesRead: 17 }),
+      item({ pageCount: 8, pagesRead: 2 }),
+    ]);
+    expect(totals.pagesTotal).toBe(25);
+    expect(totals.pagesRead).toBe(19);
+    expect(totals.percent).toBe(76);
+  });
+
+  it("reports zero rather than nonsense before counting finishes", () => {
+    const totals = batchTotals([item({ pageCount: null, pagesRead: 0 })]);
+    expect(totals.percent).toBe(0);
   });
 
   it("counts flyers still missing a store", () => {

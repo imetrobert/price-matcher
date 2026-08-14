@@ -38,7 +38,11 @@
 import { RETAILERS } from "@/config/retailers";
 import type { RetailerId } from "@/types";
 
-import { renderFlyerPdf, type RenderedFlyerPage } from "./pdf/renderPages";
+import {
+  countPdfPages,
+  renderFlyerPdf,
+  type RenderedFlyerPage,
+} from "./pdf/renderPages";
 import { readFlyerPages, type ReadFlyerResult } from "./pdf/readPage";
 
 export type BatchStage =
@@ -51,6 +55,15 @@ export type BatchStage =
 export interface BatchItem {
   id: string;
   file: File;
+  /** Pages in the PDF, counted before any work starts. Drives the progress bar. */
+  pageCount: number | null;
+  /** Pages of this flyer already read. */
+  pagesRead: number;
+  /** The flyer's run dates, from its filename or its cover. */
+  validFrom: string | null;
+  validTo: string | null;
+  /** Where those dates came from, since one source is a model and one is not. */
+  validityFrom: "FILENAME" | "COVER" | "UNKNOWN";
   /** Best current guess, and what the run will use unless overridden. */
   retailerId: RetailerId | null;
   /** How that guess was arrived at, shown so it can be judged. */
@@ -112,11 +125,40 @@ export function retailerFromLogo(read: string | null): RetailerId | null {
   return null;
 }
 
+/**
+ * The run dates some retailers put in the filename.
+ *
+ * Metro Inc writes "SuperC Weekly Flyer 2 Valid 13-08-26 - 19-08-26.pdf" —
+ * day-month-year, two-digit year. Preferred over the cover reading when it is
+ * there, because it came from the retailer's own file naming rather than from
+ * a model looking at artwork.
+ *
+ * Two-digit years are read as 2000+. These are weekly flyers; a 1926 grocery
+ * circular is not a case worth handling.
+ */
+export function validityFromFilename(
+  name: string,
+): { from: string; to: string } | null {
+  const m = /(\d{2})-(\d{2})-(\d{2})\s*-\s*(\d{2})-(\d{2})-(\d{2})/.exec(name);
+  if (!m) return null;
+  const iso = (d: string, mo: string, y: string) => `20${y}-${mo}-${d}`;
+  const from = iso(m[1]!, m[2]!, m[3]!);
+  const to = iso(m[4]!, m[5]!, m[6]!);
+  if (Number(m[2]) > 12 || Number(m[5]) > 12) return null;
+  return from <= to ? { from, to } : null;
+}
+
 export function newBatchItem(file: File, index: number): BatchItem {
   const guess = retailerFromFilename(file.name);
+  const dates = validityFromFilename(file.name);
   return {
     id: `${index}-${file.name}-${file.size}`,
     file,
+    pageCount: null,
+    pagesRead: 0,
+    validFrom: dates?.from ?? null,
+    validTo: dates?.to ?? null,
+    validityFrom: dates ? "FILENAME" : "UNKNOWN",
     retailerId: guess,
     retailerFrom: guess ? "FILENAME" : "UNKNOWN",
     stage: "WAITING",
@@ -163,6 +205,8 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
       onProgress: ({ page, pageCount, offersSoFar }) => {
         current = {
           ...current,
+          // page-1 means pages FINISHED, which is what a progress bar counts.
+          pagesRead: Math.max(0, page - 1),
           detail: `Reading page ${page} of ${pageCount} — ${offersSoFar} offers`,
         };
         options.onUpdate(current);
@@ -184,11 +228,26 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
     const disagrees =
       retailerFrom === "FILENAME" && fromLogo !== null && fromLogo !== retailerId;
 
+    // The filename wins where it speaks: it is the retailer's own labelling of
+    // the file, and the cover reading is a model looking at artwork. The cover
+    // fills the gap for the retailers whose files carry no dates at all.
+    const validFrom = current.validFrom ?? result.validFrom;
+    const validTo = current.validTo ?? result.validTo;
+
     current = {
       ...current,
       retailerId,
       retailerFrom,
       result,
+      validFrom,
+      validTo,
+      validityFrom:
+        current.validityFrom === "FILENAME"
+          ? "FILENAME"
+          : validFrom
+            ? "COVER"
+            : "UNKNOWN",
+      pagesRead: pages.length - result.notAttempted.length,
       stage: "DONE",
       detail: disagrees
         ? `Filename says ${RETAILERS[retailerId!].displayName}, page 1 shows ${RETAILERS[fromLogo!].displayName} — check this one`
@@ -232,6 +291,34 @@ function summarise(result: ReadFlyerResult, pageCount: number): string {
  * One flyer failing does not stop the others. A corrupt PDF or an exhausted
  * quota partway down the list should still leave the flyers that did work.
  */
+/**
+ * Count every PDF's pages before doing any work.
+ *
+ * Cheap — pdf.js reads the page tree without rasterising anything — and it is
+ * what makes the progress bar mean something. A bar that counts files moves
+ * once every eight minutes; one that counts pages moves every few seconds, and
+ * a person can tell from it whether to wait or go and do something else.
+ */
+export async function countBatchPages(
+  items: BatchItem[],
+  onUpdate: (item: BatchItem) => void,
+): Promise<BatchItem[]> {
+  const counted: BatchItem[] = [];
+  for (const item of items) {
+    try {
+      const pageCount = await countPdfPages(await item.file.arrayBuffer());
+      const next = { ...item, pageCount, detail: `${pageCount} pages — waiting` };
+      onUpdate(next);
+      counted.push(next);
+    } catch {
+      // A file that will not open is left uncounted rather than failed here;
+      // the run itself reports it properly, with the reason.
+      counted.push(item);
+    }
+  }
+  return counted;
+}
+
 export async function runBatch(
   items: BatchItem[],
   options: BatchOptions,
@@ -254,14 +341,24 @@ export function batchTotals(items: BatchItem[]): {
   flyersIncomplete: number;
   flyersFailed: number;
   needsRetailer: number;
+  needsDates: number;
+  pagesTotal: number;
+  pagesRead: number;
+  percent: number;
 } {
   let offers = 0;
   let flyersDone = 0;
   let flyersIncomplete = 0;
   let flyersFailed = 0;
   let needsRetailer = 0;
+  let needsDates = 0;
+  let pagesTotal = 0;
+  let pagesRead = 0;
 
   for (const item of items) {
+    pagesTotal += item.pageCount ?? 0;
+    pagesRead += item.pagesRead;
+    if (item.stage === "DONE" && !item.validTo) needsDates += 1;
     if (item.stage === "FAILED") flyersFailed += 1;
     if (item.stage === "DONE") {
       offers += item.result?.offers.length ?? 0;
@@ -271,5 +368,18 @@ export function batchTotals(items: BatchItem[]): {
     if (item.retailerId === null) needsRetailer += 1;
   }
 
-  return { offers, flyersDone, flyersIncomplete, flyersFailed, needsRetailer };
+  return {
+    offers,
+    flyersDone,
+    flyersIncomplete,
+    flyersFailed,
+    needsRetailer,
+    needsDates,
+    pagesTotal,
+    pagesRead,
+    // Zero rather than NaN before counting finishes. A progress bar that
+    // reports nonsense for the first second teaches people to ignore it.
+    percent:
+      pagesTotal === 0 ? 0 : Math.min(100, Math.round((pagesRead / pagesTotal) * 100)),
+  };
 }

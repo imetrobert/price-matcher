@@ -110,6 +110,26 @@ function workerSrc(): string {
 }
 
 /**
+ * How many pages a PDF has, without rendering any of them.
+ *
+ * Exists so a batch can show real progress. Without it the total is unknown
+ * until the last flyer is opened, so a progress bar could only ever count
+ * files — and "2 of 5 flyers" moves once every eight minutes, which is not
+ * progress a person can read. Counting first costs a fraction of a second per
+ * file and turns the bar into pages, which move every few seconds.
+ */
+export async function countPdfPages(data: ArrayBuffer): Promise<number> {
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc = workerSrc();
+  const doc = await pdfjs.getDocument({ data }).promise;
+  try {
+    return doc.numPages;
+  } finally {
+    await doc.destroy();
+  }
+}
+
+/**
  * Render every page of a flyer PDF to an image, and pull whatever text exists.
  *
  * The text matters as much as the image: it is the independent witness that

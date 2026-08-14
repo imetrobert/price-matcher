@@ -65,6 +65,29 @@ export interface ParsedExtraction {
    * are — which belongs where a person can see and override it.
    */
   retailerName: string | null;
+  /**
+   * The run dates printed on the page, as YYYY-MM-DD.
+   *
+   * Kept only when they parse as a real date. A model asked for a date will
+   * produce something date-shaped whatever it saw, and a flyer's window is the
+   * one field a cashier checks first — so a malformed answer is dropped rather
+   * than repaired into a plausible one.
+   */
+  validFrom: string | null;
+  validTo: string | null;
+}
+
+/** YYYY-MM-DD, and a date that exists. Anything else is not a date. */
+function readIsoDate(value: unknown): string | null {
+  const text = readString(value);
+  if (!text || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const [y, m, d] = text.split("-").map(Number);
+  const date = new Date(Date.UTC(y!, m! - 1, d!));
+  const roundTrips =
+    date.getUTCFullYear() === y &&
+    date.getUTCMonth() === m! - 1 &&
+    date.getUTCDate() === d;
+  return roundTrips ? text : null;
 }
 
 /**
@@ -81,10 +104,16 @@ export function parseFlyerExtraction(
   const offers: ExtractedOffer[] = [];
   const rejected: string[] = [];
 
-  const retailerName =
+  const row =
     typeof raw === "object" && raw !== null
-      ? readString((raw as Record<string, unknown>).retailerName)
-      : null;
+      ? (raw as Record<string, unknown>)
+      : {};
+  const retailerName = readString(row.retailerName);
+  const validFrom = readIsoDate(row.validFrom);
+  const validTo = readIsoDate(row.validTo);
+  // A window that runs backwards was misread, and half a window cannot be
+  // shown as one. Both or neither.
+  const windowOk = validFrom !== null && validTo !== null && validFrom <= validTo;
 
   const list = readArray(raw, "offers");
   if (list === null) {
@@ -92,6 +121,8 @@ export function parseFlyerExtraction(
       offers,
       rejected: ["The reply contained no list of offers."],
       retailerName,
+      validFrom: windowOk ? validFrom : null,
+      validTo: windowOk ? validTo : null,
     };
   }
 
@@ -104,7 +135,13 @@ export function parseFlyerExtraction(
     offers.push(parsed.offer);
   }
 
-  return { offers, rejected, retailerName };
+  return {
+    offers,
+    rejected,
+    retailerName,
+    validFrom: windowOk ? validFrom : null,
+    validTo: windowOk ? validTo : null,
+  };
 }
 
 type OneResult = { offer: ExtractedOffer } | { error: string };
