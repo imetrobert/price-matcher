@@ -33,12 +33,28 @@ function Home() {
   // progressing, which is the impression "Finish loading" gave.
   useEffect(() => {
     if (flyers?.readiness !== "PARTIAL") return;
-    const timer = setInterval(() => {
+
+    const refreshStatus = () =>
       loadAllFlyers()
         .then((all) => setFlyers(flyerStatus(all)))
         .catch(() => undefined);
-    }, 15_000);
-    return () => clearInterval(timer);
+
+    const timer = setInterval(refreshStatus, 10_000);
+
+    // Coming back to a backgrounded tab is the common case on a phone, and it
+    // is exactly when the number on screen is most out of date — several
+    // minutes of reading have happened since it was last painted, and mobile
+    // browsers throttle or suspend timers in background tabs, so the interval
+    // above cannot be relied on to have run. Refresh on return.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshStatus();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [flyers?.readiness]);
 
   useEffect(() => {
@@ -125,8 +141,9 @@ function Home() {
           {flyers.readiness === "PARTIAL" ? (
             <>
               <p className="mt-2 text-xs text-muted">
-                Reading continues on its own — you can close this. This count
-                refreshes every fifteen seconds.
+                Reading continues on its own — you can close this. The count
+                updates every ten seconds, and again whenever you come back to
+                this tab.
               </p>
               <Link href="/flyers" className="btn-secondary mt-3">
                 Add more flyers
