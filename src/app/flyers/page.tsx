@@ -148,7 +148,7 @@ function FlyerImport() {
     <main className="mx-auto max-w-[900px]">
       <PageHeader
         title="Import this week's flyers"
-        subtitle="Drop in every flyer at once. Reading them takes a while; nothing else is needed from you."
+        subtitle="Drop them all in. Uploading takes a couple of minutes, then you can close the tab — the reading finishes on its own."
         backHref="/"
       />
 
@@ -214,8 +214,8 @@ function FlyerImport() {
             onClick={() => void start()}
           >
             {finishedAt
-              ? "Read them again"
-              : `Read ${items.length} flyer${items.length === 1 ? "" : "s"}`}
+              ? "Upload them again"
+              : `Upload ${items.length} flyer${items.length === 1 ? "" : "s"}`}
           </button>
         ) : null}
 
@@ -262,8 +262,9 @@ function FlyerImport() {
             />
           </div>
           <p className="mt-2 text-xs text-muted">
-            Pages go one at a time, spaced out so the API quota is not tripped.
-            Leave this open and come back; closing the tab stops it.
+            Each cover is read here to find the store and the dates, then the
+            pages are uploaded. Once the uploads finish you can close the tab —
+            the reading happens on the server.
           </p>
         </section>
       ) : null}
@@ -427,10 +428,12 @@ function FlyerImport() {
       {finishedAt ? (
         <>
           <div className="mb-4">
-            <Notice tone="info" title="Nothing has been saved yet">
-              These are candidates. Storing them, and comparing them against a
-              cart, comes next — and nothing reaches a cashier until you have
-              confirmed it.
+            <Notice tone="info" title="You can close this tab now">
+              The pages are uploaded and queued. A scheduled job reads a few
+              every minute — a five-flyer week takes roughly half an hour, and a
+              quota that runs out simply resumes when it resets. Watch the home
+              screen for progress. Nothing reaches a cashier until you have
+              confirmed it against the page.
             </Notice>
           </div>
           <Link href="/" className="btn-secondary">
