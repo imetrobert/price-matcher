@@ -40,7 +40,7 @@ import { buildCanonicalProduct, meaningfulTokens } from "@/services/products/nor
 import { scoreMatch } from "@/services/matching/scoring";
 import { calculateSavingsCents, meetsThreshold } from "@/lib/money";
 import type { Cents, RetailerId } from "@/types";
-import type { PriceBasis } from "@/types/flyer";
+import type { OfferCondition, PriceBasis } from "@/types/flyer";
 import type { StoredOffer } from "./storage";
 
 /**
@@ -68,17 +68,62 @@ export interface PriceGap {
   savingCents: Cents;
   /** Every offer in the group, cheapest first. */
   offers: StoredOffer[];
+  /**
+   * At least one offer here carries a condition — a card, a quantity cap.
+   * Set so the card can say so where somebody reads the number, rather than
+   * only in a setting they toggled and forgot.
+   */
+  hasConditional: boolean;
 }
+
+/**
+ * Conditions whose advertised number is still a price for ONE of the item.
+ *
+ * ---------------------------------------------------------------------------
+ * THE LINE THAT MATTERS, AND WHY IT IS NOT DRAWN AT "CONDITIONAL"
+ * ---------------------------------------------------------------------------
+ * Conditional offers were excluded wholesale, which conflated two quite
+ * different problems under one word.
+ *
+ *   "avec carte Scène+" and "limite 4" advertise a price for one unit. The
+ *   catch is whether the shopper QUALIFIES — a card in the wallet, a quantity
+ *   cap. The number itself is comparable; what it costs is a condition a
+ *   person can read and decide about.
+ *
+ *   "2 for $5" and "with the purchase of..." advertise a price for something
+ *   else entirely. Five dollars is the price of TWO. Set beside $3.99 each it
+ *   reads as a dollar cheaper when it is in fact a dollar dearer per item, and
+ *   halving it to $2.50 quotes a number no flyer printed.
+ *
+ * So the first group can be opted into and the second cannot. That is not a
+ * setting: a multi-buy total compared against a unit price is arithmetic
+ * between two different quantities, and no amount of labelling makes the
+ * subtraction mean anything.
+ */
+const UNIT_PRICED_CONDITIONS: readonly OfferCondition[] = [
+  "UNIT_PRICE",
+  "LOYALTY_ONLY",
+  "LIMIT_APPLIES",
+];
 
 /**
  * Can this offer take part in a comparison at all?
  *
- * Conditional prices are excluded rather than converted. A "2 for $5" reduced
- * to $2.50 is a number nobody was quoted, and a card price compared against a
- * shelf price is a saving that evaporates when the cashier asks for the card.
+ * With `includeConditional`, offers whose price is still per-unit join in —
+ * card prices and limited quantities. Multi-buys and with-purchase offers stay
+ * out either way, because their number counts a different thing.
  */
-export function isComparable(offer: StoredOffer): boolean {
-  return offer.condition === "UNIT_PRICE";
+export function isComparable(
+  offer: StoredOffer,
+  includeConditional = false,
+): boolean {
+  if (offer.condition === "UNIT_PRICE") return true;
+  return includeConditional && UNIT_PRICED_CONDITIONS.includes(offer.condition);
+}
+
+/** Is this offer in the comparison only because conditions were opted into? */
+export function isConditional(offer: StoredOffer): boolean {
+  return offer.condition !== "UNIT_PRICE";
 }
 
 /**
@@ -118,8 +163,9 @@ function toCanonical(offer: StoredOffer) {
 export function findPriceGaps(
   offers: StoredOffer[],
   minSavingCents: Cents,
+  includeConditional = false,
 ): PriceGap[] {
-  const usable = offers.filter(isComparable);
+  const usable = offers.filter((o) => isComparable(o, includeConditional));
 
   // Grouped by unit first. Comparing a per-pound price with a per-item one is
   // the single most convincing wrong answer this app could produce, so the two
@@ -192,6 +238,7 @@ export function findPriceGaps(
           dearest,
           savingCents: saving,
           offers: sorted,
+          hasConditional: sorted.some(isConditional),
         });
       }
     }
@@ -201,28 +248,99 @@ export function findPriceGaps(
   return gaps.sort((a, b) => b.savingCents - a.savingCents);
 }
 
+/** One flyer that took part, as the reader needs to see it. */
+export interface ComparisonSource {
+  retailerId: RetailerId;
+  validFrom: string;
+  validTo: string;
+  /** Offers this flyer contributed, conditional ones included. */
+  offers: number;
+  /** From the flyer record, when it is available. */
+  pagesRead: number | null;
+  pageCount: number | null;
+}
+
 export interface ComparisonSummary {
   offersConsidered: number;
   offersSkippedConditional: number;
+  /** Conditional offers whose price is per-unit, so they CAN be opted into. */
+  offersConditionalUsable: number;
+  /** Multi-buys and with-purchase offers, which never take part. */
+  offersNeverComparable: number;
   retailers: RetailerId[];
   gaps: number;
+  /** Every flyer behind these numbers, named and dated. */
+  sources: ComparisonSource[];
+  /** The widest window the sources cover, or null when there are none. */
+  validFrom: string | null;
+  validTo: string | null;
+  /** True when some page of some flyer has not been read yet. */
+  incomplete: boolean;
 }
 
 /**
  * What the comparison was working from.
  *
- * Shown above the results because the results are only as good as the input,
- * and "no gaps found" means something quite different with two flyers loaded
- * than with five.
+ * ---------------------------------------------------------------------------
+ * WHY THE SOURCES ARE NAMED AND DATED
+ * ---------------------------------------------------------------------------
+ * This screen compares what THIS WEEK'S FLYERS ADVERTISE. It is not a survey
+ * of what the shops sell — a product nobody put in a flyer cannot appear here
+ * however different its price is between two stores, and a flyer that was not
+ * loaded is simply a store that does not exist as far as these numbers go.
+ *
+ * "3 price gaps across 4 stores" gave no way to tell those apart. Naming each
+ * flyer with its dates, its offer count and how much of it has been read makes
+ * the boundary of the answer visible: four stores for the week of the 13th,
+ * one of them still sixteen pages short, is a very different claim from four
+ * complete flyers.
  */
 export function summariseComparison(
   offers: StoredOffer[],
   gaps: PriceGap[],
+  flyers: { retailerId: RetailerId; validFrom: string; pagesRead: number; pageCount: number }[] = [],
 ): ComparisonSummary {
+  const byRetailer = new Map<RetailerId, StoredOffer[]>();
+  for (const offer of offers) {
+    const list = byRetailer.get(offer.retailerId) ?? [];
+    list.push(offer);
+    byRetailer.set(offer.retailerId, list);
+  }
+
+  const sources: ComparisonSource[] = [...byRetailer.entries()]
+    .map(([retailerId, list]) => {
+      const validFrom = list.map((o) => o.validFrom).sort()[0]!;
+      const validTo = list.map((o) => o.validTo).sort().reverse()[0]!;
+      const flyer = flyers.find(
+        (f) => f.retailerId === retailerId && f.validFrom === validFrom,
+      );
+      return {
+        retailerId,
+        validFrom,
+        validTo,
+        offers: list.length,
+        pagesRead: flyer ? flyer.pagesRead : null,
+        pageCount: flyer ? flyer.pageCount : null,
+      };
+    })
+    .sort((a, b) => a.retailerId.localeCompare(b.retailerId));
+
+  const conditional = offers.filter(isConditional);
+
   return {
-    offersConsidered: offers.filter(isComparable).length,
-    offersSkippedConditional: offers.filter((o) => !isComparable(o)).length,
-    retailers: [...new Set(offers.map((o) => o.retailerId))].sort(),
+    offersConsidered: offers.filter((o) => isComparable(o)).length,
+    offersSkippedConditional: conditional.length,
+    offersConditionalUsable: conditional.filter((o) => isComparable(o, true)).length,
+    offersNeverComparable: conditional.filter((o) => !isComparable(o, true)).length,
+    retailers: [...byRetailer.keys()].sort(),
     gaps: gaps.length,
+    sources,
+    validFrom: sources.map((s) => s.validFrom).sort()[0] ?? null,
+    validTo: sources.map((s) => s.validTo).sort().reverse()[0] ?? null,
+    // A page still unread is offers missing from this comparison, not offers
+    // that do not exist — the same distinction the home card makes.
+    incomplete: sources.some(
+      (s) => s.pagesRead !== null && s.pageCount !== null && s.pagesRead < s.pageCount,
+    ),
   };
 }

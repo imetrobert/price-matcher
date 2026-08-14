@@ -218,3 +218,118 @@ describe("saying what the comparison was working from", () => {
     expect(summary.retailers).toEqual(["iga", "maxi", "walmart"]);
   });
 });
+
+describe("opting into conditional prices", () => {
+  // Two problems were filed under one word. "Requires the card" advertises a
+  // price for ONE item and the catch is whether you qualify. "2 for $5"
+  // advertises the price of TWO. Only the first can be opted into.
+
+  const card = (patch: Partial<StoredOffer> = {}): StoredOffer =>
+    offer({ condition: "LOYALTY_ONLY", conditionText: "avec carte Scène+", ...patch });
+
+  it("leaves card prices out until asked", () => {
+    const offers = [
+      offer({ id: "a", retailerId: "maxi", advertisedText: "Lait 2% 2 L", price: 599 }),
+      card({ id: "b", retailerId: "iga", advertisedText: "Lait 2% 2 L", price: 399 }),
+    ];
+    expect(findPriceGaps(offers, 50)).toHaveLength(0);
+  });
+
+  it("includes them when asked, and marks the gap", () => {
+    const offers = [
+      offer({ id: "a", retailerId: "maxi", advertisedText: "Lait 2% 2 L", price: 599 }),
+      card({ id: "b", retailerId: "iga", advertisedText: "Lait 2% 2 L", price: 399 }),
+    ];
+    const gaps = findPriceGaps(offers, 50, true);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]!.savingCents).toBe(200);
+    // The flag is what lets the card say so where the number is read, rather
+    // than only in a setting somebody toggled and forgot.
+    expect(gaps[0]!.hasConditional).toBe(true);
+  });
+
+  it("never includes a multi-buy, whatever the setting", () => {
+    // $5 is the price of two. Beside $3.99 each it reads a dollar cheaper
+    // when it is a dollar dearer per item, and no label fixes a subtraction
+    // between two different quantities.
+    const offers = [
+      offer({ id: "a", retailerId: "maxi", advertisedText: "Lait 2% 2 L", price: 399 }),
+      offer({
+        id: "b",
+        retailerId: "iga",
+        advertisedText: "Lait 2% 2 L",
+        price: 500,
+        condition: "MULTI_BUY",
+        conditionText: "2 pour 5$",
+      }),
+    ];
+    expect(findPriceGaps(offers, 50, true)).toHaveLength(0);
+  });
+
+  it("never includes a with-purchase offer either", () => {
+    const offers = [
+      offer({ id: "a", retailerId: "maxi", advertisedText: "Lait 2% 2 L", price: 599 }),
+      offer({
+        id: "b",
+        retailerId: "iga",
+        advertisedText: "Lait 2% 2 L",
+        price: 199,
+        condition: "WITH_PURCHASE",
+        conditionText: "à l'achat de 3 produits",
+      }),
+    ];
+    expect(findPriceGaps(offers, 50, true)).toHaveLength(0);
+  });
+
+  it("leaves an all-unit-price gap unmarked", () => {
+    const offers = [
+      offer({ id: "a", retailerId: "maxi", advertisedText: "Lait 2% 2 L", price: 599 }),
+      offer({ id: "b", retailerId: "iga", advertisedText: "Lait 2% 2 L", price: 399 }),
+    ];
+    expect(findPriceGaps(offers, 50, true)[0]!.hasConditional).toBe(false);
+  });
+});
+
+describe("saying what the comparison was working from", () => {
+  it("names each flyer with its dates and how much was read", () => {
+    const offers = [
+      offer({ id: "a", retailerId: "maxi", advertisedText: "Lait", price: 599 }),
+      offer({ id: "b", retailerId: "iga", advertisedText: "Pain", price: 399 }),
+    ];
+    const summary = summariseComparison(offers, [], [
+      { retailerId: "maxi", validFrom: "2026-08-13", pagesRead: 17, pageCount: 17 },
+      { retailerId: "iga", validFrom: "2026-08-13", pagesRead: 4, pageCount: 16 },
+    ]);
+
+    expect(summary.sources).toHaveLength(2);
+    const iga = summary.sources.find((s) => s.retailerId === "iga")!;
+    expect(iga.pagesRead).toBe(4);
+    expect(iga.pageCount).toBe(16);
+    // A page unread is offers missing, not offers absent — the same
+    // distinction the home card makes.
+    expect(summary.incomplete).toBe(true);
+  });
+
+  it("does not claim incompleteness it cannot see", () => {
+    // No flyer records supplied. Not knowing how many pages exist is not
+    // evidence that some are unread.
+    const summary = summariseComparison(
+      [offer({ id: "a", retailerId: "maxi", advertisedText: "Lait", price: 599 })],
+      [],
+    );
+    expect(summary.incomplete).toBe(false);
+    expect(summary.sources[0]!.pagesRead).toBeNull();
+  });
+
+  it("counts conditional offers by whether they could ever be compared", () => {
+    const offers = [
+      offer({ id: "a", advertisedText: "Lait", price: 599 }),
+      offer({ id: "b", advertisedText: "Pain", price: 399, condition: "LOYALTY_ONLY" }),
+      offer({ id: "c", advertisedText: "Riz", price: 500, condition: "MULTI_BUY" }),
+    ];
+    const summary = summariseComparison(offers, []);
+    expect(summary.offersConsidered).toBe(1);
+    expect(summary.offersConditionalUsable).toBe(1);
+    expect(summary.offersNeverComparable).toBe(1);
+  });
+});

@@ -279,17 +279,16 @@ export function regularPriceIsComparable(offer: FlyerOffer): boolean {
   return offer.regularBasis === null || offer.regularBasis === offer.basis;
 }
 
-export function describeCondition(offer: FlyerOffer): string {
-  // The basis leads when there is one: "per lb" is the thing that stops a
-  // shopper misreading the number, and it outranks any other qualifier.
-  if (isMeasuredBasis(offer.basis)) {
-    const unit = describeBasis(offer.basis);
-    return offer.conditionText
-      ? `${unit} — ${offer.conditionText}`
-      : `Advertised ${unit}, so it cannot be compared against a package price`;
-  }
-  if (offer.conditionText) return offer.conditionText;
-  switch (offer.condition) {
+/**
+ * The condition in plain words, from the code alone.
+ *
+ * Split out because a stored flyer offer is not a FlyerOffer — it has no
+ * source or flyerUrl — and the deals screen still has to name the catch beside
+ * the price. One wording, used by both, so a card price is never described one
+ * way on one screen and another way on the next.
+ */
+export function conditionLabel(condition: OfferCondition): string {
+  switch (condition) {
     case "UNIT_PRICE":
       return "Advertised price";
     case "MULTI_BUY":
@@ -301,4 +300,17 @@ export function describeCondition(offer: FlyerOffer): string {
     case "WITH_PURCHASE":
       return "Conditional on another purchase";
   }
+}
+
+export function describeCondition(offer: FlyerOffer): string {
+  // The basis leads when there is one: "per lb" is the thing that stops a
+  // shopper misreading the number, and it outranks any other qualifier.
+  if (isMeasuredBasis(offer.basis)) {
+    const unit = describeBasis(offer.basis);
+    return offer.conditionText
+      ? `${unit} — ${offer.conditionText}`
+      : `Advertised ${unit}, so it cannot be compared against a package price`;
+  }
+  if (offer.conditionText) return offer.conditionText;
+  return conditionLabel(offer.condition);
 }

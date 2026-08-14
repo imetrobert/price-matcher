@@ -35,9 +35,24 @@ import {
   type ComparisonSummary,
   type PriceGap,
 } from "@/services/flyers/compare";
-import { loadCurrentOffers, type StoredOffer } from "@/services/flyers/storage";
+import {
+  loadAllFlyers,
+  loadCurrentOffers,
+  type StoredOffer,
+} from "@/services/flyers/storage";
 import { citationLine } from "@/services/flyers/citation";
-import { describeBasis } from "@/types/flyer";
+import { conditionLabel, describeBasis } from "@/types/flyer";
+
+/** A date as a shopper reads it. Noon UTC so it never slips back a day. */
+function day(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString("en-CA", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
 
 export default function DealsPage() {
   return (
@@ -53,21 +68,30 @@ function Deals() {
   const [gaps, setGaps] = useState<PriceGap[]>([]);
   const [summary, setSummary] = useState<ComparisonSummary | null>(null);
   const [threshold, setThreshold] = useState(DEFAULT_PREFS.minSavingsCents);
+  // Off by default. A card price is a price somebody may not be able to pay,
+  // and the safe reading has to be the one nobody had to choose.
+  const [includeConditional, setIncludeConditional] = useState(false);
 
-  const refresh = useCallback(async (minSaving: number) => {
-    setLoading(true);
-    const loaded = await loadCurrentOffers();
-    const found = findPriceGaps(loaded, minSaving);
-    setOffers(loaded);
-    setGaps(found);
-    setSummary(summariseComparison(loaded, found));
-    setLoading(false);
-  }, []);
+  const refresh = useCallback(
+    async (minSaving: number, withConditional: boolean) => {
+      setLoading(true);
+      const [loaded, flyers] = await Promise.all([
+        loadCurrentOffers(),
+        loadAllFlyers(),
+      ]);
+      const found = findPriceGaps(loaded, minSaving, withConditional);
+      setOffers(loaded);
+      setGaps(found);
+      setSummary(summariseComparison(loaded, found, flyers));
+      setLoading(false);
+    },
+    [],
+  );
 
   useEffect(() => {
     const prefs = loadPrefs();
     setThreshold(prefs.minSavingsCents);
-    void refresh(prefs.minSavingsCents);
+    void refresh(prefs.minSavingsCents, false);
   }, [refresh]);
 
   return (
@@ -108,24 +132,101 @@ function Deals() {
             {summary.retailers.length} store
             {summary.retailers.length === 1 ? "" : "s"}
           </p>
-          <p className="mb-2 text-xs text-muted">
-            {summary.retailers
-              .map((r) => RETAILERS[r]?.displayName ?? r)
-              .join(", ")}
+          {/*
+            The scope of the answer, stated before the answer.
+
+            This screen compares what THIS WEEK'S FLYERS ADVERTISE — not what
+            the shops sell. A product nobody put in a flyer cannot appear here
+            however different its price is between two stores, and a flyer that
+            was not loaded is a store that does not exist as far as these
+            numbers go. "3 gaps across 4 stores" gave no way to tell any of
+            that apart from a complete survey.
+          */}
+          <p className="mb-3 text-xs text-muted">
+            Only products advertised in the flyers below are compared. Anything
+            not in a flyer this week — and any store whose flyer you have not
+            loaded — is not in these numbers.
           </p>
+
+          <div className="mb-3 space-y-1">
+            {summary.sources.map((source) => (
+              <p
+                key={`${source.retailerId}-${source.validFrom}`}
+                className="flex flex-wrap items-baseline justify-between gap-x-3 border-b border-line py-1 text-xs last:border-0"
+              >
+                <span className="font-semibold">
+                  {RETAILERS[source.retailerId]?.displayName ?? source.retailerId}
+                </span>
+                <span className="text-muted">
+                  {day(source.validFrom)} – {day(source.validTo)}
+                </span>
+                <span className="text-muted">
+                  {source.offers} offers
+                  {source.pageCount !== null && source.pagesRead !== null
+                    ? ` · ${source.pagesRead}/${source.pageCount} pages`
+                    : ""}
+                </span>
+              </p>
+            ))}
+          </div>
+
+          {summary.incomplete ? (
+            <p className="mb-3 rounded-md bg-warn/10 p-2 text-xs text-warn">
+              Some pages have not been read yet. Offers on them are missing
+              from this comparison, not absent from the flyer.
+            </p>
+          ) : null}
+
           <Row
             label="Offers compared"
-            value={String(summary.offersConsidered)}
+            value={String(
+              includeConditional
+                ? summary.offersConsidered + summary.offersConditionalUsable
+                : summary.offersConsidered,
+            )}
           />
           <Row
-            label="Set aside as conditional"
-            value={String(summary.offersSkippedConditional)}
+            label={includeConditional ? "Left out (multi-buy)" : "Set aside as conditional"}
+            value={String(
+              includeConditional
+                ? summary.offersNeverComparable
+                : summary.offersSkippedConditional,
+            )}
           />
-          <p className="mt-2 text-xs text-muted">
-            Conditional offers — multi-buys, loyalty-card prices, quantity
-            limits — are never compared. The advertised number is not what you
-            pay unless you satisfy something this app cannot check.
-          </p>
+
+          {/*
+            The opt-in, and the line it does not cross.
+
+            A card price and a quantity limit advertise a price for ONE of the
+            item; whether you can pay it is a condition you can read. A
+            multi-buy does not — "2 for $5" is the price of two, and set beside
+            "$3.99 each" it reads a dollar cheaper when it is a dollar dearer
+            per item. Halving it to $2.50 quotes a number no flyer printed. So
+            that group stays out whatever this is set to.
+          */}
+          <label className="mt-3 flex items-start gap-2 text-xs">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={includeConditional}
+              onChange={(e) => {
+                setIncludeConditional(e.target.checked);
+                void refresh(threshold, e.target.checked);
+              }}
+            />
+            <span>
+              <span className="font-semibold">
+                Include loyalty-card and limited-quantity prices
+              </span>
+              <span className="block text-muted">
+                {summary.offersConditionalUsable} more offers. Their price is
+                for one item, but you only pay it with the card, or up to the
+                limit — each one shows its condition. Multi-buys and
+                with-purchase offers ({summary.offersNeverComparable}) stay out
+                either way: their number is the price of something else.
+              </span>
+            </span>
+          </label>
 
           <label className="mt-3 block text-xs text-muted" htmlFor="threshold">
             Only show gaps of at least
@@ -137,7 +238,7 @@ function Deals() {
             onChange={(e) => {
               const next = Number(e.target.value);
               setThreshold(next);
-              void refresh(next);
+              void refresh(next, includeConditional);
             }}
           >
             {[25, 50, 100, 200, 500].map((cents) => (
@@ -210,6 +311,20 @@ function GapCard({ gap }: { gap: PriceGap }) {
             </span>
           </p>
         ))}
+        {/*
+          The condition beside the number it qualifies, verbatim. A card price
+          shown without "avec carte Scène+" is the exact way a saving
+          evaporates at the till, and this list is where somebody reads the
+          number they intend to act on.
+        */}
+        {gap.offers
+          .filter((o) => o.condition !== "UNIT_PRICE")
+          .map((offer) => (
+            <p key={`${offer.id}-cond`} className="text-xs text-warn">
+              {RETAILERS[offer.retailerId]?.displayName ?? offer.retailerId}:{" "}
+              {offer.conditionText ?? conditionLabel(offer.condition)}
+            </p>
+          ))}
       </div>
 
       {/*
@@ -226,6 +341,13 @@ function GapCard({ gap }: { gap: PriceGap }) {
           hasPageImage: true,
         })}
       </p>
+
+      {gap.hasConditional ? (
+        <p className="mt-2 rounded-md bg-warn/10 p-2 text-xs text-warn">
+          A price here depends on a condition — a card, or a quantity limit.
+          You pay it only if that applies to you.
+        </p>
+      ) : null}
 
       {cheapest.confirmedAt === null ? (
         <p className="mt-1 text-xs text-warn">
