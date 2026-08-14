@@ -127,14 +127,14 @@ export async function queueFlyerForReading(input: {
 
   let queued = 0;
   for (const page of input.pages) {
-    const extractionPath = `${userId}/${input.flyer.id}/read-p${String(page.pageNumber).padStart(2, "0")}.jpg`;
+    const readPath = extractionPath(userId, input.flyer.id, page.pageNumber);
 
     const extraction = dataUrlToBlob(page.extractionDataUrl);
     if (!extraction) continue;
 
     const { error: upErr } = await supabase.storage
       .from(FLYER_BUCKET)
-      .upload(extractionPath, extraction, {
+      .upload(readPath, extraction, {
         contentType: "image/jpeg",
         upsert: true,
       });
@@ -157,7 +157,7 @@ export async function queueFlyerForReading(input: {
       flyer_id: input.flyer.id,
       user_id: userId,
       page_number: page.pageNumber,
-      storage_path: extractionPath,
+      storage_path: readPath,
     });
     if (queueErr) return { ok: false, error: queueErr.message };
 
@@ -788,6 +788,11 @@ export function pagesStillNeeded(flyer: StoredFlyer, on: Date = new Date()): boo
  * retention rule in supabase/flyers.sql. The offers are left alone: they are
  * history, and history is the point of keeping them.
  */
+/** Where the model-sized copy of a page lives. Mirrors queueFlyerForReading. */
+function extractionPath(userId: string, flyerId: string, pageNumber: number): string {
+  return `${userId}/${flyerId}/read-p${String(pageNumber).padStart(2, "0")}.jpg`;
+}
+
 export async function purgeExpiredPages(on: Date = new Date()): Promise<number> {
   const supabase = client();
   if (!supabase) return 0;
@@ -800,9 +805,21 @@ export async function purgeExpiredPages(on: Date = new Date()): Promise<number> 
 
   for (const flyer of flyers) {
     if (pagesStillNeeded(flyer, on)) continue;
-    const paths = Array.from({ length: flyer.pageCount }, (_, i) =>
+    // Both sizes, not just the proof page.
+    //
+    // The worker deletes an extraction image the moment its page is read, so
+    // in the ordinary case there is nothing here to collect. A page that ended
+    // FAILED is the exception: its extraction image was never deleted, nothing
+    // else ever looks at it, and it is four times the size of a proof page. One
+    // orphan a week is invisible; a year of them is not, and the leak has no
+    // upper bound because nothing else in the system knows the file exists.
+    //
+    // remove() ignores paths that are not there, so listing both is cheaper
+    // than asking which of them survived.
+    const paths = Array.from({ length: flyer.pageCount }, (_, i) => [
       pagePath(userId, flyer.id, i + 1),
-    );
+      extractionPath(userId, flyer.id, i + 1),
+    ]).flat();
     const { error } = await supabase.storage.from(FLYER_BUCKET).remove(paths);
     if (!error) removed += paths.length;
   }
