@@ -34,6 +34,7 @@ import { MATCH_THRESHOLDS, CHECKOUT_ELIGIBLE_TIERS, tierForScore } from "@/confi
 import {
   PRODUCT_LINE_TOKENS,
   gtinsMatch,
+  identityTokens,
   meaningfulTokens,
   normalizeGtin,
   normalizeText,
@@ -89,7 +90,26 @@ export function scoreMatch(
     blockers.push(`Different GTIN (${gtinA} vs ${gtinB})`);
   }
 
-  if (!brandsMatch(a.brand, b.brand)) {
+  // Neither side naming a brand is not two products disagreeing about one.
+  //
+  // `brandsMatch` treats an empty brand as a blocker, which is right for a
+  // packaged good: a tin of tomatoes always has a maker, so a missing brand is
+  // a failed reading and matching on the noun alone would pair two different
+  // companies' products. It is wrong for produce, which has no brand to read.
+  // A cauliflower is a cauliflower, and a price-match desk treats it as one.
+  //
+  // The tell is the size. Packaged goods print one; produce does not. So the
+  // exemption is narrow: BOTH sides unbranded AND BOTH sides sizeless. "Beurre
+  // 454 g" against "butter 454 g" with no brands stays blocked, because the
+  // printed size says somebody packaged it and the brand should have been
+  // there to read.
+  const unbrandedProduce =
+    normalizeText(a.brand) === "" &&
+    normalizeText(b.brand) === "" &&
+    !a.size &&
+    !b.size;
+
+  if (!unbrandedProduce && !brandsMatch(a.brand, b.brand)) {
     blockers.push(`Different brand ("${a.brand}" vs "${b.brand}")`);
   }
 
@@ -139,6 +159,51 @@ export function scoreMatch(
 
   // -- Level 3: attribute match -------------------------------------------
   const namesMatch = productNamesMatch(a, b);
+
+  /*
+    Unbranded produce, matched on the name alone.
+
+    Deliberately stricter about the name than the branded path, because the
+    name is now the ENTIRE identity — there is no brand, no size and no variant
+    corroborating it. The branded path asks only that the shorter name's tokens
+    all appear in the longer, which is safe when a brand already agrees and
+    unsafe here: "chou" is a strict subset of "chou-fleur", so cabbage would
+    have compared against cauliflower. (The phrase pass now keeps that
+    particular compound whole, but the general shape of the problem does not go
+    away — "poulet" sits inside "poulet pané".)
+
+    So this requires the identity tokens to be EQUAL, with origin and grade
+    words removed first: two shops will not agree on "du Québec" or "Catégorie
+    1", and for an unbranded item that suffix would otherwise block every
+    match.
+
+    It scores 90 rather than 95 — the threshold a comparison needs and not a
+    step above it. Nothing corroborates the reading, so it earns the floor.
+  */
+  if (unbrandedProduce) {
+    const ia = identityTokens(a.name);
+    const ib = identityTokens(b.name);
+    const sameIdentity =
+      ia.length > 0 &&
+      ia.length === ib.length &&
+      new Set(ia).size === new Set([...ia, ...ib]).size;
+
+    if (sameIdentity) {
+      reasons.push("Neither side names a brand and neither prints a size");
+      reasons.push(`Same produce ("${ia.join(" ")}")`);
+      return finalize("L3_ATTRIBUTES", SCORE.strongAttribute, reasons, blockers);
+    }
+    return {
+      level: "NO_MATCH",
+      score: 0,
+      tier: "REJECTED",
+      reasons,
+      blockers: [
+        `Unbranded items, and the names are not the same product ("${ia.join(" ")}" vs "${ib.join(" ")}")`,
+      ],
+      eligibleForCheckoutProof: false,
+    };
+  }
   const bothSizesKnown = Boolean(a.size && b.size);
   const sizeConfirmed = bothSizesKnown && sizesMatch(a.size, b.size);
 

@@ -58,7 +58,60 @@ const PHRASE_EQUIVALENTS: [RegExp, string][] = [
   [/\bpetits pois\b/g, "pea"],
   [/\bharicots verts\b/g, "green-bean"],
   [/\bhauts? de cuisse\b/g, "thigh"],
+
+  // Compounds whose halves mean something else entirely on their own.
+  //
+  // "chou-fleur" is cauliflower, not a flowering cabbage, and the lexicon maps
+  // `chou` to cabbage. Left to the token pass, a cabbage offer became a strict
+  // subset of a cauliflower one — harmless while a matching brand was also
+  // required, and a wrong comparison the moment unbranded produce was allowed
+  // to match. The phrase pass runs first precisely so a compound never gets
+  // taken apart.
+  [/\bchou[- ]fleur\b/g, "cauliflower"],
+  [/\bchoux? de bruxelles\b/g, "brussels-sprout"],
+  [/\bpoivrons?\b/g, "pepper"],
+  [/\bpatates? douces?\b/g, "sweet-potato"],
+  [/\bcourges? musquees?\b/g, "butternut-squash"],
+  [/\bmais en epi\b/g, "corn-cob"],
+  [/\bbleuets?\b/g, "blueberry"],
 ];
+
+/**
+ * Words that say where produce came from or how it was graded, not what it is.
+ *
+ * Quebec flyers print "Chou-fleur du Québec", "Cantaloup du Canada Catégorie
+ * 1", "Raisins importés". Two shops selling cauliflower will not agree on that
+ * suffix, and for an unbranded item the name is the whole identity — so the
+ * origin has to come out before the names are compared, or nothing unbranded
+ * ever matches anything.
+ *
+ * Removed only for that comparison. The advertised wording shown to a person
+ * keeps every word the flyer printed.
+ */
+export const ORIGIN_AND_GRADE_TOKENS = new Set([
+  "quebec",
+  "canada",
+  "ontario",
+  "usa",
+  "mexique",
+  "mexico",
+  "categorie",
+  "category",
+  "grade",
+  "importe",
+  "imported",
+  "local",
+  "fresh",
+  "frais",
+  "no",
+  "1",
+  "a",
+]);
+
+/** Meaningful tokens with origin and grade words removed. */
+export function identityTokens(text: string): string[] {
+  return meaningfulTokens(text).filter((t) => !ORIGIN_AND_GRADE_TOKENS.has(t));
+}
 
 /** Apply the phrase pass to already-normalised text. */
 function applyPhrases(text: string): string {
