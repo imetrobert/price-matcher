@@ -34,6 +34,14 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { Notice, PageHeader, Spinner } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
 import {
+  readFlyerPages,
+  type ReadFlyerProgress,
+  type ReadFlyerResult,
+} from "@/services/flyers/pdf/readPage";
+import { verifyExtraction } from "@/services/flyers/pdf/verify";
+import { describeBasis, describeCondition } from "@/types/flyer";
+import { formatCents } from "@/lib/money";
+import {
   describeTextCoverage,
   renderFlyerPdf,
   type RenderProgress,
@@ -57,6 +65,8 @@ function FlyerImport() {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<RenderedFlyerPage | null>(null);
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
+  const [reading, setReading] = useState<ReadFlyerProgress | null>(null);
+  const [read, setRead] = useState<ReadFlyerResult | null>(null);
 
   // Cancels a render in flight when a second file is chosen. Without it, two
   // renders write to the same state and the pages interleave.
@@ -72,6 +82,7 @@ function FlyerImport() {
     setError(null);
     setOpen(null);
     setElapsedMs(null);
+    setRead(null);
     setProgress({ page: 0, pageCount: 0 });
 
     const startedAt = performance.now();
@@ -96,6 +107,19 @@ function FlyerImport() {
       if (!controller.signal.aborted) setProgress(null);
     }
   }, []);
+
+  const runRead = useCallback(async () => {
+    if (!pages) return;
+    setRead(null);
+    setReading({ page: 0, pageCount: pages.length, offersSoFar: 0 });
+    const result = await readFlyerPages(pages, { onProgress: setReading });
+    setReading(null);
+    setRead(result);
+  }, [pages]);
+
+  // Verified here rather than inside the reader: the reader's job is to report
+  // what a model said, and this file's job is to decide what that is worth.
+  const verified = pages && read ? verifyExtraction(read.offers, pages) : null;
 
   const totalKb = pages?.reduce((sum, p) => sum + p.imageKb, 0) ?? 0;
   const readable = pages?.filter((p) => p.text.length >= 40).length ?? 0;
@@ -232,11 +256,97 @@ function FlyerImport() {
             ))}
           </div>
 
+          <div className="mt-5 space-y-3">
+            {reading ? (
+              <div className="card">
+                <Spinner
+                  label={`Reading page ${reading.page} of ${reading.pageCount} — ${reading.offersSoFar} offers so far…`}
+                />
+              </div>
+            ) : (
+              <button type="button" className="btn-primary" onClick={() => void runRead()}>
+                {read ? "Read the flyer again" : "Read the prices off this flyer"}
+              </button>
+            )}
+          </div>
+
+          {read && verified ? (
+            <section className="card mt-4 text-sm">
+              <p className="mb-2 font-bold">
+                {read.offers.length} offer{read.offers.length === 1 ? "" : "s"} read
+                {read.model ? ` by ${read.model}` : ""}
+              </p>
+              <Row label="Confirmed by the flyer's own text" value={String(verified.summary.confirmed)} />
+              <Row label="Need your confirmation" value={String(verified.summary.needsReview)} />
+              <Row label="Dropped as contradicted" value={String(verified.summary.rejected)} />
+              {read.rejected.length > 0 ? (
+                <Row label="Unreadable tiles skipped" value={String(read.rejected.length)} />
+              ) : null}
+              {read.failedPages.length > 0 ? (
+                <Row
+                  label="Pages that failed"
+                  value={read.failedPages.map((f) => f.pageNumber).join(", ")}
+                />
+              ) : null}
+            </section>
+          ) : null}
+
+          {read && read.failedPages.length > 0 ? (
+            <div className="mt-3">
+              <Notice tone="error" title="Some pages could not be read">
+                {read.failedPages[0]!.error}
+              </Notice>
+            </div>
+          ) : null}
+
+          {read && read.offers.length > 0 ? (
+            <section className="mt-4">
+              <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-muted">
+                What it read — check these against the pages above
+              </h2>
+              <div className="card space-y-2 text-sm">
+                {read.offers.slice(0, 60).map((offer, i) => (
+                  <p key={i} className="border-b border-line pb-2 last:border-0">
+                    <span className="font-bold">{formatCents(offer.price)}</span>{" "}
+                    <span className="text-muted">{describeBasis(offer.basis)}</span>
+                    {" — "}
+                    {offer.advertisedText}
+                    {offer.size ? <span className="text-muted"> · {offer.size}</span> : null}
+                    <span className="block text-xs text-muted">
+                      p.{offer.pageNumber}
+                      {offer.retailerSku ? ` · N° ${offer.retailerSku}` : ""}
+                      {offer.regularPrice ? ` · reg. ${formatCents(offer.regularPrice)}` : ""}
+                      {" · "}
+                      {describeCondition({
+                        ...offer,
+                        id: "",
+                        retailerId,
+                        validity: { startsAt: null, endsAt: null },
+                        source: "FLYER_PDF",
+                        flyerUrl: null,
+                        flyerDocumentRef: null,
+                        flyerPage: offer.pageNumber,
+                        storeId: null,
+                        observedAt: "",
+                      })}
+                    </span>
+                  </p>
+                ))}
+                {read.offers.length > 60 ? (
+                  <p className="text-xs text-muted">
+                    …and {read.offers.length - 60} more.
+                  </p>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
           <div className="mt-5">
             <Notice tone="info" title="Nothing has been saved">
-              This screen only proves the flyer can be read on this phone.
-              Reading prices out of it, and comparing them against a cart, comes
-              next.
+              These are candidates, not offers. Storing them, and comparing
+              them against a cart, comes next — and nothing reaches a cashier
+              until it is either confirmed by the flyer&rsquo;s own text or by
+              you.
             </Notice>
           </div>
 

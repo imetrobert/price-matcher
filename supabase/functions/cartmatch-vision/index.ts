@@ -238,6 +238,103 @@ Rules you must follow:
 
 Return JSON only, matching the provided schema.`;
 
+/**
+ * Reading a flyer page.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE PRICE IS ASKED FOR AS TWO INTEGERS
+ * ---------------------------------------------------------------------------
+ * A grocery flyer sets the dollars enormous and the cents as a small
+ * superscript: 4 with a raised 99 beside it. There is no decimal point on the
+ * page at all, and Quebec flyers that do print one use a comma. Asking for
+ * "the price" invites a model to render that as 4.99, 499, 4,99 or 4 99, and
+ * one of those is a hundredfold error in a number shown to a cashier.
+ *
+ * Asking for the two numerals it can literally see removes the decision.
+ * Assembling them into cents is arithmetic, and arithmetic is done in code —
+ * the model transcribes, it never calculates.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY basis IS REQUIRED
+ * ---------------------------------------------------------------------------
+ * "/lb" is printed in six-point type beside a price set forty points tall. An
+ * extraction that overlooks it produces a number that looks comparable to a
+ * package price and is not. Required, with no default, so an omission is a
+ * failure rather than a silent PER_ITEM.
+ */
+const FLYER_PROMPT =
+  "You are reading one page of a Canadian grocery flyer. List every advertised " +
+  "product offer on the page.\n\n" +
+  "For each offer:\n" +
+  "- advertisedText: the product wording exactly as printed, in the flyer's own " +
+  "language. Do not translate, tidy or expand it.\n" +
+  "- brand: the brand name if one is printed, otherwise null.\n" +
+  "- size: the pack size as printed (\"551 mL\", \"375 g\", \"1 kg\"), otherwise null.\n" +
+  "- retailerSku: the retailer's article number if the tile prints one, such as " +
+  "\"N° 51087737\" — digits only, otherwise null.\n" +
+  "- priceDollars and priceCents: the two numerals of the sale price exactly as " +
+  "shown. A price displayed as a large 4 with a small 99 is priceDollars 4, " +
+  "priceCents 99. A price shown as 44 cents is priceDollars 0, priceCents 44.\n" +
+  "- basis: PER_ITEM when the price is for the item as sold (\"each\", \"chacun\", " +
+  "\"le paquet\", or no unit shown), PER_LB when marked /lb, PER_KG when marked " +
+  "/kg, PER_100G or PER_100ML when marked per 100 g or 100 ml. Look carefully: " +
+  "the unit is printed much smaller than the price.\n" +
+  "- regularDollars and regularCents: the struck-through or \"reg.\" price if the " +
+  "tile prints one, otherwise null for both.\n" +
+  "- condition: UNIT_PRICE for a plain price; MULTI_BUY for \"2 for $5\"; " +
+  "LOYALTY_ONLY when a card is required; LIMIT_APPLIES when a quantity limit is " +
+  "printed; WITH_PURCHASE when it depends on buying something else.\n" +
+  "- conditionText: the qualifying words exactly as printed (\"limite 4\", " +
+  "\"2 for $5\", \"avec carte\"), otherwise null.\n\n" +
+  "Report only what is printed on this page. If you cannot read a price " +
+  "clearly, omit that offer entirely rather than guessing at it. Do not infer a " +
+  "price from a similar product elsewhere on the page.";
+
+const FLYER_SCHEMA = {
+  type: "object",
+  properties: {
+    offers: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          advertisedText: { type: "string" },
+          brand: { type: "string", nullable: true },
+          size: { type: "string", nullable: true },
+          retailerSku: { type: "string", nullable: true },
+          priceDollars: { type: "integer" },
+          priceCents: { type: "integer" },
+          basis: {
+            type: "string",
+            enum: ["PER_ITEM", "PER_LB", "PER_KG", "PER_100G", "PER_100ML"],
+          },
+          regularDollars: { type: "integer", nullable: true },
+          regularCents: { type: "integer", nullable: true },
+          condition: {
+            type: "string",
+            enum: [
+              "UNIT_PRICE",
+              "MULTI_BUY",
+              "LOYALTY_ONLY",
+              "LIMIT_APPLIES",
+              "WITH_PURCHASE",
+            ],
+          },
+          conditionText: { type: "string", nullable: true },
+        },
+        required: [
+          "advertisedText",
+          "priceDollars",
+          "priceCents",
+          "basis",
+          "condition",
+        ],
+      },
+    },
+  },
+  required: ["offers"],
+} as const;
+
 const CART_VISION_SCHEMA = {
   type: "object",
   properties: {
@@ -340,7 +437,16 @@ Deno.serve(async (req: Request) => {
     10,
   );
 
-  const parts: unknown[] = [{ text: VISION_PROMPT }];
+  // One function, two readers. A flyer page and a cart photo need different
+  // prompts and different schemas, and nothing else — so this stays one
+  // deployment holding one Gemini key rather than a fourth copy of the auth
+  // and CORS code that already exists three times.
+  const flyerMode =
+    typeof payload === "object" &&
+    payload !== null &&
+    (payload as { mode?: unknown }).mode === "flyer";
+
+  const parts: unknown[] = [{ text: flyerMode ? FLYER_PROMPT : VISION_PROMPT }];
   for (const img of images.slice(0, MAX_IMAGES)) {
     parts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } });
   }
@@ -353,6 +459,7 @@ Deno.serve(async (req: Request) => {
       apiKey,
       model,
       parts,
+      flyerMode,
       supportsThinking(model),
       Number.isFinite(thinkingBudget) ? thinkingBudget : 0,
       controller.signal,
@@ -366,7 +473,7 @@ Deno.serve(async (req: Request) => {
         console.warn(
           `[cartmatch] ${model} rejected thinkingConfig; retrying without it.`,
         );
-        res = await callGemini(apiKey, model, parts, false, 0, controller.signal);
+        res = await callGemini(apiKey, model, parts, flyerMode, false, 0, controller.signal);
       } else {
         return json(
           { ok: false, error: `Gemini returned HTTP 400. ${detail.slice(0, 400)}` },
@@ -413,7 +520,7 @@ Deno.serve(async (req: Request) => {
     // The raw shape is returned as-is; the browser validates and normalises it
     // with the same parseVisionResponse() used everywhere else, so there is
     // exactly one implementation of that logic.
-    return json({ ok: true, raw: parsed, model }, 200, origin);
+    return json({ ok: true, raw: parsed, model, mode: flyerMode ? "flyer" : "cart" }, 200, origin);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const aborted = message.toLowerCase().includes("abort");
@@ -436,13 +543,14 @@ function callGemini(
   apiKey: string,
   model: string,
   parts: unknown[],
+  flyerMode: boolean,
   withThinking: boolean,
   thinkingBudget: number,
   signal: AbortSignal,
 ): Promise<Response> {
   const generationConfig: Record<string, unknown> = {
     responseMimeType: "application/json",
-    responseSchema: CART_VISION_SCHEMA,
+    responseSchema: flyerMode ? FLYER_SCHEMA : CART_VISION_SCHEMA,
     temperature: 0.1,
   };
   if (withThinking) {
