@@ -297,6 +297,10 @@ const FLYER_PROMPT =
   "printed; WITH_PURCHASE when it depends on buying something else.\n" +
   "- conditionText: the qualifying words exactly as printed (\"limite 4\", " +
   "\"2 for $5\", \"avec carte\"), otherwise null.\n\n" +
+  "Also report retailerName: the name of the store whose logo or branding " +
+  "appears on this page — Maxi, IGA, Walmart, Metro, Super C, Provigo — or " +
+  "null if no store branding is visible. Report the brand printed on the page, " +
+  "never a guess from the products.\n\n" +
   "Report only what is printed on this page. If you cannot read a price " +
   "clearly, omit that offer entirely rather than guessing at it. Do not infer a " +
   "price from a similar product elsewhere on the page.";
@@ -304,6 +308,7 @@ const FLYER_PROMPT =
 const FLYER_SCHEMA = {
   type: "object",
   properties: {
+    retailerName: { type: "string", nullable: true },
     offers: {
       type: "array",
       items: {

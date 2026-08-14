@@ -31,7 +31,14 @@ import type { ExtractedOffer } from "./types";
 import type { RenderedFlyerPage } from "./renderPages";
 
 export type ReadPageOutcome =
-  | { ok: true; offers: ExtractedOffer[]; rejected: string[]; model: string }
+  | {
+      ok: true;
+      offers: ExtractedOffer[];
+      rejected: string[];
+      model: string;
+      /** Store branding read off this page, verbatim. Usually only page 1. */
+      retailerName: string | null;
+    }
   | { ok: false; error: string; code?: string };
 
 /** Data URL in, base64 payload and mime type out. */
@@ -199,8 +206,17 @@ async function readFlyerPageOnce(
       };
     }
 
-    const { offers, rejected } = parseFlyerExtraction(data.raw, page.pageNumber);
-    return { ok: true, offers, rejected, model: String(data.model ?? "unknown") };
+    const { offers, rejected, retailerName } = parseFlyerExtraction(
+      data.raw,
+      page.pageNumber,
+    );
+    return {
+      ok: true,
+      offers,
+      rejected,
+      retailerName,
+      model: String(data.model ?? "unknown"),
+    };
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err);
     const networkish =
@@ -236,6 +252,8 @@ export interface ReadFlyerResult {
    */
   notAttempted: number[];
   model: string | null;
+  /** Store branding read off the pages, for confirming which flyer this is. */
+  retailerName: string | null;
 }
 
 /**
@@ -260,6 +278,7 @@ export async function readFlyerPages(
   const rejected: string[] = [];
   const failedPages: { pageNumber: number; error: string }[] = [];
   let model: string | null = null;
+  let retailerName: string | null = null;
   let stoppedAt = -1;
   let lastRequestAt = 0;
   let interval = MIN_REQUEST_INTERVAL_MS;
@@ -308,6 +327,10 @@ export async function readFlyerPages(
     offers.push(...outcome.offers);
     rejected.push(...outcome.rejected);
     model = outcome.model;
+    // First page that names a store wins. Later pages carry section headers
+    // and supplier logos, and overwriting with those would end up deciding a
+    // Maxi flyer belongs to whoever advertised on page nine.
+    retailerName ??= outcome.retailerName;
   }
 
   return {
@@ -319,5 +342,6 @@ export async function readFlyerPages(
         ? []
         : pages.slice(stoppedAt).map((p) => p.pageNumber),
     model,
+    retailerName,
   };
 }

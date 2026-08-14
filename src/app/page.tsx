@@ -70,7 +70,7 @@ function Home() {
           Scan cart
         </Link>
         <Link href="/flyers" className="btn-secondary">
-          Import a flyer
+          Import this week&rsquo;s flyers
         </Link>
         <Link href="/test" className="btn-secondary">
           Manual product test

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Import a weekly flyer from a PDF.
+ * Import a week's flyers.
  *
  * ---------------------------------------------------------------------------
  * WHY THIS SCREEN EXISTS
@@ -11,42 +11,36 @@
  * the pages out of the HTML — superc.ca returns 227 KB containing exactly one
  * image, its own logo. There is no supply line to automate.
  *
- * A flyer the shopper already has is the remaining route, and it is the better
- * artefact anyway: a price-match desk asks for the competitor's ADVERTISED
- * price, printed, with dates. That is what a flyer page is.
+ * The flyer PDFs themselves are a different story: they sit on plain blob
+ * storage. But their URLs carry an unpredictable version suffix, so the
+ * reliable weekly act is a person downloading five files and dropping them
+ * here.
  *
  * ---------------------------------------------------------------------------
- * WHAT THIS SCREEN DOES, AND DELIBERATELY DOES NOT
+ * ONE ACTION, THEN WALK AWAY
  * ---------------------------------------------------------------------------
- * It renders the PDF and shows what came out. Nothing is read, nothing is
- * saved, nothing is compared. That is the point: before any of it is trusted,
- * the input has to be seen working on real flyers, on the phone that will
- * actually do it.
+ * The work takes upwards of half an hour, nearly all of it spent waiting out
+ * an API quota. That is machine work. So the only thing asked of a person is
+ * the upload; everything after it is queued, paced and reported.
  *
- * The file never leaves the device here. Rendering is local, and no page image
- * is uploaded anywhere by this screen.
+ * The files never leave the device. Rendering is local; only page images go to
+ * Gemini, one at a time, to be read.
  */
 
 import Link from "next/link";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
-import { Notice, PageHeader, Spinner } from "@/components/ui";
+import { Notice, PageHeader } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
-import {
-  readFlyerPages,
-  type ReadFlyerProgress,
-  type ReadFlyerResult,
-} from "@/services/flyers/pdf/readPage";
-import { verifyExtraction } from "@/services/flyers/pdf/verify";
-import { describeBasis, describeCondition } from "@/types/flyer";
 import { formatCents } from "@/lib/money";
 import {
-  describeTextCoverage,
-  renderFlyerPdf,
-  type RenderProgress,
-  type RenderedFlyerPage,
-} from "@/services/flyers/pdf/renderPages";
+  batchTotals,
+  newBatchItem,
+  runBatch,
+  type BatchItem,
+} from "@/services/flyers/batch";
+import { describeBasis } from "@/types/flyer";
 import type { RetailerId } from "@/types";
 
 export default function FlyersPage() {
@@ -58,361 +52,312 @@ export default function FlyersPage() {
 }
 
 function FlyerImport() {
-  const [retailerId, setRetailerId] = useState<RetailerId>("iga");
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [progress, setProgress] = useState<RenderProgress | null>(null);
-  const [pages, setPages] = useState<RenderedFlyerPage[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<RenderedFlyerPage | null>(null);
-  const [elapsedMs, setElapsedMs] = useState<number | null>(null);
-  const [reading, setReading] = useState<ReadFlyerProgress | null>(null);
-  const [read, setRead] = useState<ReadFlyerResult | null>(null);
-
-  // Cancels a render in flight when a second file is chosen. Without it, two
-  // renders write to the same state and the pages interleave.
+  const [items, setItems] = useState<BatchItem[]>([]);
+  const [running, setRunning] = useState(false);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [finishedAt, setFinishedAt] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const onFile = useCallback(async (file: File) => {
+  const onFiles = useCallback((files: FileList) => {
     abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    setFileName(file.name);
-    setPages(null);
-    setError(null);
-    setOpen(null);
-    setElapsedMs(null);
-    setRead(null);
-    setProgress({ page: 0, pageCount: 0 });
-
-    const startedAt = performance.now();
-    try {
-      const data = await file.arrayBuffer();
-      const rendered = await renderFlyerPdf(data, {
-        onProgress: setProgress,
-        signal: controller.signal,
-      });
-      if (controller.signal.aborted) return;
-      setPages(rendered);
-      setElapsedMs(Math.round(performance.now() - startedAt));
-    } catch (err) {
-      if (controller.signal.aborted) return;
-      const message = err instanceof Error ? err.message : String(err);
-      setError(
-        /password|encrypt/i.test(message)
-          ? "This PDF is password-protected, so it cannot be read."
-          : `Could not read this PDF: ${message}`,
-      );
-    } finally {
-      if (!controller.signal.aborted) setProgress(null);
-    }
+    setItems([...files].map((file, i) => newBatchItem(file, i)));
+    setFinishedAt(null);
+    setStartedAt(null);
   }, []);
 
-  const runRead = useCallback(async () => {
-    if (!pages) return;
-    setRead(null);
-    setReading({ page: 0, pageCount: pages.length, offersSoFar: 0 });
-    const result = await readFlyerPages(pages, { onProgress: setReading });
-    setReading(null);
-    setRead(result);
-  }, [pages]);
+  const start = useCallback(async () => {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setRunning(true);
+    setStartedAt(Date.now());
+    setFinishedAt(null);
 
-  // Verified here rather than inside the reader: the reader's job is to report
-  // what a model said, and this file's job is to decide what that is worth.
-  const verified = pages && read ? verifyExtraction(read.offers, pages) : null;
+    // Each item reports its own progress, so the list updates in place rather
+    // than only at the end of a half-hour run.
+    const done = await runBatch(items, {
+      signal: controller.signal,
+      onUpdate: (updated) =>
+        setItems((prev) =>
+          prev.map((it) => (it.id === updated.id ? updated : it)),
+        ),
+    });
 
-  const totalKb = pages?.reduce((sum, p) => sum + p.imageKb, 0) ?? 0;
-  const readable = pages?.filter((p) => p.text.length >= 40).length ?? 0;
+    setItems(done);
+    setRunning(false);
+    setFinishedAt(Date.now());
+  }, [items]);
+
+  const totals = useMemo(() => batchTotals(items), [items]);
+  const elapsedMin =
+    startedAt === null || finishedAt === null
+      ? null
+      : Math.max(1, Math.round((finishedAt - startedAt) / 60000));
 
   return (
     <main className="mx-auto max-w-[900px]">
       <PageHeader
-        title="Import a flyer"
-        subtitle="Save this week's flyer as a PDF, then load it here."
+        title="Import this week's flyers"
+        subtitle="Drop in every flyer at once. Reading them takes a while; nothing else is needed from you."
         backHref="/"
       />
 
       <section className="card mb-4">
-        <label className="mb-1 block text-sm font-semibold" htmlFor="retailer">
-          Which retailer&rsquo;s flyer
+        <label className="mb-1 block text-sm font-semibold" htmlFor="pdfs">
+          Flyer PDFs
+        </label>
+        <input
+          id="pdfs"
+          type="file"
+          accept="application/pdf,.pdf"
+          multiple
+          disabled={running}
+          className="field w-full"
+          onChange={(e) => {
+            if (e.target.files?.length) onFiles(e.target.files);
+          }}
+        />
+        <p className="mt-2 text-xs text-muted">
+          Select all of them together. The files stay on this device — only the
+          rendered pages are sent, one at a time, to be read.
+        </p>
+
+        {items.length > 0 && !running ? (
+          <button
+            type="button"
+            className="btn-primary mt-3"
+            onClick={() => void start()}
+          >
+            {finishedAt
+              ? "Read them again"
+              : `Read ${items.length} flyer${items.length === 1 ? "" : "s"}`}
+          </button>
+        ) : null}
+
+        {running ? (
+          <button
+            type="button"
+            className="btn-secondary mt-3"
+            onClick={() => abortRef.current?.abort()}
+          >
+            Stop
+          </button>
+        ) : null}
+      </section>
+
+      {running ? (
+        <div className="mb-4">
+          <Notice tone="info" title="Reading — this takes a while">
+            Pages go one at a time, spaced out so the API quota is not tripped.
+            A five-flyer week is roughly half an hour. Leave this open and come
+            back; closing the tab stops it.
+          </Notice>
+        </div>
+      ) : null}
+
+      {items.length > 0 ? (
+        <section className="mb-4">
+          <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-muted">
+            Flyers ({items.length})
+          </h2>
+          <div className="space-y-3">
+            {items.map((item) => (
+              <FlyerRow
+                key={item.id}
+                item={item}
+                locked={running}
+                expanded={expanded === item.id}
+                onToggle={() =>
+                  setExpanded(expanded === item.id ? null : item.id)
+                }
+                onRetailer={(retailerId) =>
+                  setItems((prev) =>
+                    prev.map((it) =>
+                      it.id === item.id
+                        ? { ...it, retailerId, retailerFrom: "CHOSEN" as const }
+                        : it,
+                    ),
+                  )
+                }
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {finishedAt ? (
+        <section className="card mb-4 text-sm">
+          <p className="mb-2 font-bold">
+            {totals.offers} offers from{" "}
+            {totals.flyersDone + totals.flyersIncomplete} flyer
+            {totals.flyersDone + totals.flyersIncomplete === 1 ? "" : "s"}
+          </p>
+          <Row
+            label="Time taken"
+            value={elapsedMin === null ? "—" : `${elapsedMin} min`}
+          />
+          <Row label="Complete" value={String(totals.flyersDone)} />
+          {totals.flyersIncomplete > 0 ? (
+            <Row label="Incomplete" value={String(totals.flyersIncomplete)} />
+          ) : null}
+          {totals.flyersFailed > 0 ? (
+            <Row label="Failed" value={String(totals.flyersFailed)} />
+          ) : null}
+        </section>
+      ) : null}
+
+      {/*
+        Two conditions worth interrupting for, because both make the data wrong
+        rather than merely thin: a flyer filed under no retailer cannot be
+        compared against anything, and a flyer read only in part looks complete.
+      */}
+      {finishedAt && totals.needsRetailer > 0 ? (
+        <div className="mb-4">
+          <Notice tone="warn" title="Some flyers have no store set">
+            {totals.needsRetailer} could not be matched to a retailer from the
+            filename or the logo on page 1. Set the store on each, otherwise
+            their prices cannot be compared against anything.
+          </Notice>
+        </div>
+      ) : null}
+
+      {finishedAt && totals.flyersIncomplete > 0 ? (
+        <div className="mb-4">
+          <Notice tone="warn" title="Some flyers were only partly read">
+            The pages that were never opened are listed on each flyer above.
+            Anything advertised on them is missing rather than absent. Reading
+            again picks up what a quota cut off.
+          </Notice>
+        </div>
+      ) : null}
+
+      {finishedAt ? (
+        <>
+          <div className="mb-4">
+            <Notice tone="info" title="Nothing has been saved yet">
+              These are candidates. Storing them, and comparing them against a
+              cart, comes next — and nothing reaches a cashier until you have
+              confirmed it.
+            </Notice>
+          </div>
+          <Link href="/" className="btn-secondary">
+            Done
+          </Link>
+        </>
+      ) : null}
+    </main>
+  );
+}
+
+function FlyerRow({
+  item,
+  locked,
+  expanded,
+  onToggle,
+  onRetailer,
+}: {
+  item: BatchItem;
+  locked: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  onRetailer: (id: RetailerId) => void;
+}) {
+  const busy = item.stage === "RENDERING" || item.stage === "READING";
+  const border =
+    item.stage === "FAILED"
+      ? "border-bad/40"
+      : item.stage === "DONE"
+        ? "border-good/40"
+        : "border-line";
+
+  return (
+    <div className={`card border ${border}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold">{item.file.name}</p>
+          <p className="mt-1 text-xs text-muted">
+            {busy
+              ? "… "
+              : item.stage === "DONE"
+                ? "✓ "
+                : item.stage === "FAILED"
+                  ? "✕ "
+                  : ""}
+            {item.detail}
+          </p>
+        </div>
+        {item.result && item.result.offers.length > 0 ? (
+          <button
+            type="button"
+            onClick={onToggle}
+            className="shrink-0 rounded-lg border border-line px-2 py-1 text-xs font-semibold"
+          >
+            {expanded ? "Hide" : "Show"}
+          </button>
+        ) : null}
+      </div>
+
+      <div className="mt-2 flex items-center gap-2">
+        <label className="text-xs text-muted" htmlFor={`retailer-${item.id}`}>
+          Store
         </label>
         <select
-          id="retailer"
-          className="field w-full"
-          value={retailerId}
-          onChange={(e) => setRetailerId(e.target.value as RetailerId)}
+          id={`retailer-${item.id}`}
+          disabled={locked}
+          className="field flex-1 py-1 text-sm"
+          value={item.retailerId ?? ""}
+          onChange={(e) => onRetailer(e.target.value as RetailerId)}
         >
+          <option value="" disabled>
+            Not set
+          </option>
           {Object.values(RETAILERS).map((r) => (
             <option key={r.id} value={r.id}>
               {r.displayName}
             </option>
           ))}
         </select>
+        <span className="shrink-0 text-xs text-muted">
+          {item.retailerFrom === "FILENAME"
+            ? "from filename"
+            : item.retailerFrom === "LOGO"
+              ? "from page 1"
+              : item.retailerFrom === "CHOSEN"
+                ? "you chose"
+                : "unknown"}
+        </span>
+      </div>
 
-        <label className="mb-1 mt-4 block text-sm font-semibold" htmlFor="pdf">
-          Flyer PDF
-        </label>
-        <input
-          id="pdf"
-          type="file"
-          accept="application/pdf,.pdf"
-          className="field w-full"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) void onFile(file);
-          }}
-        />
-        <p className="mt-2 text-xs text-muted">
-          The file stays on this device. Nothing is uploaded by this screen.
+      {item.result && item.result.notAttempted.length > 0 ? (
+        <p className="mt-2 rounded-lg bg-warn/5 px-2 py-1 text-xs text-warn">
+          Pages never read: {item.result.notAttempted.join(", ")}
         </p>
-      </section>
-
-      {progress ? (
-        <section className="card mb-4">
-          <Spinner
-            label={
-              progress.pageCount > 0
-                ? `Rendering page ${progress.page} of ${progress.pageCount}…`
-                : "Opening the PDF…"
-            }
-          />
-        </section>
       ) : null}
 
-      {error ? (
-        <div className="mb-4">
-          <Notice tone="error" title="Could not read the flyer">
-            {error}
-          </Notice>
-        </div>
-      ) : null}
-
-      {pages && pages.length > 0 ? (
-        <>
-          <section className="card mb-4 text-sm">
-            <p className="mb-2 font-bold">
-              {RETAILERS[retailerId].displayName} — {pages.length} page
-              {pages.length === 1 ? "" : "s"}
+      {expanded && item.result ? (
+        <div className="mt-3 space-y-2 border-t border-line pt-2 text-sm">
+          {item.result.offers.slice(0, 40).map((offer, i) => (
+            <p key={i} className="border-b border-line pb-1 last:border-0">
+              <span className="font-bold">{formatCents(offer.price)}</span>{" "}
+              <span className="text-muted">{describeBasis(offer.basis)}</span> —{" "}
+              {offer.advertisedText}
+              <span className="block text-xs text-muted">
+                p.{offer.pageNumber}
+                {offer.retailerSku ? ` · N° ${offer.retailerSku}` : ""}
+                {offer.regularPrice
+                  ? ` · reg. ${formatCents(offer.regularPrice)}`
+                  : ""}
+              </span>
             </p>
-            <Row label="File" value={fileName ?? "—"} />
-            <Row
-              label="Rendered"
-              value={
-                elapsedMs === null
-                  ? "—"
-                  : `${(elapsedMs / 1000).toFixed(1)}s on this device`
-              }
-            />
-            <Row label="Page size" value={`${pages[0]!.widthPx} × ${pages[0]!.heightPx} px`} />
-            <Row label="Total image data" value={`${(totalKb / 1024).toFixed(1)} MB`} />
-            <Row
-              label="Pages the app can check itself"
-              value={`${readable} of ${pages.length}`}
-            />
-          </section>
-
-          {/*
-            Said before anything is read, not after. Whether a flyer can be
-            checked against its own text decides how much confirming the person
-            is signing up for, and that is not a detail to discover later.
-          */}
-          <div className="mb-4">
-            <Notice
-              tone={readable === 0 ? "warn" : "info"}
-              title={
-                readable === 0
-                  ? "You can read this flyer. The app cannot."
-                  : readable === pages.length
-                    ? "The app can check this flyer against itself"
-                    : "The app can check part of this flyer against itself"
-              }
-            >
-              {describeTextCoverage(pages)}
-            </Notice>
-          </div>
-
-          <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-muted">
-            Pages — tap one to check it is readable
-          </h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {pages.map((page) => (
-              <button
-                key={page.pageNumber}
-                type="button"
-                onClick={() => setOpen(page)}
-                className="overflow-hidden rounded-xl border border-line bg-surface text-left"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={page.thumbDataUrl}
-                  alt={`Page ${page.pageNumber}`}
-                  className="block w-full"
-                />
-                <span className="block px-2 py-1 text-xs text-muted">
-                  Page {page.pageNumber} · {page.imageKb} KB ·{" "}
-                  {page.text.length >= 40 ? "checkable" : "artwork"}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-5 space-y-3">
-            {reading ? (
-              <div className="card">
-                <Spinner
-                  label={`Reading page ${reading.page} of ${reading.pageCount} — ${reading.offersSoFar} offers so far…`}
-                />
-                <p className="mt-2 text-xs text-muted">
-                  Pages are sent one every five seconds, because a free API key
-                  allows about a dozen a minute and sending faster gets the
-                  whole run cut off. A seventeen-page flyer takes roughly a
-                  minute and a half.
-                </p>
-              </div>
-            ) : (
-              <button type="button" className="btn-primary" onClick={() => void runRead()}>
-                {read ? "Read the flyer again" : "Read the prices off this flyer"}
-              </button>
-            )}
-          </div>
-
-          {read && verified ? (
-            <section className="card mt-4 text-sm">
-              <p className="mb-2 font-bold">
-                {read.offers.length} offer{read.offers.length === 1 ? "" : "s"} read
-                {read.model ? ` by ${read.model}` : ""}
-              </p>
-              <Row label="Confirmed by the flyer's own text" value={String(verified.summary.confirmed)} />
-              <Row label="Need your confirmation" value={String(verified.summary.needsReview)} />
-              <Row label="Dropped as contradicted" value={String(verified.summary.rejected)} />
-              {read.rejected.length > 0 ? (
-                <Row label="Unreadable tiles skipped" value={String(read.rejected.length)} />
-              ) : null}
-              {read.failedPages.length > 0 ? (
-                <Row
-                  label="Pages refused"
-                  value={read.failedPages.map((f) => f.pageNumber).join(", ")}
-                />
-              ) : null}
-              <Row
-                label="Pages actually read"
-                value={`${pages.length - read.failedPages.length - read.notAttempted.length} of ${pages.length}`}
-              />
-            </section>
+          ))}
+          {item.result.offers.length > 40 ? (
+            <p className="text-xs text-muted">
+              …and {item.result.offers.length - 40} more.
+            </p>
           ) : null}
-
-          {/*
-            Said loudest, because it is the finding most easily misread. A run
-            that stops early looks like a run that finished: offers appear, the
-            page list is full, and nothing about the screen says most of the
-            flyer was never opened.
-          */}
-          {read && read.notAttempted.length > 0 ? (
-            <div className="mt-3">
-              <Notice
-                tone="warn"
-                title={`This flyer is not loaded — ${read.notAttempted.length} of ${pages.length} pages were never read`}
-              >
-                Reading stopped at page {read.notAttempted[0]}.{" "}
-                {read.failedPages[0]?.error ?? ""} Pages{" "}
-                {read.notAttempted.join(", ")} have not been looked at, so
-                anything advertised on them is missing rather than absent. Read
-                the flyer again to continue — a free API key allows about a
-                dozen pages a minute, so a long flyer may need a second run.
-              </Notice>
-            </div>
-          ) : read && read.failedPages.length > 0 ? (
-            <div className="mt-3">
-              <Notice tone="error" title="Some pages could not be read">
-                {read.failedPages[0]!.error}
-              </Notice>
-            </div>
-          ) : null}
-
-          {read && read.offers.length > 0 ? (
-            <section className="mt-4">
-              <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-muted">
-                What it read — check these against the pages above
-              </h2>
-              <div className="card space-y-2 text-sm">
-                {read.offers.slice(0, 60).map((offer, i) => (
-                  <p key={i} className="border-b border-line pb-2 last:border-0">
-                    <span className="font-bold">{formatCents(offer.price)}</span>{" "}
-                    <span className="text-muted">{describeBasis(offer.basis)}</span>
-                    {" — "}
-                    {offer.advertisedText}
-                    {offer.size ? <span className="text-muted"> · {offer.size}</span> : null}
-                    <span className="block text-xs text-muted">
-                      p.{offer.pageNumber}
-                      {offer.retailerSku ? ` · N° ${offer.retailerSku}` : ""}
-                      {offer.regularPrice ? ` · reg. ${formatCents(offer.regularPrice)}` : ""}
-                      {" · "}
-                      {describeCondition({
-                        ...offer,
-                        id: "",
-                        retailerId,
-                        validity: { startsAt: null, endsAt: null },
-                        source: "FLYER_PDF",
-                        flyerUrl: null,
-                        flyerDocumentRef: null,
-                        flyerPage: offer.pageNumber,
-                        storeId: null,
-                        observedAt: "",
-                      })}
-                    </span>
-                  </p>
-                ))}
-                {read.offers.length > 60 ? (
-                  <p className="text-xs text-muted">
-                    …and {read.offers.length - 60} more.
-                  </p>
-                ) : null}
-              </div>
-            </section>
-          ) : null}
-
-          <div className="mt-5">
-            <Notice tone="info" title="Nothing has been saved">
-              These are candidates, not offers. Storing them, and comparing
-              them against a cart, comes next — and nothing reaches a cashier
-              until it is either confirmed by the flyer&rsquo;s own text or by
-              you.
-            </Notice>
-          </div>
-
-          <Link href="/" className="btn-secondary mt-4">
-            Done
-          </Link>
-        </>
-      ) : null}
-
-      {pages && pages.length === 0 ? (
-        <Notice tone="warn" title="That PDF has no pages" />
-      ) : null}
-
-      {/*
-        Full resolution, deliberately. The whole question this screen answers is
-        whether the small print survives, and a thumbnail cannot answer it.
-      */}
-      {open ? (
-        <div
-          className="fixed inset-0 z-50 overflow-auto bg-black/90 p-2"
-          onClick={() => setOpen(null)}
-          role="presentation"
-        >
-          <p className="sticky top-0 mb-2 rounded-lg bg-black/70 px-3 py-2 text-sm text-white">
-            Page {open.pageNumber} — {open.widthPx} × {open.heightPx} px. Tap to
-            close. Pinch to zoom in on the small print.
-          </p>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={open.imageDataUrl}
-            alt={`Flyer page ${open.pageNumber} at full size`}
-            className="mx-auto block w-full max-w-[1600px]"
-          />
         </div>
       ) : null}
-    </main>
+    </div>
   );
 }
 

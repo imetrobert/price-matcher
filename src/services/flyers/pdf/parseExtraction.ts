@@ -57,6 +57,14 @@ export interface ParsedExtraction {
   offers: ExtractedOffer[];
   /** One line per dropped offer, saying what was wrong. Shown, not swallowed. */
   rejected: string[];
+  /**
+   * The store name the model saw branded on the page, verbatim.
+   *
+   * Not mapped to a RetailerId here. This is a reading of a logo, and turning
+   * "Super C" into an id is a decision about which retailer's prices these
+   * are — which belongs where a person can see and override it.
+   */
+  retailerName: string | null;
 }
 
 /**
@@ -73,9 +81,18 @@ export function parseFlyerExtraction(
   const offers: ExtractedOffer[] = [];
   const rejected: string[] = [];
 
+  const retailerName =
+    typeof raw === "object" && raw !== null
+      ? readString((raw as Record<string, unknown>).retailerName)
+      : null;
+
   const list = readArray(raw, "offers");
   if (list === null) {
-    return { offers, rejected: ["The reply contained no list of offers."] };
+    return {
+      offers,
+      rejected: ["The reply contained no list of offers."],
+      retailerName,
+    };
   }
 
   for (const [index, item] of list.entries()) {
@@ -87,7 +104,7 @@ export function parseFlyerExtraction(
     offers.push(parsed.offer);
   }
 
-  return { offers, rejected };
+  return { offers, rejected, retailerName };
 }
 
 type OneResult = { offer: ExtractedOffer } | { error: string };
