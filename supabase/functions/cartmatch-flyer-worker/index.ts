@@ -45,10 +45,11 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 import { parseFlyerExtraction } from "../_shared/parseOffers.ts";
+import { quotaMessage } from "../_shared/quota.ts";
 
 /** Which build answered. Same reason as the other functions: a silent stale
  *  deploy is indistinguishable from a working one until you check. */
-const FUNCTION_BUILD = "2026-08-14-worker-3";
+const FUNCTION_BUILD = "2026-08-14-worker-4";
 
 /**
  * Pages per tick.
@@ -176,6 +177,22 @@ async function handle(req: Request): Promise<Response> {
 
     const outcome = await readOnePage(supabase, apiKey, models, page);
     results.push(outcome);
+
+    // A quota belongs to the key, not to the page. Once it is gone the next
+    // two pages of this tick would spend nothing but time and come back with
+    // the same refusal, so the tick ends here and the next one picks up.
+    if ((outcome as { quotaGone?: boolean }).quotaGone) {
+      return json(
+        {
+          ok: true,
+          build: FUNCTION_BUILD,
+          processed: results.length,
+          note: "Stopped: the key is out of quota. Pages stay queued.",
+          results,
+        },
+        200,
+      );
+    }
   }
 
   return json(
@@ -195,6 +212,32 @@ async function readOnePage(
   const flyerId = String(page.flyer_id);
   const userId = String(page.user_id);
   const path = String(page.storage_path);
+
+  /**
+   * Put the page back without spending one of its lives.
+   *
+   * `attempts` exists to stop a page that fails the same way however often it
+   * is asked — a corrupt image, a name no model answers to. A quota is not
+   * that. It is the key saying "not now", and the page is untouched.
+   *
+   * Counting it was quietly destructive: five pages a tick against a daily cap
+   * that resets tomorrow morning would mark every remaining page FAILED within
+   * the hour, and a flyer whose offers were merely late would become a flyer
+   * whose offers were gone. The claim above already incremented the counter,
+   * so this writes the original value back rather than leaving it.
+   */
+  const requeue = async (error: string) => {
+    await supabase
+      .from("cartmatch_flyer_pages")
+      .update({
+        status: "PENDING",
+        claimed_at: null,
+        attempts: Number(page.attempts),
+        last_error: error.slice(0, 500),
+      })
+      .eq("id", id);
+    return { page: pageNumber, ok: false, error, quotaGone: true };
+  };
 
   const fail = async (error: string) => {
     // Back to PENDING unless it has run out of attempts. The distinction
@@ -252,7 +295,16 @@ async function readOnePage(
     }
 
     if (!res || !res.ok) {
-      const detail = res ? (await res.text()).slice(0, 300) : "no response";
+      const body = res ? await res.text() : "";
+      const detail = body.slice(0, 300) || "no response";
+
+      // Told apart because the two answers are different: a per-minute cap
+      // refills before the next tick, a per-day cap does not refill until
+      // tomorrow. Neither is the page's fault, so neither costs it an attempt.
+      if (res && res.status === 429) {
+        return await requeue(quotaMessage(body));
+      }
+
       return await fail(`Gemini ${res?.status ?? 0} on ${used}: ${detail}`);
     }
 

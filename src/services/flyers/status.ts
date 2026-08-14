@@ -72,6 +72,12 @@ export interface FlyerStatus {
   stalled: boolean;
   /** Pages that gave up, when the queue counts were supplied. */
   pagesFailed: number;
+  /**
+   * Why the queue is not moving, when a queued page has said. A run waiting
+   * out a daily quota is queued and going nowhere, and "31%" alone reads as
+   * "nearly there" rather than "tomorrow".
+   */
+  waitingReason: string | null;
   /** One line, written to be shown as-is. */
   headline: string;
   detail: string;
@@ -128,6 +134,7 @@ export function flyerStatus(
       percent: 0,
       stalled: false,
       pagesFailed: 0,
+      waitingReason: null,
       headline: "Upload the latest flyers",
       detail: previous
         ? `The newest flyers held ran to ${day(previous.validTo)} and have expired. Nothing covers today.`
@@ -158,9 +165,10 @@ export function flyerStatus(
           return {
             waiting: sum.waiting + c.pending + c.reading,
             failed: sum.failed + c.failed,
+            reason: sum.reason ?? c.waitingReason,
           };
         },
-        { waiting: 0, failed: 0 },
+        { waiting: 0, failed: 0, reason: null as string | null },
       )
     : null;
 
@@ -180,6 +188,7 @@ export function flyerStatus(
       percent,
       stalled,
       pagesFailed: counts?.failed ?? 0,
+      waitingReason: stalled ? null : (counts?.reason ?? null),
       headline: stalled
         ? `Reading stopped — ${percent}% of ${window}`
         : `Reading ${window} — ${percent}%`,
@@ -202,6 +211,7 @@ export function flyerStatus(
     percent: 100,
     stalled: false,
     pagesFailed: counts?.failed ?? 0,
+    waitingReason: null,
     headline: `Flyers loaded — ${window}`,
     detail: `${names(retailers)}, all ${pagesTotal} pages read.`,
   };

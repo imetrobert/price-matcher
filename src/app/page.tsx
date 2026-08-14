@@ -184,6 +184,17 @@ function Home() {
             </>
           ) : flyers.readiness === "PARTIAL" ? (
             <>
+              {/*
+                A queued page that keeps being handed back — an exhausted
+                daily quota does exactly this, correctly, since the page is
+                fine and the key is not. Without saying so, "31%" reads as
+                nearly there when the truth is tomorrow morning.
+              */}
+              {flyers.waitingReason ? (
+                <p className="mt-2 rounded-md bg-warn/10 p-2 text-xs text-warn">
+                  Waiting: {flyers.waitingReason}
+                </p>
+              ) : null}
               <p className="mt-2 text-xs text-muted">
                 Reading continues on its own — you can close this. The count
                 updates every ten seconds, and again whenever you come back to

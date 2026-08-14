@@ -120,7 +120,7 @@ describe("stopped, versus still going", () => {
 
   it("says nothing is queued when nothing is", () => {
     const status = flyerStatus([flyer({ pagesRead: 5 })], DURING, {
-      "maxi-2026-08-13": { pending: 0, reading: 0, done: 5, failed: 12 },
+      "maxi-2026-08-13": { pending: 0, reading: 0, done: 5, failed: 12, waitingReason: null },
     });
     expect(status.readiness).toBe("PARTIAL");
     expect(status.stalled).toBe(true);
@@ -134,7 +134,7 @@ describe("stopped, versus still going", () => {
   it("is not stalled while pages are still waiting their turn", () => {
     // A failure alongside live work is not a stopped run.
     const status = flyerStatus([flyer({ pagesRead: 5 })], DURING, {
-      "maxi-2026-08-13": { pending: 11, reading: 1, done: 5, failed: 1 },
+      "maxi-2026-08-13": { pending: 11, reading: 1, done: 5, failed: 1, waitingReason: null },
     });
     expect(status.stalled).toBe(false);
     expect(status.detail).toMatch(/The rest are queued/);
@@ -142,7 +142,7 @@ describe("stopped, versus still going", () => {
 
   it("treats a page being read as work in progress", () => {
     const status = flyerStatus([flyer({ pagesRead: 16 })], DURING, {
-      "maxi-2026-08-13": { pending: 0, reading: 1, done: 16, failed: 0 },
+      "maxi-2026-08-13": { pending: 0, reading: 1, done: 16, failed: 0, waitingReason: null },
     });
     expect(status.stalled).toBe(false);
   });
@@ -161,8 +161,8 @@ describe("stopped, versus still going", () => {
       [flyer({ pagesRead: 4 }), flyer({ id: "iga-2026-08-06", validFrom: "2026-08-06", validTo: "2026-08-12" })],
       DURING,
       {
-        "maxi-2026-08-13": { pending: 13, reading: 0, done: 4, failed: 0 },
-        "iga-2026-08-06": { pending: 0, reading: 0, done: 3, failed: 14 },
+        "maxi-2026-08-13": { pending: 13, reading: 0, done: 4, failed: 0, waitingReason: null },
+        "iga-2026-08-06": { pending: 0, reading: 0, done: 3, failed: 14, waitingReason: null },
       },
     );
     expect(status.stalled).toBe(false);
@@ -173,10 +173,35 @@ describe("stopped, versus still going", () => {
     // Uploaded, never enqueued — a different fault with the same symptom, and
     // the wording has to stop short of blaming a failure that did not happen.
     const status = flyerStatus([flyer({ pagesRead: 3 })], DURING, {
-      "maxi-2026-08-13": { pending: 0, reading: 0, done: 3, failed: 0 },
+      "maxi-2026-08-13": { pending: 0, reading: 0, done: 3, failed: 0, waitingReason: null },
     });
     expect(status.stalled).toBe(true);
     expect(status.pagesFailed).toBe(0);
     expect(status.detail).toMatch(/never queued/);
+  });
+});
+
+describe("waiting on something outside the queue", () => {
+  it("reports why a queued page is going nowhere", () => {
+    // The quota case: pages are queued and correctly untouched, so nothing is
+    // stalled — but nothing is going to move tonight either.
+    const status = flyerStatus([flyer({ pagesRead: 16 })], DURING, {
+      "maxi-2026-08-13": {
+        pending: 1,
+        reading: 0,
+        done: 16,
+        failed: 0,
+        waitingReason: "This API key has used its quota for the DAY.",
+      },
+    });
+    expect(status.stalled).toBe(false);
+    expect(status.waitingReason).toMatch(/quota for the DAY/);
+  });
+
+  it("says nothing when the queue is moving cleanly", () => {
+    const status = flyerStatus([flyer({ pagesRead: 5 })], DURING, {
+      "maxi-2026-08-13": { pending: 12, reading: 0, done: 5, failed: 0, waitingReason: null },
+    });
+    expect(status.waitingReason).toBeNull();
   });
 });

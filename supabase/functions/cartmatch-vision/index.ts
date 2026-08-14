@@ -60,6 +60,8 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
+import { quotaMessage } from "../_shared/quota.ts";
+
 // ===========================================================================
 // SECTION 1 — CORS
 // ===========================================================================
@@ -723,32 +725,6 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-/**
- * Say WHICH quota ran out, in Google's own words.
- *
- * A 429 is a per-minute cap or a per-day cap, and the difference decides
- * whether the answer is to wait a minute or to come back tomorrow. Guessing
- * "per-minute" sent somebody to retry a run that could not succeed again until
- * the following day.
- *
- * Google names the metric in the error body — GenerateRequestsPerDayPerProject
- * or PerMinute — so this reads it rather than assuming.
- */
-function quotaMessage(detail: string): string {
-  const perDay = /per\s?day/i.test(detail);
-  const perMinute = /per\s?minute/i.test(detail);
-
-  if (perDay && !perMinute) {
-    return "This API key has used its quota for the DAY. Waiting will not help until it resets — use a different key, or come back tomorrow.";
-  }
-  if (perMinute && !perDay) {
-    return "This API key's per-minute quota is used up. It refills within a minute.";
-  }
-
-  // Both named, or neither. Report what Google said rather than picking one.
-  const quoted = detail.replace(/\s+/g, " ").slice(0, 220);
-  return `This API key is over its quota. Google said: ${quoted}`;
-}
 
 /**
  * Which models this key may actually call.

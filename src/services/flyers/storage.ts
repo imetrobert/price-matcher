@@ -221,6 +221,16 @@ export interface FlyerQueueCounts {
   reading: number;
   done: number;
   failed: number;
+  /**
+   * What a still-queued page last came back with, when one has been tried.
+   *
+   * A page can be queued and going nowhere: an exhausted daily quota returns
+   * it to the queue untouched, correctly, because the page is fine and the key
+   * is not. Without this the card would spin all night over a run that cannot
+   * move until the quota resets, which is the difference between "nearly done"
+   * and "come back tomorrow".
+   */
+  waitingReason: string | null;
 }
 
 export type QueueByFlyer = Record<string, FlyerQueueCounts>;
@@ -234,19 +244,37 @@ export async function queueSummary(): Promise<QueueByFlyer> {
   // cheaper than five round trips asking the server to count.
   const { data, error } = await supabase
     .from("cartmatch_flyer_pages")
-    .select("flyer_id, status");
+    .select("flyer_id, status, last_error");
   if (error || !data) return {};
 
   const out: QueueByFlyer = {};
   for (const row of data) {
     const flyer = String(row.flyer_id);
     const counts =
-      out[flyer] ?? (out[flyer] = { pending: 0, reading: 0, done: 0, failed: 0 });
+      out[flyer] ??
+      (out[flyer] = {
+        pending: 0,
+        reading: 0,
+        done: 0,
+        failed: 0,
+        waitingReason: null,
+      });
     const status = String(row.status);
     if (status === "PENDING") counts.pending += 1;
     else if (status === "READING") counts.reading += 1;
     else if (status === "DONE") counts.done += 1;
     else if (status === "FAILED") counts.failed += 1;
+
+    // Only from a page that is still waiting. A reason attached to a page that
+    // has since been read is history, and reporting it would describe a
+    // problem that is over.
+    if (
+      status === "PENDING" &&
+      counts.waitingReason === null &&
+      row.last_error
+    ) {
+      counts.waitingReason = String(row.last_error);
+    }
   }
   return out;
 }
