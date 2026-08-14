@@ -49,7 +49,7 @@ import { quotaMessage } from "../_shared/quota.ts";
 
 /** Which build answered. Same reason as the other functions: a silent stale
  *  deploy is indistinguishable from a working one until you check. */
-const FUNCTION_BUILD = "2026-08-14-worker-5";
+const FUNCTION_BUILD = "2026-08-14-worker-6";
 
 /**
  * Pages per tick.
