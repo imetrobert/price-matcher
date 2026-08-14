@@ -52,7 +52,7 @@ import { FLYER_PROMPT, FLYER_SCHEMA } from "../_shared/flyerPrompt.ts";
 
 /** Which build answered. Same reason as the other functions: a silent stale
  *  deploy is indistinguishable from a working one until you check. */
-const FUNCTION_BUILD = "2026-08-15-worker-11";
+const FUNCTION_BUILD = "2026-08-15-worker-12";
 
 /**
  * Pages per tick.
@@ -785,7 +785,7 @@ function callGeminiBatch(
         contents: [{ parts }],
         generationConfig: {
           responseMimeType: "application/json",
-          responseSchema: BATCH_SCHEMA,
+          responseSchema: batchSchema(),
           temperature: 0,
         },
       }),
@@ -846,23 +846,38 @@ const batchPrompt = (pages: number[]): string =>
   `on it takes an entry with an empty offers list.\n\n` +
   FLYER_PROMPT.replace("You are reading one page of a Canadian grocery flyer. ", "");
 
-const BATCH_SCHEMA = {
-  type: "object",
-  properties: {
-    pages: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          pageNumber: { type: "integer" },
-          offers: FLYER_SCHEMA.properties.offers,
+/**
+ * Built when it is needed, not when the module loads.
+ *
+ * It used to be a module-level const reaching into an imported object —
+ * `FLYER_SCHEMA.properties.offers`. Anything that throws at module scope
+ * happens before Deno.serve is reached, so the handler's try/catch does not
+ * exist yet and the platform answers a bare "Internal Server Error" with no
+ * body: the one failure shape this function cannot explain about itself.
+ *
+ * Nothing here needs to happen at load. Building it inside the call means the
+ * worst case is a caught exception with a message, which is the difference
+ * between a debuggable failure and an evening.
+ */
+function batchSchema() {
+  return {
+    type: "object",
+    properties: {
+      pages: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            pageNumber: { type: "integer" },
+            offers: FLYER_SCHEMA.properties.offers,
+          },
+          required: ["pageNumber", "offers"],
         },
-        required: ["pageNumber", "offers"],
       },
     },
-  },
-  required: ["pages"],
-} as const;
+    required: ["pages"],
+  };
+}
 
 // ---------------------------------------------------------------------------
 // END OF FILE — the lines below are deliberately comments.
