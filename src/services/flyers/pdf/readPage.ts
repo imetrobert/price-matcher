@@ -52,6 +52,33 @@ function splitDataUrl(dataUrl: string): { base64: string; mimeType: string } {
  */
 const OVERLOAD_BACKOFF_MS = [2_000, 6_000, 15_000];
 
+/**
+ * How long to wait when the KEY is the limit rather than the model.
+ *
+ * A free-tier quota is measured per minute, so backing off for fifteen seconds
+ * spends another request inside the same window and fails again. These waits
+ * are long enough to reach the next window.
+ *
+ * Found on a Super C flyer: page 1 read fine, page 2 came back 429, three
+ * quick retries all landed in the same minute, and the run stopped with one
+ * page of seventeen read.
+ */
+const RATE_LIMIT_BACKOFF_MS = [25_000, 45_000, 65_000];
+
+/**
+ * Minimum gap between page requests.
+ *
+ * Pacing beats recovering. A free key allows something in the region of a
+ * dozen requests a minute, and a seventeen-page flyer sent as fast as the
+ * network allows will trip that on page two every time — then spend a minute
+ * recovering from a limit it created. Five seconds turns a burst into a
+ * steady twelve a minute, which a whole flyer can sustain.
+ *
+ * The cost is about ninety seconds for a seventeen-page flyer. That is a
+ * price worth paying once a week for a complete flyer instead of one page.
+ */
+const MIN_REQUEST_INTERVAL_MS = 5_000;
+
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -81,10 +108,18 @@ export async function readFlyerPage(
   for (let attempt = 0; ; attempt++) {
     const outcome = await readFlyerPageOnce(page);
     if (outcome.ok) return outcome;
-    if (outcome.code !== "OVERLOADED") return outcome;
-    if (attempt >= OVERLOAD_BACKOFF_MS.length) return outcome;
+
+    const waits =
+      outcome.code === "RATE_LIMITED"
+        ? RATE_LIMIT_BACKOFF_MS
+        : outcome.code === "OVERLOADED"
+          ? OVERLOAD_BACKOFF_MS
+          : null;
+
+    if (waits === null) return outcome;
+    if (attempt >= waits.length) return outcome;
     if (signal?.aborted) return outcome;
-    await wait(OVERLOAD_BACKOFF_MS[attempt]!, signal);
+    await wait(waits[attempt]!, signal);
   }
 }
 
@@ -169,8 +204,18 @@ export interface ReadFlyerProgress {
 export interface ReadFlyerResult {
   offers: ExtractedOffer[];
   rejected: string[];
-  /** Pages that could not be read at all, with the reason for each. */
+  /** Pages that were tried and refused, with the reason for each. */
   failedPages: { pageNumber: number; error: string }[];
+  /**
+   * Pages the run never got to.
+   *
+   * Kept apart from `failedPages` because conflating them lies. A Super C run
+   * reported "pages that failed: 2" after reading page 1 and stopping — which
+   * reads as sixteen good pages and one bad one, when it was one good page and
+   * sixteen never attempted. A person deciding whether they have this week's
+   * prices needs that difference.
+   */
+  notAttempted: number[];
   model: string | null;
 }
 
@@ -196,9 +241,21 @@ export async function readFlyerPages(
   const rejected: string[] = [];
   const failedPages: { pageNumber: number; error: string }[] = [];
   let model: string | null = null;
+  let stoppedAt = -1;
+  let lastRequestAt = 0;
 
-  for (const page of pages) {
-    if (options.signal?.aborted) break;
+  for (const [index, page] of pages.entries()) {
+    if (options.signal?.aborted) {
+      stoppedAt = index;
+      break;
+    }
+
+    // Pace, rather than sprint and recover. See MIN_REQUEST_INTERVAL_MS.
+    const sinceLast = Date.now() - lastRequestAt;
+    if (lastRequestAt > 0 && sinceLast < MIN_REQUEST_INTERVAL_MS) {
+      await wait(MIN_REQUEST_INTERVAL_MS - sinceLast, options.signal);
+    }
+    lastRequestAt = Date.now();
     options.onProgress?.({
       page: page.pageNumber,
       pageCount: pages.length,
@@ -211,12 +268,16 @@ export async function readFlyerPages(
       // A stale function or a lost session will fail identically on every
       // remaining page. Sixteen copies of one message helps nobody.
       if (outcome.code === "STALE_FUNCTION" || outcome.code === "NOT_SIGNED_IN") {
+        stoppedAt = index + 1;
         break;
       }
-      // Still busy after every retry. Grinding through eleven more pages to
-      // collect eleven more copies of "the model is busy" wastes the person's
-      // time and the retailer's nothing; stop and say so once.
-      if (outcome.code === "OVERLOADED") break;
+      // Still refused after every retry. Grinding through fifteen more pages
+      // to collect fifteen more copies of the same message wastes the person's
+      // time; stop, and say exactly which pages were never tried.
+      if (outcome.code === "OVERLOADED" || outcome.code === "RATE_LIMITED") {
+        stoppedAt = index + 1;
+        break;
+      }
       continue;
     }
     offers.push(...outcome.offers);
@@ -224,5 +285,14 @@ export async function readFlyerPages(
     model = outcome.model;
   }
 
-  return { offers, rejected, failedPages, model };
+  return {
+    offers,
+    rejected,
+    failedPages,
+    notAttempted:
+      stoppedAt === -1
+        ? []
+        : pages.slice(stoppedAt).map((p) => p.pageNumber),
+    model,
+  };
 }

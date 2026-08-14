@@ -263,8 +263,10 @@ function FlyerImport() {
                   label={`Reading page ${reading.page} of ${reading.pageCount} — ${reading.offersSoFar} offers so far…`}
                 />
                 <p className="mt-2 text-xs text-muted">
-                  A page can pause here for up to half a minute if the model is
-                  busy. It waits and asks again rather than skipping the page.
+                  Pages are sent one every five seconds, because a free API key
+                  allows about a dozen a minute and sending faster gets the
+                  whole run cut off. A seventeen-page flyer takes roughly a
+                  minute and a half.
                 </p>
               </div>
             ) : (
@@ -288,14 +290,38 @@ function FlyerImport() {
               ) : null}
               {read.failedPages.length > 0 ? (
                 <Row
-                  label="Pages that failed"
+                  label="Pages refused"
                   value={read.failedPages.map((f) => f.pageNumber).join(", ")}
                 />
               ) : null}
+              <Row
+                label="Pages actually read"
+                value={`${pages.length - read.failedPages.length - read.notAttempted.length} of ${pages.length}`}
+              />
             </section>
           ) : null}
 
-          {read && read.failedPages.length > 0 ? (
+          {/*
+            Said loudest, because it is the finding most easily misread. A run
+            that stops early looks like a run that finished: offers appear, the
+            page list is full, and nothing about the screen says most of the
+            flyer was never opened.
+          */}
+          {read && read.notAttempted.length > 0 ? (
+            <div className="mt-3">
+              <Notice
+                tone="warn"
+                title={`This flyer is not loaded — ${read.notAttempted.length} of ${pages.length} pages were never read`}
+              >
+                Reading stopped at page {read.notAttempted[0]}.{" "}
+                {read.failedPages[0]?.error ?? ""} Pages{" "}
+                {read.notAttempted.join(", ")} have not been looked at, so
+                anything advertised on them is missing rather than absent. Read
+                the flyer again to continue — a free API key allows about a
+                dozen pages a minute, so a long flyer may need a second run.
+              </Notice>
+            </div>
+          ) : read && read.failedPages.length > 0 ? (
             <div className="mt-3">
               <Notice tone="error" title="Some pages could not be read">
                 {read.failedPages[0]!.error}

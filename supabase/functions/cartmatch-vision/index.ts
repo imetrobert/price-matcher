@@ -551,16 +551,21 @@ Deno.serve(async (req: Request) => {
       // says anything about the page. Labelled so the caller can retry rather
       // than record a page as unreadable — a flyer that loses five pages of
       // eight to a passing spike is a flyer nobody can shop from.
+      // Busy and too-fast are both answered by waiting, and they are answered
+      // by waiting DIFFERENTLY. A 503 demand spike passes in seconds; a 429 is
+      // a quota measured per minute, so a fifteen-second retry just spends
+      // another request against the same window. Reported separately so the
+      // caller can pace itself rather than back off blindly.
       if (res.status === 503 || res.status === 429) {
         return json(
           {
             ok: false,
-            code: "OVERLOADED",
+            code: res.status === 429 ? "RATE_LIMITED" : "OVERLOADED",
             retryAfterSeconds: Number(res.headers.get("retry-after") ?? "") || null,
             error:
               res.status === 503
                 ? `The ${model} model is busy right now.`
-                : `Sending pages faster than this key is allowed.`,
+                : `This API key's per-minute quota is used up.`,
           },
           503,
           origin,
