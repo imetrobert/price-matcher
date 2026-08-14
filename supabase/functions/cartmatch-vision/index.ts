@@ -238,7 +238,7 @@ const MAX_IMAGES = 4;
  *
  * CARTMATCH_GEMINI_MODEL overrides, and accepts the same comma-separated form.
  */
-const DEFAULT_MODEL = "gemini-3.5-flash,gemini-2.5-flash,gemini-flash-latest";
+const DEFAULT_MODEL = "gemini-3.7-flash,gemini-3.5-flash,gemini-flash-latest";
 const MAX_BYTES = 8 * 1024 * 1024;
 const TIMEOUT_MS = 45_000;
 
@@ -566,6 +566,37 @@ Deno.serve(async (req: Request) => {
     }
     if (!res) {
       return json({ ok: false, error: "No model was configured." }, 500, origin);
+    }
+
+    // Every configured name refused with 404, and Google's own model list
+    // contradicts that — it advertises the very ids it just declined. Rather
+    // than report a configuration error nobody can act on, ask what this key
+    // may use and try the best of those once.
+    //
+    // The self-correction is bounded: one extra attempt, on a name the API
+    // supplied this second, and if that fails too the error names both what
+    // was configured and what was tried.
+    if (!res.ok && res.status === 404) {
+      const available = await listUsableModels(apiKey, controller.signal);
+      const suggested = available.find((m) => !models.includes(m));
+      if (suggested) {
+        console.warn(
+          `[cartmatch] ${models.join(", ")} all refused; trying ${suggested} from the live model list.`,
+        );
+        const retry = await callGemini(
+          apiKey,
+          suggested,
+          parts,
+          flyerMode,
+          supportsThinking(suggested),
+          Number.isFinite(thinkingBudget) ? thinkingBudget : 0,
+          controller.signal,
+        );
+        if (retry.ok) {
+          res = retry;
+          used = suggested;
+        }
+      }
     }
 
     // thinkingConfig only exists on 2.5+. If the gate guessed wrong for a

@@ -48,7 +48,7 @@ import { parseFlyerExtraction } from "../_shared/parseOffers.ts";
 
 /** Which build answered. Same reason as the other functions: a silent stale
  *  deploy is indistinguishable from a working one until you check. */
-const FUNCTION_BUILD = "2026-08-14-worker-2";
+const FUNCTION_BUILD = "2026-08-14-worker-3";
 
 /**
  * Pages per tick.
@@ -69,7 +69,7 @@ const PAGES_PER_TICK = 3;
  */
 const MAX_ATTEMPTS = 5;
 
-const DEFAULT_MODEL = "gemini-3.5-flash,gemini-2.5-flash,gemini-flash-latest";
+const DEFAULT_MODEL = "gemini-3.7-flash,gemini-3.5-flash,gemini-flash-latest";
 const TIMEOUT_MS = 90_000;
 const FLYER_BUCKET = "cartmatch-flyers";
 
@@ -236,6 +236,21 @@ async function readOnePage(
       if (res.status !== 503 && res.status !== 429 && res.status !== 404) break;
     }
 
+    // Every configured name refused with 404 while Google's own list advertises
+    // them. Ask what this key may actually use and try the best of those once,
+    // rather than failing a page over a name.
+    if (res && !res.ok && res.status === 404) {
+      const available = await listUsableModels(apiKey, controller.signal);
+      const suggested = available.find((m) => !models.includes(m));
+      if (suggested) {
+        const retry = await callGemini(apiKey, suggested, base64, controller.signal);
+        if (retry.ok) {
+          res = retry;
+          used = suggested;
+        }
+      }
+    }
+
     if (!res || !res.ok) {
       const detail = res ? (await res.text()).slice(0, 300) : "no response";
       return await fail(`Gemini ${res?.status ?? 0} on ${used}: ${detail}`);
@@ -357,6 +372,57 @@ function callGemini(
       }),
     },
   );
+}
+
+/**
+ * Which models this key may actually call, best first.
+ *
+ * Asked, not assumed — and filtered, because generateContent is necessary and
+ * nowhere near sufficient: text-to-speech, video and Gemma models all
+ * advertise it and none can read a flyer tile into structured offers.
+ */
+async function listUsableModels(
+  apiKey: string,
+  signal: AbortSignal,
+): Promise<string[]> {
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=100`,
+      { signal },
+    );
+    if (!res.ok) return [];
+    const body = await res.json();
+    const models = Array.isArray(body?.models) ? body.models : [];
+    return models
+      .filter((m: { supportedGenerationMethods?: unknown }) =>
+        Array.isArray(m.supportedGenerationMethods) &&
+        m.supportedGenerationMethods.includes("generateContent"),
+      )
+      .map((m: { name?: unknown }) => String(m.name ?? "").replace(/^models\//, ""))
+      .filter(
+        (name: string) =>
+          name !== "" &&
+          !/tts|embedding|aqa|imagen|veo|image-generation|video|gemma|learnlm/i.test(
+            name,
+          ),
+      )
+      .sort((a: string, b: string) => rankModel(a) - rankModel(b));
+  } catch {
+    // Improving an error must never replace it with a worse one.
+    return [];
+  }
+}
+
+/** Concrete flash first, newest first; then lite, then aliases, then pro. */
+function rankModel(name: string): number {
+  const version = Number(/gemini-(\d+(?:\.\d+)?)/.exec(name)?.[1] ?? "0");
+  if (/flash/.test(name) && !/lite|latest|image|preview/.test(name)) {
+    return 100 - version;
+  }
+  if (/flash/.test(name) && !/latest/.test(name)) return 200 - version;
+  if (/flash/.test(name)) return 300;
+  if (/pro/.test(name)) return 400;
+  return 500;
 }
 
 function encodeBase64(bytes: Uint8Array): string {
