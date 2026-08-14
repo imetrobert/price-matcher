@@ -219,13 +219,20 @@ const MAX_IMAGES = 4;
 /**
  * The model used when CARTMATCH_GEMINI_MODEL is unset.
  *
- * A default, not a recommendation. Google retires model ids, and a key issued
- * after a retirement cannot call the retired id at all — "no longer available
- * to new users" — so whatever is written here will eventually be wrong for
- * somebody. When it is, the 404 path lists what the key CAN use rather than
- * guessing a successor, and the answer goes in CARTMATCH_GEMINI_MODEL.
+ * An ALIAS, deliberately, after a pinned version broke twice. Google retires
+ * model ids, and a key issued after a retirement cannot call the retired id at
+ * all — a key created on 8 August could not call gemini-2.5-flash, which had
+ * been the default here. Worse, ListModels still ADVERTISES the retired id, so
+ * the error and the list of alternatives contradicted each other.
+ *
+ * "gemini-flash-latest" follows whatever the current flash model is, which is
+ * the right tier for this work: reading a flyer is dense transcription, not
+ * reasoning. Pinning a version buys reproducibility nobody here needs and
+ * costs a breakage every time Google moves on.
+ *
+ * CARTMATCH_GEMINI_MODEL still overrides, for anyone who wants a fixed one.
  */
-const DEFAULT_MODEL = "gemini-2.5-flash";
+const DEFAULT_MODEL = "gemini-flash-latest";
 const MAX_BYTES = 8 * 1024 * 1024;
 const TIMEOUT_MS = 45_000;
 
@@ -559,7 +566,7 @@ Deno.serve(async (req: Request) => {
             availableModels: available,
             error:
               available.length > 0
-                ? `Gemini does not offer "${model}" to this API key. Set CARTMATCH_GEMINI_MODEL to one of: ${available.slice(0, 8).join(", ")}.`
+                ? `Gemini does not offer "${model}" to this API key. Set CARTMATCH_GEMINI_MODEL to one of: ${available.slice(0, 20).join(", ")}.`
                 : `Gemini does not offer "${model}" to this API key, and the model list could not be read. ${detail.slice(0, 200)}`,
           },
           502,

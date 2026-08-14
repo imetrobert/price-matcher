@@ -296,7 +296,12 @@ function FlyerImport() {
                   setItems((prev) =>
                     prev.map((it) =>
                       it.id === item.id
-                        ? { ...it, validFrom, validTo, validityFrom: "COVER" as const }
+                        ? // MANUAL, not COVER. Dates typed in by a person are
+                          // not dates read off the flyer, and labelling them
+                          // "from cover" told the reader the app had verified
+                          // something nobody had — on a run where no page was
+                          // read at all.
+                          { ...it, validFrom, validTo, validityFrom: "MANUAL" as const }
                         : it,
                     ),
                   )
@@ -528,7 +533,13 @@ function FlyerRow({
             </span>
             <span className="text-muted">
               {" "}
-              ({item.validityFrom === "FILENAME" ? "from filename" : "from cover"})
+              (
+              {item.validityFrom === "FILENAME"
+                ? "from filename"
+                : item.validityFrom === "MANUAL"
+                  ? "you set these"
+                  : "from cover"}
+              )
             </span>
           </>
         ) : item.stage === "DONE" ? (

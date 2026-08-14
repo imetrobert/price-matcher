@@ -65,7 +65,7 @@ export interface BatchItem {
   validFrom: string | null;
   validTo: string | null;
   /** Where those dates came from, since one source is a model and one is not. */
-  validityFrom: "FILENAME" | "COVER" | "UNKNOWN";
+  validityFrom: "FILENAME" | "COVER" | "MANUAL" | "UNKNOWN";
   /** What happened when this flyer was saved, if it could be. */
   saved: { offers: number; pages: number } | null;
   saveError: string | null;
@@ -480,7 +480,12 @@ export async function saveLater(
     pageCount: item.pageCount ?? item.result.offers.length,
     pagesRead: item.pagesRead,
     sourceFilename: item.file.name,
-    validitySource: item.validityFrom === "FILENAME" ? "FILENAME" : "MANUAL",
+    validitySource:
+      item.validityFrom === "FILENAME"
+        ? "FILENAME"
+        : item.validityFrom === "COVER"
+          ? "COVER"
+          : "MANUAL",
     offers: item.result.offers,
     // Empty: the images were released when the flyer finished.
     pageImages: new Map<number, string>(),
