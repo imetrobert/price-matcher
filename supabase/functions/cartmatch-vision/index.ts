@@ -724,6 +724,33 @@ function quotaMessage(detail: string): string {
  * Only models that can generateContent are returned. The list also carries
  * embedding and other models that would 404 differently and just as usefully.
  */
+/**
+ * Could this model read a page of a flyer?
+ *
+ * generateContent is necessary and not sufficient. Text-to-speech variants,
+ * video and image-generation models and embedding models all advertise it and
+ * none of them can look at a flyer tile and return structured offers — so
+ * listing them as alternatives is advice that wastes somebody's evening.
+ *
+ * Gemma is excluded for a subtler reason: it does not support the response
+ * schema this function relies on, so it would answer with free text that the
+ * parser correctly rejects, page after page, looking like a bad flyer rather
+ * than a bad model choice.
+ */
+function canReadAFlyerPage(name: string): boolean {
+  return !/tts|embedding|aqa|imagen|veo|image-generation|video|gemma|learnlm/i.test(
+    name,
+  );
+}
+
+/** Aliases first, then flash, then everything else. */
+function rankModel(name: string): number {
+  if (/latest/.test(name)) return /flash/.test(name) ? 0 : 1;
+  if (/flash/.test(name)) return 2;
+  if (/pro/.test(name)) return 3;
+  return 4;
+}
+
 async function listUsableModels(
   apiKey: string,
   signal: AbortSignal,
@@ -742,7 +769,11 @@ async function listUsableModels(
         m.supportedGenerationMethods.includes("generateContent"),
       )
       .map((m: { name?: unknown }) => String(m.name ?? "").replace(/^models\//, ""))
-      .filter((name: string) => name !== "");
+      .filter((name: string) => name !== "" && canReadAFlyerPage(name))
+      // Aliases first. A "-latest" id follows whatever the current model is,
+      // so it cannot be retired underneath a configuration — which is exactly
+      // how this broke twice.
+      .sort((a: string, b: string) => rankModel(a) - rankModel(b));
   } catch {
     // The point of this call is to improve an error message. Failing to
     // improve it must never replace the original error with a worse one.

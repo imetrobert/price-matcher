@@ -542,7 +542,12 @@ function GeminiModelsPanel() {
     setResult({ configured: outcome.configured, models: outcome.models });
   }
 
-  const usable = result?.models.filter((m) => !/embedding|aqa|imagen|veo/i.test(m)) ?? [];
+  // The Edge Function already filters and ranks these; this only guards against
+  // an older deployment answering with the raw list.
+  const usable =
+    result?.models.filter(
+      (m) => !/tts|embedding|aqa|imagen|veo|video|gemma|learnlm/i.test(m),
+    ) ?? [];
 
   return (
     <section className="card mb-4 text-sm">
@@ -578,11 +583,18 @@ function GeminiModelsPanel() {
             )}
           </p>
           <p className="mb-1 text-xs text-muted">
-            Text-and-image models, most likely candidates first:
+            Models that could read a flyer page, best candidates first. Set
+            CARTMATCH_GEMINI_MODEL to two or three of these, comma-separated —
+            a busy model falls through to the next one in the same request.
           </p>
           <pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs text-muted">
             {usable.join("\n") || "(none returned)"}
           </pre>
+          {usable.length > 1 ? (
+            <p className="mt-2 break-all rounded-lg bg-surface px-2 py-1 text-xs">
+              Suggested value: {usable.slice(0, 3).join(",")}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </section>
