@@ -72,6 +72,10 @@ export interface ProbeResult {
   sampleImages?: string[];
   /** Context around a substring the caller asked about. */
   matches?: string[];
+  /** Content-Length as declared, for a file the probe deliberately did not read. */
+  contentLength?: number | null;
+  /** True when the first bytes carry the PDF signature. */
+  looksLikePdf?: boolean;
 }
 
 /** Does this look like a flyer viewer rather than a product page? */
@@ -142,6 +146,16 @@ export async function probeRetailerUrl(
  * confidently returning nothing.
  */
 export function summariseProbe(r: ProbeResult): string {
+  // A file, not a page. Judged on whether it is really there and really a PDF —
+  // the two things that decide whether a weekly flyer import can be automated.
+  if (r.looksLikePdf) {
+    const mb = r.contentLength ? (r.contentLength / 1024 / 1024).toFixed(1) : "?";
+    return `A real PDF, ${mb} MB, served to a datacenter without objection. This is a supply line.`;
+  }
+  if (r.status < 400 && r.contentType && !/html|text|json/i.test(r.contentType)) {
+    return `HTTP ${r.status}, content-type ${r.contentType}, and the first bytes are not a PDF. Something is there, but not the file we expected.`;
+  }
+
   // A flyer viewer is judged on different evidence. It has no Product block and
   // never will, so the product-page verdict would call every success a failure.
   if (isFlyerTarget(r) && r.status < 400) {

@@ -182,6 +182,14 @@ const ALLOWED_HOSTS = new Set([
   // are unread. The probe reports what came back; it never routes around it.
   "flipp.com",
   "www.flipp.com",
+  // Azure blob storage serving retailer flyer PDFs. Not a retailer's own site:
+  // a plain object store, no viewer, no protection in front of it. Whether the
+  // files there are fetchable is the question that decides whether the weekly
+  // import can be automated at all, so it is on the list to be MEASURED.
+  //
+  // Being here permits a fetch of a URL a person supplies. It is not a licence
+  // to enumerate the bucket, and nothing in this file lists or walks it.
+  "stgraddaradfprod.blob.core.windows.net",
 ]);
 
 /**
@@ -196,7 +204,7 @@ const ALLOWED_HOSTS = new Set([
  * So every response now says which build produced it. Bump this string
  * whenever the file changes in a way a caller could notice.
  */
-const FUNCTION_BUILD = "2026-08-13-body-diagnostics";
+const FUNCTION_BUILD = "2026-08-14-binary-aware";
 
 const MAX_REDIRECTS = 3;
 const TIMEOUT_MS = 20_000;
@@ -349,6 +357,19 @@ async function probe(
         continue;
       }
 
+      // A PDF is not text, and reading a 12 MB one into a string would spend
+      // the function's memory and time to produce mojibake. Anything that is
+      // not textual is identified from its first bytes and its headers, which
+      // is all a probe needs to say whether the file is really there.
+      const contentType = res.headers.get("content-type") ?? "";
+      if (res.status < 400 && !isTextual(contentType)) {
+        return json(
+          { ok: true, result: await summariseBinary(res, current, hops) },
+          200,
+          origin,
+        );
+      }
+
       // The body is read on failure too. A 403's body and headers say WHICH
       // protection refused — Akamai, Cloudflare, PerimeterX all identify
       // themselves — and "403 from something unnamed" is a much weaker finding
@@ -417,6 +438,10 @@ interface ProbeResult {
   matches: string[];
   /** Headers that name the protection doing the refusing. */
   signals: Record<string, string>;
+  /** Content-Length as the server declared it, for a file we do not read. */
+  contentLength: number | null;
+  /** True when the first bytes are the PDF signature. */
+  looksLikePdf: boolean;
 }
 
 /**
@@ -480,6 +505,83 @@ function summarise(
     imageHosts: imageHostCounts(body),
     sampleImages: sampleImageUrls(body),
     matches: find ? contextAround(body, find) : [],
+    contentLength: declaredLength(res),
+    looksLikePdf: body.startsWith("%PDF-"),
+  };
+}
+
+/** Content types worth reading as a string. Everything else is a file. */
+function isTextual(contentType: string): boolean {
+  return /^text\/|json|xml|javascript|xhtml/i.test(contentType);
+}
+
+function declaredLength(res: Response): number | null {
+  const raw = res.headers.get("content-length");
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Report a file without downloading it.
+ *
+ * The interesting questions about a flyer PDF are all answerable from the
+ * headers and the first few bytes: is it there, is it really a PDF, how big is
+ * it, and did anything object. Pulling megabytes through an Edge Function to
+ * answer them would be a waste twice over — the function's time, and the
+ * retailer's bandwidth for a file we are only checking on.
+ *
+ * The stream is cancelled after the first chunk, so the rest is never sent.
+ */
+async function summariseBinary(
+  res: Response,
+  url: URL,
+  hops: string[],
+): Promise<ProbeResult> {
+  let head = "";
+  try {
+    const reader = res.body?.getReader();
+    if (reader) {
+      const { value } = await reader.read();
+      if (value) {
+        head = new TextDecoder("latin1").decode(value.slice(0, 16));
+      }
+      await reader.cancel();
+    }
+  } catch {
+    // A stream that will not open is reported as an empty head rather than as
+    // a failure: the status and headers are still a real finding.
+  }
+
+  const signals: Record<string, string> = {};
+  for (const name of SIGNAL_HEADERS) {
+    const value = res.headers.get(name);
+    if (value) {
+      signals[name] = name === "set-cookie" ? value.split("=")[0]! : value.slice(0, 120);
+    }
+  }
+
+  const length = declaredLength(res);
+  return {
+    functionBuild: FUNCTION_BUILD,
+    signals,
+    finalUrl: url.toString(),
+    status: res.status,
+    contentType: res.headers.get("content-type") ?? "",
+    bytes: length ?? 0,
+    contentLength: length,
+    looksLikePdf: head.startsWith("%PDF-"),
+    hasJsonLdProduct: false,
+    priceFromJsonLd: null,
+    looksLikeChallenge: false,
+    challengeMarkers: [],
+    hops,
+    note: "Binary response. Headers and the first bytes only; the file was not downloaded.",
+    bodyPreview: head,
+    flyerImages: [],
+    imageHosts: {},
+    sampleImages: [],
+    matches: [],
   };
 }
 
