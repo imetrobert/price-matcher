@@ -307,3 +307,80 @@ function readArray(raw: unknown, key: string): unknown[] | null {
   const value = (raw as Record<string, unknown>)[key];
   return Array.isArray(value) ? value : null;
 }
+
+// ===========================================================================
+// SEVERAL PAGES IN ONE REPLY
+// ===========================================================================
+
+export interface ParsedBatch {
+  /** One entry per page, keyed by the page number the caller sent. */
+  byPage: Map<number, ParsedExtraction>;
+  /**
+   * Why the reply could not be trusted as a batch, or null. When set, nothing
+   * in `byPage` should be used — the caller reads the pages singly instead.
+   */
+  error: string | null;
+}
+
+/**
+ * Parse a reply covering several pages at once.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS STRICTER THAN THE SINGLE-PAGE PARSER
+ * ---------------------------------------------------------------------------
+ * The single-page parser never asks the model which page it read: the app knows
+ * which page it sent, and a page number is exactly the kind of fact a model
+ * will helpfully invent. Batching cannot keep that property outright — several
+ * images go up together and their groups have to be told apart somehow.
+ *
+ * So the labels are checked rather than trusted. The reply must carry one group
+ * per page sent, and the set of labels must be exactly the set of pages sent:
+ * no page missing, no page twice, no page nobody asked for. Anything else and
+ * the whole batch is refused.
+ *
+ * That is deliberately all-or-nothing. A partially aligned reply is the
+ * dangerous case — offers landing under the wrong page number look completely
+ * normal and produce a citation that sends somebody to a page that does not
+ * carry the product. "IGA, page 7" has to mean page 7 or it is worse than
+ * saying nothing, so a batch that cannot be aligned with certainty is discarded
+ * and its pages are read one at a time.
+ */
+export function parseFlyerBatch(raw: unknown, pagesSent: number[]): ParsedBatch {
+  const empty = new Map<number, ParsedExtraction>();
+
+  const groups = readArray(raw, "pages");
+  if (groups === null) {
+    return { byPage: empty, error: "The reply contained no list of pages." };
+  }
+  if (groups.length !== pagesSent.length) {
+    return {
+      byPage: empty,
+      error: `The reply covered ${groups.length} pages; ${pagesSent.length} were sent.`,
+    };
+  }
+
+  const expected = new Set(pagesSent);
+  const seen = new Set<number>();
+  const byPage = new Map<number, ParsedExtraction>();
+
+  for (const group of groups) {
+    const row =
+      typeof group === "object" && group !== null
+        ? (group as Record<string, unknown>)
+        : {};
+    const label = row.pageNumber;
+    if (typeof label !== "number" || !Number.isInteger(label)) {
+      return { byPage: empty, error: "A page group carried no whole-number page label." };
+    }
+    if (!expected.has(label)) {
+      return { byPage: empty, error: `The reply labelled a page ${label}, which was not sent.` };
+    }
+    if (seen.has(label)) {
+      return { byPage: empty, error: `The reply labelled page ${label} twice.` };
+    }
+    seen.add(label);
+    byPage.set(label, parseFlyerExtraction(row, label));
+  }
+
+  return { byPage, error: null };
+}

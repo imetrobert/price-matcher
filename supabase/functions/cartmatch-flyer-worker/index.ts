@@ -44,12 +44,12 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-import { parseFlyerExtraction } from "../_shared/parseOffers.ts";
+import { parseFlyerBatch, parseFlyerExtraction } from "../_shared/parseOffers.ts";
 import { quotaMessage } from "../_shared/quota.ts";
 
 /** Which build answered. Same reason as the other functions: a silent stale
  *  deploy is indistinguishable from a working one until you check. */
-const FUNCTION_BUILD = "2026-08-14-worker-6";
+const FUNCTION_BUILD = "2026-08-14-worker-7";
 
 /**
  * Pages per tick.
@@ -69,6 +69,22 @@ const PAGES_PER_TICK = 3;
  * enough to ride out a bad afternoon and few enough to stop.
  */
 const MAX_ATTEMPTS = 5;
+
+/**
+ * How many pages ride in one request.
+ *
+ * A week of five flyers is about seventy pages, and at one request per page
+ * that is seventy requests against a per-model daily allowance. Three pages to
+ * a request turns the same week into about twenty-four, without reading any
+ * fewer pages — the throughput of a tick is unchanged, only the number of times
+ * it knocks on the door.
+ *
+ * Only pages that have never been attempted are batched. Anything that has
+ * already struggled is read alone, where the model has one page to think about
+ * and a failure names one page rather than three. Set to 1 to turn batching off
+ * entirely.
+ */
+const PAGES_PER_REQUEST = Number(Deno.env.get("CARTMATCH_PAGES_PER_REQUEST") ?? "3");
 
 const DEFAULT_MODEL = "gemini-3.7-flash,gemini-3.5-flash,gemini-flash-latest";
 const TIMEOUT_MS = 90_000;
@@ -161,19 +177,57 @@ async function handle(req: Request): Promise<Response> {
 
   const results: unknown[] = [];
 
-  for (const page of queued) {
-    // Claim first. Two ticks overlapping is normal when one runs long, and a
-    // page read twice would write its offers twice.
-    const { error: claimError } = await supabase
-      .from("cartmatch_flyer_pages")
-      .update({
-        status: "READING",
-        claimed_at: new Date().toISOString(),
-        attempts: page.attempts + 1,
-      })
-      .eq("id", page.id)
-      .eq("status", "PENDING");
-    if (claimError) continue;
+  // Batching is only safe inside one flyer. Page labels are how a reply is
+  // aligned back to the images it answered, and every flyer has a page 3 — so
+  // a mixed batch could align perfectly and still put IGA's offers on Maxi's
+  // page. Same flyer, or read alone.
+  const fresh = queued.filter((p) => Number(p.attempts) === 0);
+  const firstFlyer = fresh[0] ? String(fresh[0].flyer_id) : null;
+  const batch =
+    firstFlyer === null
+      ? []
+      : fresh
+          .filter((p) => String(p.flyer_id) === firstFlyer)
+          .slice(0, PAGES_PER_REQUEST);
+
+  const batched = new Set(batch.map((p) => String(p.id)));
+  // A batch of one is just a page. Anything already attempted is read alone,
+  // where a failure names one page instead of three.
+  const singles =
+    batch.length > 1
+      ? queued.filter((p) => !batched.has(String(p.id)))
+      : queued;
+
+  if (batch.length > 1) {
+    const claimed: Record<string, unknown>[] = [];
+    for (const page of batch) {
+      if (await claim(supabase, page)) claimed.push(page);
+    }
+    // One survivor means another worker took the rest between the select and
+    // the claim. It is already marked READING, so it has to be read here or it
+    // waits out the stale sweep for nothing.
+    if (claimed.length === 1) {
+      results.push(await readOnePage(supabase, apiKey, models, claimed[0]!));
+    } else if (claimed.length > 1) {
+      const outcome = await readBatch(supabase, apiKey, models, claimed);
+      results.push(outcome);
+      if ((outcome as { quotaGone?: boolean }).quotaGone) {
+        return json(
+          {
+            ok: true,
+            build: FUNCTION_BUILD,
+            processed: results.length,
+            note: "Stopped: the key is out of quota. Pages stay queued.",
+            results,
+          },
+          200,
+        );
+      }
+    }
+  }
+
+  for (const page of singles) {
+    if (!(await claim(supabase, page))) continue;
 
     const outcome = await readOnePage(supabase, apiKey, models, page);
     results.push(outcome);
@@ -199,6 +253,210 @@ async function handle(req: Request): Promise<Response> {
     { ok: true, build: FUNCTION_BUILD, processed: results.length, results },
     200,
   );
+}
+
+/**
+ * Take a page, so a second worker does not take it too.
+ *
+ * The `status = PENDING` condition is what makes overlapping ticks safe: two
+ * workers can both select the same row, and only one update matches. Returns
+ * false when somebody else got there first.
+ */
+async function claim(
+  supabase: ReturnType<typeof createClient>,
+  page: Record<string, unknown>,
+): Promise<boolean> {
+  const { error } = await supabase
+    .from("cartmatch_flyer_pages")
+    .update({
+      status: "READING",
+      claimed_at: new Date().toISOString(),
+      attempts: Number(page.attempts) + 1,
+    })
+    .eq("id", page.id)
+    .eq("status", "PENDING");
+  return !error;
+}
+
+/**
+ * Read several pages of one flyer in a single request.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT IS SAVED AND WHAT IS NOT
+ * ---------------------------------------------------------------------------
+ * The saving is requests, not work. The same pages are read at the same size
+ * with the same prompt; three of them simply travel together. A week of five
+ * flyers goes from about seventy requests to about twenty-four, which is the
+ * difference between a workload that fits inside a free daily allowance and one
+ * that spills over several days.
+ *
+ * ---------------------------------------------------------------------------
+ * A BATCH IS ALL OR NOTHING
+ * ---------------------------------------------------------------------------
+ * If the reply cannot be aligned to the pages sent — a group missing, a label
+ * repeated, a page nobody asked for — every page in the batch goes back to the
+ * queue and is read alone next time, because each has now spent an attempt.
+ * Nothing from an unalignable reply is written.
+ *
+ * The reason is the citation. Offers filed under the wrong page number look
+ * entirely normal and send somebody to a page that does not carry the product,
+ * which is worse at a price-match desk than having no page at all.
+ */
+async function readBatch(
+  supabase: ReturnType<typeof createClient>,
+  apiKey: string,
+  models: string[],
+  pages: Record<string, unknown>[],
+): Promise<unknown> {
+  const flyerId = String(pages[0]!.flyer_id);
+  const userId = String(pages[0]!.user_id);
+  const numbers = pages.map((p) => Number(p.page_number));
+
+  /** Hand the whole batch back, with a reason on every page. */
+  const failAll = async (error: string, keepAttempts = false) => {
+    for (const page of pages) {
+      await supabase
+        .from("cartmatch_flyer_pages")
+        .update({
+          status: keepAttempts
+            ? "PENDING"
+            : Number(page.attempts) + 1 >= MAX_ATTEMPTS
+              ? "FAILED"
+              : "PENDING",
+          claimed_at: null,
+          ...(keepAttempts ? { attempts: Number(page.attempts) } : {}),
+          last_error: error.slice(0, 500),
+          errored_at: new Date().toISOString(),
+        })
+        .eq("id", page.id);
+    }
+    return { pages: numbers, ok: false, error, quotaGone: keepAttempts };
+  };
+
+  const images: string[] = [];
+  for (const page of pages) {
+    const { data: file, error: downloadError } = await supabase.storage
+      .from(FLYER_BUCKET)
+      .download(String(page.storage_path));
+    if (downloadError || !file) {
+      return await failAll(
+        `Could not read stored page ${page.page_number}: ${downloadError?.message ?? "missing"}`,
+      );
+    }
+    images.push(encodeBase64(new Uint8Array(await file.arrayBuffer())));
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    let res: Response | null = null;
+    let used = models[0] ?? DEFAULT_MODEL;
+    for (const candidate of models) {
+      used = candidate;
+      res = await callGeminiBatch(apiKey, candidate, images, numbers, controller.signal);
+      if (res.ok) break;
+      if (res.status !== 503 && res.status !== 429 && res.status !== 404) break;
+    }
+
+    if (!res || !res.ok) {
+      const body = res ? await res.text() : "";
+      if (res && res.status === 429) {
+        // Not the pages' fault. They keep their attempts and stay batchable.
+        return await failAll(quotaMessage(body), true);
+      }
+      return await failAll(
+        `Gemini ${res?.status ?? 0} on ${used}: ${(body || "no response").slice(0, 260)}`,
+      );
+    }
+
+    const payload = await res.json();
+    const text = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (typeof text !== "string") return await failAll("Gemini returned no JSON payload.");
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      return await failAll("Gemini returned text that was not valid JSON.");
+    }
+
+    const { byPage, error: alignError } = parseFlyerBatch(raw, numbers);
+    if (alignError) {
+      // Every page here now has one attempt against it, so the next tick reads
+      // them singly. That is the fallback, and it needs no extra state.
+      return await failAll(`Batch could not be aligned: ${alignError}`);
+    }
+
+    const written: { page: number; offers: number }[] = [];
+    for (const page of pages) {
+      const pageNumber = Number(page.page_number);
+      const parsed = byPage.get(pageNumber)!;
+
+      if (parsed.offers.length > 0) {
+        const rows = parsed.offers.map((offer, index) => ({
+          id: `${flyerId}:p${pageNumber}:${index}`,
+          flyer_id: flyerId,
+          user_id: userId,
+          advertised_text: offer.advertisedText,
+          brand: offer.brand,
+          size: offer.size,
+          retailer_sku: offer.retailerSku,
+          price_cents: offer.price,
+          currency: offer.currency,
+          regular_price_cents: offer.regularPrice,
+          regular_basis: offer.regularBasis,
+          basis: offer.basis,
+          condition: offer.condition,
+          condition_text: offer.conditionText,
+          flyer_page: pageNumber,
+          confirmed_at: null,
+        }));
+        const { error: insertError } = await supabase
+          .from("cartmatch_flyer_offers")
+          .upsert(rows, { onConflict: "id" });
+        if (insertError) {
+          return await failAll(`Saving offers failed: ${insertError.message}`);
+        }
+      }
+
+      await supabase
+        .from("cartmatch_flyer_pages")
+        .update({
+          status: "DONE",
+          claimed_at: null,
+          read_at: new Date().toISOString(),
+          model: used,
+          offers_found: parsed.offers.length,
+          last_error:
+            parsed.rejected.length > 0 ? `${parsed.rejected.length} tiles discarded` : null,
+          errored_at: null,
+        })
+        .eq("id", page.id);
+
+      try {
+        await supabase.storage.from(FLYER_BUCKET).remove([String(page.storage_path)]);
+      } catch {
+        // A leftover extraction image costs storage and nothing else.
+      }
+
+      written.push({ page: pageNumber, offers: parsed.offers.length });
+    }
+
+    try {
+      await supabase.rpc("cartmatch_recount_flyer", { flyer: flyerId });
+    } catch {
+      // The tally is a convenience for the home screen; the offers are saved.
+    }
+
+    return { batch: written, ok: true, model: used };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return await failAll(
+      message.toLowerCase().includes("abort") ? `Timed out after ${TIMEOUT_MS}ms.` : message,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function readOnePage(
@@ -430,6 +688,45 @@ function callGemini(
 }
 
 /**
+ * One request, several pages, each labelled so the reply can be checked.
+ *
+ * The label is sent as text immediately before its image. The model is asked
+ * to echo it back, and parseFlyerBatch refuses any reply whose labels are not
+ * exactly the ones sent — so a label is a checksum here, not a fact taken on
+ * trust.
+ */
+function callGeminiBatch(
+  apiKey: string,
+  model: string,
+  images: string[],
+  pages: number[],
+  signal: AbortSignal,
+): Promise<Response> {
+  const parts: unknown[] = [{ text: batchPrompt(pages) }];
+  images.forEach((data, index) => {
+    parts.push({ text: `PAGE ${pages[index]}:` });
+    parts.push({ inline_data: { mime_type: "image/jpeg", data } });
+  });
+
+  return fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: BATCH_SCHEMA,
+          temperature: 0,
+        },
+      }),
+    },
+  );
+}
+
+/**
  * Which models this key may actually call, best first.
  *
  * Asked, not assumed — and filtered, because generateContent is necessary and
@@ -578,6 +875,34 @@ const FLYER_SCHEMA = {
     },
   },
   required: ["offers"],
+} as const;
+
+const batchPrompt = (pages: number[]): string =>
+  `You are reading ${pages.length} pages of one Canadian grocery flyer: ` +
+  `pages ${pages.join(", ")}. Each image below is preceded by a line naming ` +
+  `its page number.\n\n` +
+  `Return one entry per page, with pageNumber set to that page's number ` +
+  `exactly as labelled, and offers listing EVERY advertised product offer on ` +
+  `that page. Do not merge pages. Do not omit a page: a page with no offers ` +
+  `on it takes an entry with an empty offers list.\n\n` +
+  FLYER_PROMPT.replace("You are reading one page of a Canadian grocery flyer. ", "");
+
+const BATCH_SCHEMA = {
+  type: "object",
+  properties: {
+    pages: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          pageNumber: { type: "integer" },
+          offers: FLYER_SCHEMA.properties.offers,
+        },
+        required: ["pageNumber", "offers"],
+      },
+    },
+  },
+  required: ["pages"],
 } as const;
 
 // ---------------------------------------------------------------------------
