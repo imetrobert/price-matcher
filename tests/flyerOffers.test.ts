@@ -32,6 +32,7 @@ function offer(patch: Partial<FlyerOffer> = {}): FlyerOffer {
     currency: "CAD",
     basis: "PER_ITEM",
     regularPrice: 749,
+    regularBasis: "PER_ITEM",
     validity: WEEK,
     condition: "UNIT_PRICE",
     conditionText: null,

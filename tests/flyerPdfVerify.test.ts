@@ -24,6 +24,7 @@ function offer(overrides: Partial<ExtractedOffer> = {}): ExtractedOffer {
     currency: "CAD",
     basis: "PER_ITEM",
     regularPrice: 849,
+    regularBasis: "PER_ITEM",
     condition: "UNIT_PRICE",
     conditionText: null,
     pageNumber: 3,

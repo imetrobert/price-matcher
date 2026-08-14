@@ -78,6 +78,8 @@ export interface ExtractedOffer {
    */
   basis: PriceBasis;
   regularPrice: Cents | null;
+  /** What the regular price is per — not always what the sale price is per. */
+  regularBasis: PriceBasis | null;
 
   condition: OfferCondition;
   /** "2 for $5", "limite 4", "avec carte" — verbatim, in the flyer's language. */

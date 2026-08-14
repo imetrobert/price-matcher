@@ -514,7 +514,14 @@ function FlyerRow({
                 p.{offer.pageNumber}
                 {offer.retailerSku ? ` · N° ${offer.retailerSku}` : ""}
                 {offer.regularPrice
-                  ? ` · reg. ${formatCents(offer.regularPrice)}`
+                  ? ` · reg. ${formatCents(offer.regularPrice)}${
+                      offer.regularBasis && offer.regularBasis !== offer.basis
+                        ? ` ${describeBasis(offer.regularBasis)}`
+                        : ""
+                    }`
+                  : ""}
+                {offer.condition !== "UNIT_PRICE"
+                  ? ` · ${offer.conditionText ?? offer.condition}`
                   : ""}
               </span>
             </p>

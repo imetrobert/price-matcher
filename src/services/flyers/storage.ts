@@ -163,6 +163,7 @@ export async function saveFlyer(input: SaveFlyerInput): Promise<SaveOutcome> {
     price_cents: offer.price,
     currency: offer.currency,
     regular_price_cents: offer.regularPrice,
+    regular_basis: offer.regularBasis,
     basis: offer.basis,
     condition: offer.condition,
     condition_text: offer.conditionText,

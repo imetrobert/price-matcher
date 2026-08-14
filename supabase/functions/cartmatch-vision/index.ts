@@ -292,6 +292,10 @@ const FLYER_PROMPT =
   "the unit is printed much smaller than the price.\n" +
   "- regularDollars and regularCents: the struck-through or \"reg.\" price if the " +
   "tile prints one, otherwise null for both.\n" +
+  "- regularBasis: what the REGULAR price is per, using the same values as " +
+  "basis. Flyers often print a sale price per pound beside a regular price per " +
+  "kilogram — read each one's own unit, do not copy the sale price's. Null " +
+  "when there is no regular price.\n" +
   "- condition: UNIT_PRICE for a plain price; MULTI_BUY for \"2 for $5\"; " +
   "LOYALTY_ONLY when a card is required; LIMIT_APPLIES when a quantity limit is " +
   "printed; WITH_PURCHASE when it depends on buying something else.\n" +
@@ -333,6 +337,11 @@ const FLYER_SCHEMA = {
           },
           regularDollars: { type: "integer", nullable: true },
           regularCents: { type: "integer", nullable: true },
+          regularBasis: {
+            type: "string",
+            nullable: true,
+            enum: ["PER_ITEM", "PER_LB", "PER_KG", "PER_100G", "PER_100ML"],
+          },
           condition: {
             type: "string",
             enum: [

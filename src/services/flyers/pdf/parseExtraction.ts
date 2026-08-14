@@ -178,6 +178,10 @@ function parseOne(item: unknown, pageNumber: number): OneResult {
   }
 
   const regularPrice = readMoney(row.regularDollars, row.regularCents);
+  // Falls back to the sale price's basis only when the flyer printed no unit
+  // for the regular price — which is the ordinary case for a per-item tile.
+  // It is never assumed for a tile that printed one.
+  const regularBasis = readEnum(row.regularBasis, BASES);
 
   return {
     offer: {
@@ -193,13 +197,41 @@ function parseOne(item: unknown, pageNumber: number): OneResult {
       // A "regular" price at or below the sale price is a misread, not a
       // saving. Dropped rather than shown, since a struck-through price that is
       // lower than the one beside it is worse than none at all.
-      regularPrice:
-        regularPrice !== null && regularPrice > price ? regularPrice : null,
+      // A "regular" price at or below the sale price is a misread — but only
+      // when the two are measured the same way. Across different units the
+      // comparison says nothing, so the guard is skipped rather than deciding
+      // that $30.99 per kg is not above $6.49 per lb.
+      regularPrice: keepRegular(price, basis, regularPrice, regularBasis)
+        ? regularPrice
+        : null,
+      regularBasis: keepRegular(price, basis, regularPrice, regularBasis)
+        ? (regularBasis ?? basis)
+        : null,
       condition,
       conditionText: readString(row.conditionText),
       pageNumber,
     },
   };
+}
+
+/**
+ * Is this regular price worth keeping?
+ *
+ * Same unit: it must be above the sale price, or it was misread — a
+ * struck-through price lower than the one beside it is worse than none.
+ *
+ * Different unit: keep it. "$6.49 /lb, reg. $30.99 /kg" is exactly what the
+ * flyer printed, and the units are carried so nothing subtracts them.
+ */
+function keepRegular(
+  price: Cents,
+  basis: PriceBasis,
+  regularPrice: Cents | null,
+  regularBasis: PriceBasis | null,
+): boolean {
+  if (regularPrice === null) return false;
+  const sameUnit = regularBasis === null || regularBasis === basis;
+  return sameUnit ? regularPrice > price : true;
 }
 
 /**

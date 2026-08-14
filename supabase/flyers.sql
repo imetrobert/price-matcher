@@ -2,6 +2,14 @@
 -- CartMatch: stored flyers, their offers, and the pages that prove them.
 --
 -- Idempotent. Safe to run again after an edit.
+--
+-- ALREADY RAN AN EARLIER VERSION? This adds regular_basis, which the first cut
+-- did not have. Run this once, then re-run the whole file:
+--
+--   alter table public.cartmatch_flyer_offers
+--     add column if not exists regular_basis text;
+--   alter table public.cartmatch_flyer_offers
+--     drop constraint if exists cartmatch_flyer_offers_regular_price_cents_check;
 -- ===========================================================================
 --
 -- WHY THIS EXISTS
@@ -92,7 +100,20 @@ create table if not exists public.cartmatch_flyer_offers (
   -- Integer cents. Never a float: 7.49 * 100 is 748.9999999999999.
   price_cents integer not null check (price_cents >= 0),
   currency text not null default 'CAD' check (currency = 'CAD'),
-  regular_price_cents integer check (regular_price_cents > price_cents),
+  regular_price_cents integer,
+  -- What the REGULAR price is per. Not always what the sale price is per: IGA
+  -- prints "$6.49 /lb ... Reg. 30,99$/kg" on one tile, and reading both as the
+  -- same unit advertises a saving four times the real one.
+  regular_basis text
+    check (regular_basis in ('PER_ITEM','PER_LB','PER_KG','PER_100G','PER_100ML')),
+  -- The sanity check only applies within a unit. Across units it says nothing:
+  -- 30.99 per kg is genuinely not "above" 6.49 per lb as a number, and it is
+  -- the higher price.
+  constraint cartmatch_offer_regular_above_sale check (
+    regular_price_cents is null
+    or regular_basis is distinct from basis
+    or regular_price_cents > price_cents
+  ),
 
   -- What the price is the price OF. A price per pound is not a price per
   -- package, and subtracting one from the other invents a saving.

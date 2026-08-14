@@ -80,6 +80,7 @@ export function toFlyerOffers(
       currency: offer.currency,
       basis: offer.basis,
       regularPrice: offer.regularPrice,
+      regularBasis: offer.regularBasis,
       validity: document.validity,
       condition: offer.condition,
       conditionText: offer.conditionText,

@@ -24,6 +24,7 @@ const OIKOS = {
   basis: "PER_ITEM",
   regularDollars: 8,
   regularCents: 49,
+  regularBasis: "PER_ITEM",
   condition: "UNIT_PRICE",
   conditionText: null,
 };
@@ -123,6 +124,59 @@ describe("what gets dropped, and why", () => {
     expect(parseFlyerExtraction({ result: "none" }, 3).rejected[0]).toMatch(
       /no list of offers/,
     );
+  });
+});
+
+describe("a regular price in a different unit from the sale price", () => {
+  // A real IGA tile: "$6.49 /lb — POITRINES DE POULET ... Reg. 30,99$/kg".
+  // Read as one unit, that advertises a $24.50 saving per pound. The real gap
+  // is $6.49 against $14.31.
+  const chicken = {
+    ...OIKOS,
+    advertisedText: "POITRINES DE POULET FRAIS DESOSSEES MAPLE LEAF PRIME",
+    priceDollars: 6,
+    priceCents: 49,
+    basis: "PER_LB",
+    regularDollars: 30,
+    regularCents: 99,
+    regularBasis: "PER_KG",
+  };
+
+  it("keeps both prices and both units", () => {
+    const { offers } = parseFlyerExtraction(reply([chicken]), 1);
+    expect(offers[0]!.price).toBe(649);
+    expect(offers[0]!.basis).toBe("PER_LB");
+    expect(offers[0]!.regularPrice).toBe(3099);
+    expect(offers[0]!.regularBasis).toBe("PER_KG");
+  });
+
+  it("does not apply the above-sale check across different units", () => {
+    // 3099 > 649 numerically, but that comparison is meaningless here; the
+    // guard exists to catch a misread within one unit, not to arbitrate
+    // between two.
+    const { offers } = parseFlyerExtraction(
+      reply([{ ...chicken, regularDollars: 3, regularCents: 99 }]),
+      1,
+    );
+    expect(offers[0]!.regularBasis).toBe("PER_KG");
+    expect(offers[0]!.regularPrice).toBe(399);
+  });
+
+  it("falls back to the sale price's unit when the flyer printed none", () => {
+    const { offers } = parseFlyerExtraction(
+      reply([{ ...OIKOS, regularBasis: undefined }]),
+      3,
+    );
+    expect(offers[0]!.regularBasis).toBe("PER_ITEM");
+  });
+
+  it("still drops a regular price below the sale price in the SAME unit", () => {
+    const { offers } = parseFlyerExtraction(
+      reply([{ ...OIKOS, regularDollars: 6, regularCents: 99 }]),
+      3,
+    );
+    expect(offers[0]!.regularPrice).toBeNull();
+    expect(offers[0]!.regularBasis).toBeNull();
   });
 });
 

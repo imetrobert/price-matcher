@@ -155,6 +155,18 @@ export interface FlyerOffer {
   basis: PriceBasis;
   /** Struck-through or "reg." price where the flyer prints one. */
   regularPrice: Cents | null;
+  /**
+   * What the REGULAR price is per, which is not always what the sale price is
+   * per.
+   *
+   * From a real IGA tile: "$6.49 /lb ... Rég. 30,99$/kg". Printed side by side
+   * those two numbers describe a saving of $24.50 a pound, and the actual gap
+   * is $6.49 against $14.31. Carrying one basis for both was a bug that made
+   * every mixed-unit tile advertise a saving four times too large.
+   *
+   * Null exactly when `regularPrice` is null.
+   */
+  regularBasis: PriceBasis | null;
 
   /**
    * The dates the offer runs. Required — an offer without dates cannot be
@@ -236,6 +248,37 @@ export function offerCanSupportCheckoutProof(offer: FlyerOffer): boolean {
  * price" rather than an empty space, because a blank where a qualifier might
  * belong reads as "no strings attached" — a claim nobody made.
  */
+/**
+ * How to write the regular price beside the sale price.
+ *
+ * Carries its own unit whenever that differs from the sale price's, because a
+ * bare "reg. $30.99" next to "$6.49 per lb" is read as the same kind of number
+ * and is not one.
+ */
+export function describeRegularPrice(
+  offer: FlyerOffer,
+  format: (cents: Cents) => string,
+): string | null {
+  if (offer.regularPrice === null) return null;
+  const sameUnit =
+    offer.regularBasis === null || offer.regularBasis === offer.basis;
+  return sameUnit
+    ? `reg. ${format(offer.regularPrice)}`
+    : `reg. ${format(offer.regularPrice)} ${describeBasis(offer.regularBasis!)}`;
+}
+
+/**
+ * Can the saving against the regular price be stated as a number?
+ *
+ * Only when both prices are per the same thing. Otherwise the subtraction is
+ * between two different units and produces a figure that is not wrong so much
+ * as meaningless — and this app does not show those.
+ */
+export function regularPriceIsComparable(offer: FlyerOffer): boolean {
+  if (offer.regularPrice === null) return false;
+  return offer.regularBasis === null || offer.regularBasis === offer.basis;
+}
+
 export function describeCondition(offer: FlyerOffer): string {
   // The basis leads when there is one: "per lb" is the thing that stops a
   // shopper misreading the number, and it outranks any other qualifier.
