@@ -374,10 +374,12 @@ function summarise(result: ReadFlyerResult, pageCount: number): string {
   if (result.failedPages.length > 0) {
     return `${result.offers.length} offers from ${read} of ${pageCount} pages — ${result.failedPages.length} refused: ${result.failedPages[0]!.error}`;
   }
+  const discarded =
+    result.rejected.length > 0 ? `, ${result.rejected.length} discarded` : "";
   if (result.notAttempted.length > 0) {
-    return `${result.offers.length} offers from ${read} of ${pageCount} pages — incomplete`;
+    return `${result.offers.length} offers from ${read} of ${pageCount} pages${discarded} — incomplete`;
   }
-  return `${result.offers.length} offers from ${read} of ${pageCount} pages`;
+  return `${result.offers.length} offers from ${read} of ${pageCount} pages${discarded}`;
 }
 
 /**

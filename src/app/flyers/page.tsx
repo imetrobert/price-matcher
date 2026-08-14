@@ -613,6 +613,29 @@ function FlyerRow({
         <p className="mt-1 text-xs text-bad">{item.saveError}</p>
       ) : null}
 
+      {/*
+        Tiles the model reported and the parser refused. Invisible until now,
+        which meant a flyer yielding a fifth of its usual offers looked like a
+        thin week rather than a rule quietly discarding most of it.
+      */}
+      {item.result && item.result.rejected.length > 0 ? (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs text-warn">
+            {item.result.rejected.length} tile
+            {item.result.rejected.length === 1 ? "" : "s"} read but discarded —
+            tap to see why
+          </summary>
+          <div className="mt-1 space-y-1 text-xs text-muted">
+            {item.result.rejected.slice(0, 12).map((reason, i) => (
+              <p key={i}>{reason}</p>
+            ))}
+            {item.result.rejected.length > 12 ? (
+              <p>…and {item.result.rejected.length - 12} more.</p>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
+
       {item.result && item.result.failedPages.length > 0 ? (
         <p className="mt-2 rounded-lg bg-bad/5 px-2 py-1 text-xs text-bad">
           {item.result.failedPages.length} page
