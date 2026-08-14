@@ -10,6 +10,8 @@ import { env, visionProviderName } from "@/config/env";
 import { formatCents } from "@/lib/money";
 import { healthReport } from "@/services/retailers/registry";
 import { DEFAULT_PREFS, loadPrefs, prefsAreComplete } from "@/lib/prefs";
+import { loadAllFlyers } from "@/services/flyers/storage";
+import { flyerStatus, type FlyerStatus } from "@/services/flyers/status";
 import type { AdapterHealth, UserPreferences } from "@/types";
 
 export default function HomePage() {
@@ -23,10 +25,17 @@ export default function HomePage() {
 function Home() {
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFS);
   const [adapters, setAdapters] = useState<AdapterHealth[] | null>(null);
+  const [flyers, setFlyers] = useState<FlyerStatus | null>(null);
 
   useEffect(() => {
     setPrefs(loadPrefs());
     healthReport().then(setAdapters).catch(() => setAdapters(null));
+    // Derived from what is stored rather than from a run in progress: a run
+    // lives in one browser tab, and the question "do I have this week's
+    // prices" has to be answerable from anywhere, including tomorrow.
+    loadAllFlyers()
+      .then((all) => setFlyers(flyerStatus(all)))
+      .catch(() => setFlyers(null));
   }, []);
 
   const ready = prefsAreComplete(prefs) && prefs.currentRetailerId !== null;
@@ -42,6 +51,62 @@ function Home() {
         <h1 className="text-3xl font-extrabold tracking-tight">CartMatch</h1>
         <p className="mt-1 text-muted">Find price matches before you pay.</p>
       </header>
+
+      {/*
+        The first thing on the screen, because it is the first thing somebody
+        wants to know before leaving the house.
+      */}
+      {flyers ? (
+        <section
+          className={`card mb-4 border ${
+            flyers.readiness === "LOADED"
+              ? "border-good/40"
+              : flyers.readiness === "PARTIAL"
+                ? "border-warn/40"
+                : "border-line"
+          }`}
+        >
+          <p
+            className={`font-bold ${
+              flyers.readiness === "LOADED"
+                ? "text-good"
+                : flyers.readiness === "PARTIAL"
+                  ? "text-warn"
+                  : ""
+            }`}
+          >
+            {flyers.headline}
+          </p>
+          <p className="mt-1 text-sm text-muted">{flyers.detail}</p>
+
+          {flyers.readiness === "PARTIAL" ? (
+            <div
+              className="mt-2 h-2 overflow-hidden rounded-full bg-line"
+              role="progressbar"
+              aria-valuenow={flyers.percent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <div
+                className="h-full rounded-full bg-warn"
+                style={{ width: `${flyers.percent}%` }}
+              />
+            </div>
+          ) : null}
+
+          {flyers.readiness !== "LOADED" ? (
+            <Link href="/flyers" className="btn-primary mt-3">
+              {flyers.readiness === "NONE"
+                ? "Upload this week's flyers"
+                : "Finish loading"}
+            </Link>
+          ) : (
+            <Link href="/deals" className="btn-secondary mt-3">
+              See what is cheaper elsewhere
+            </Link>
+          )}
+        </section>
+      ) : null}
 
       <MockBanner
         visible={env.dataMode === "MOCK"}

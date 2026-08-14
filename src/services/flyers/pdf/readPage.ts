@@ -60,7 +60,7 @@ function splitDataUrl(dataUrl: string): { base64: string; mimeType: string } {
  * at a phone indefinitely — and a page that is still refused after that is
  * reported as refused rather than retried forever.
  */
-const OVERLOAD_BACKOFF_MS = [2_000, 6_000, 15_000];
+const OVERLOAD_BACKOFF_MS = [2_000, 6_000, 15_000, 30_000, 60_000];
 
 /**
  * How long to wait when the KEY is the limit rather than the model.
@@ -73,7 +73,7 @@ const OVERLOAD_BACKOFF_MS = [2_000, 6_000, 15_000];
  * quick retries all landed in the same minute, and the run stopped with one
  * page of seventeen read.
  */
-const RATE_LIMIT_BACKOFF_MS = [25_000, 45_000, 65_000];
+const RATE_LIMIT_BACKOFF_MS = [25_000, 45_000, 65_000, 90_000, 120_000, 180_000];
 
 /**
  * How long to wait when the request never arrived.
@@ -85,8 +85,17 @@ const RATE_LIMIT_BACKOFF_MS = [25_000, 45_000, 65_000];
  *
  * Short waits: nothing is rate-limiting us here, the connection simply needs a
  * moment to come back.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY ALL THREE LADDERS ARE LONG
+ * ---------------------------------------------------------------------------
+ * This is a weekly job somebody starts and walks away from. Waiting three
+ * minutes for a page is nothing against re-reading a seventeen-page flyer
+ * tomorrow, and every abandoned page is a hole in the week's prices that looks
+ * exactly like a product not being on sale. Patience is cheap here and giving
+ * up is not.
  */
-const NETWORK_BACKOFF_MS = [1_000, 3_000, 8_000];
+const NETWORK_BACKOFF_MS = [1_000, 3_000, 8_000, 20_000];
 
 /**
  * Minimum gap between page requests.
@@ -116,7 +125,7 @@ const MIN_REQUEST_INTERVAL_MS = 5_000;
  * were not read.
  */
 const PACING_BACKOFF_FACTOR = 2;
-const MAX_REQUEST_INTERVAL_MS = 20_000;
+const MAX_REQUEST_INTERVAL_MS = 45_000;
 
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
