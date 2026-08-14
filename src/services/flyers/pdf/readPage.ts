@@ -268,6 +268,17 @@ export interface ReadFlyerProgress {
   page: number;
   pageCount: number;
   offersSoFar: number;
+  /**
+   * What has been learned about the flyer itself, as soon as it is learned.
+   *
+   * Page 1 carries the logo and the run dates, and it is read within seconds
+   * of a run starting. Holding those back until page seventeen leaves the row
+   * saying "store: unknown" for half an hour about a flyer the app has already
+   * identified — which reads as a failure rather than as patience.
+   */
+  retailerName: string | null;
+  validFrom: string | null;
+  validTo: string | null;
 }
 
 export interface ReadFlyerResult {
@@ -350,6 +361,9 @@ export async function readFlyerPages(
       page: page.pageNumber,
       pageCount: pages.length,
       offersSoFar: offers.length,
+      retailerName,
+      validFrom,
+      validTo,
     });
 
     const outcome = await readFlyerPage(page, options.signal, () => {
@@ -392,6 +406,17 @@ export async function readFlyerPages(
       validFrom = outcome.validFrom;
       validTo = outcome.validTo;
     }
+
+    // Emitted again after the page, so the store and dates found on page one
+    // reach the screen at once rather than sixteen pages later.
+    options.onProgress?.({
+      page: page.pageNumber,
+      pageCount: pages.length,
+      offersSoFar: offers.length,
+      retailerName,
+      validFrom,
+      validTo,
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -426,6 +451,9 @@ export async function readFlyerPages(
         page: failure.pageNumber,
         pageCount: pages.length,
         offersSoFar: offers.length,
+        retailerName,
+        validFrom,
+        validTo,
       });
 
       await wait(interval, options.signal);

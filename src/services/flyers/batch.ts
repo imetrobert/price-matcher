@@ -229,9 +229,32 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
 
     const result = await readFlyerPages(pages, {
       signal: options.signal,
-      onProgress: ({ page, pageCount, offersSoFar }) => {
+      onProgress: (progress) => {
+        const { page, pageCount, offersSoFar } = progress;
+
+        // Apply what page one revealed the moment it reveals it. The filename
+        // cannot tell Maxi from IGA — both arrive as "PDF_wk33-2026-SA" — so
+        // the logo is the only source, and it is known within seconds. Saying
+        // "store: unknown" for the next half hour describes the screen's
+        // ignorance rather than the app's.
+        const fromLogo = retailerFromLogo(progress.retailerName);
+        const learnedRetailer =
+          current.retailerId === null && fromLogo !== null;
+        const learnedDates =
+          current.validFrom === null &&
+          progress.validFrom !== null &&
+          progress.validTo !== null;
+
         current = {
           ...current,
+          retailerId: learnedRetailer ? fromLogo : current.retailerId,
+          retailerFrom: learnedRetailer ? "LOGO" : current.retailerFrom,
+          validFrom: learnedDates ? progress.validFrom : current.validFrom,
+          validTo: learnedDates ? progress.validTo : current.validTo,
+          validityFrom:
+            learnedDates && current.validityFrom === "UNKNOWN"
+              ? "COVER"
+              : current.validityFrom,
           // page-1 means pages FINISHED, which is what a progress bar counts.
           pagesRead: Math.max(0, page - 1),
           detail: `Reading page ${page} of ${pageCount} — ${offersSoFar} offers`,
