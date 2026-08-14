@@ -44,6 +44,7 @@ import {
   type RenderedFlyerPage,
 } from "./pdf/renderPages";
 import { readFlyerPages, type ReadFlyerResult } from "./pdf/readPage";
+import { validityFromPages } from "./pdf/validityFromText";
 import { flyerId, saveFlyer } from "./storage";
 
 export type BatchStage =
@@ -207,6 +208,21 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
         options.onUpdate(current);
       },
     });
+
+    // Dates from the file's own characters, before a single API call. Free,
+    // offline, and available even when the quota is gone — which is exactly
+    // when the model route cannot answer. A flyer that prints "du jeudi 13
+    // aout au mercredi 19 aout 2026" on its cover should not report its dates
+    // as unknown because a rate limit stopped page 1 being read.
+    const fromText = validityFromPages(pages);
+    if (fromText && current.validityFrom !== "FILENAME") {
+      current = {
+        ...current,
+        validFrom: fromText.from,
+        validTo: fromText.to,
+        validityFrom: "COVER",
+      };
+    }
 
     current = { ...current, pages, stage: "READING", detail: "Reading prices…" };
     options.onUpdate(current);
