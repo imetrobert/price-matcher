@@ -19,16 +19,22 @@ import { MockBanner, Money, Notice, PageHeader, Spinner } from "@/components/ui"
 import { RETAILERS } from "@/config/retailers";
 import { formatCents, tryParsePriceToCents } from "@/lib/money";
 import { DEFAULT_PREFS, loadPrefs, saveLastResult } from "@/lib/prefs";
-import { stateLabel } from "@/services/policies/eligibility";
-import { buildCanonicalProduct } from "@/services/products/normalize";
-import { runPipeline } from "@/services/pipeline/run";
 import { analyzeCartPhotos } from "@/services/vision";
-import type {
-  DetectedProduct,
-  PipelineResult,
-  SavingsOpportunity,
-  UserPreferences,
-} from "@/types";
+import {
+  compareCartToFlyers,
+  itemLabel,
+  needsConfirming,
+  type CartComparison,
+  type CartLine,
+} from "@/services/flyers/cartMatch";
+import {
+  flyerPageUrl,
+  loadCurrentOffers,
+  type StoredOffer,
+} from "@/services/flyers/storage";
+import { citationLine } from "@/services/flyers/citation";
+import { conditionLabel, describeBasis } from "@/types/flyer";
+import type { DetectedProduct, RetailerId, UserPreferences } from "@/types";
 
 type Step = "capture" | "confirm" | "results";
 
@@ -51,11 +57,11 @@ function ScanFlow() {
   const [step, setStep] = useState<Step>("capture");
   const [images, setImages] = useState<{ base64: string; mimeType: string; preview: string }[]>([]);
   const [items, setItems] = useState<EditableItem[]>([]);
-  const [result, setResult] = useState<PipelineResult | null>(null);
+  const [cart, setCart] = useState<CartComparison | null>(null);
+  const [offerCount, setOfferCount] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [visionNote, setVisionNote] = useState<string | null>(null);
-  const [proof, setProof] = useState<SavingsOpportunity | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -100,9 +106,14 @@ function ScanFlow() {
         return;
       }
       setVisionNote(outcome.note);
-      setItems(
-        detected.map((d) => ({ ...d, include: true, manualPrice: "" })),
-      );
+      // Appended, not replaced. Photographing a missed item is the second half
+      // of "what did the camera catch" — a shopper who spots a gap in the list
+      // must be able to fill it without losing everything already confirmed.
+      setItems((prev) => [
+        ...prev,
+        ...detected.map((d) => ({ ...d, include: true, manualPrice: "" })),
+      ]);
+      setImages([]);
       setStep("confirm");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Recognition failed.");
@@ -117,34 +128,18 @@ function ScanFlow() {
       setError("Keep at least one product to compare.");
       return;
     }
-    setBusy("Checking competitor prices…");
+    setBusy("Checking this week's flyers…");
     setError(null);
     try {
-      const pipelineResult = await runPipeline({
-        storeContext: {
-          retailerId: prefs.currentRetailerId!,
-          storeId: prefs.currentStoreId,
-          storeName: null,
-          postalCode: prefs.postalCode,
-          capturedAt: new Date().toISOString(),
-        },
-        thresholdCents: prefs.minSavingsCents,
-        items: chosen.map((i) => ({
-          canonical: buildCanonicalProduct({
-            brand: i.brand ?? "",
-            name: i.productName ?? "",
-            variant: i.variant,
-            fatPercentage: i.fatPercentage,
-            size: i.size,
-            packageCount: i.packageQuantity,
-            gtin: i.visibleUpc,
-            identitySource: i.visibleUpc ? "VISIBLE_BARCODE" : "USER_ENTERED",
-          }),
-          manualCurrentPriceCents: tryParsePriceToCents(i.manualPrice),
-        })),
-      });
-      setResult(pipelineResult);
-      saveLastResult(pipelineResult);
+      // Against the flyers this shopper loaded — not against a retailer API.
+      // Every price behind these results was printed in a document they hold
+      // and can show at a till, which is the only kind a price-match desk
+      // accepts.
+      const offers = await loadCurrentOffers();
+      setOfferCount(offers.length);
+      setCart(
+        compareCartToFlyers(chosen, offers, prefs.currentRetailerId!),
+      );
       setStep("results");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Comparison failed.");
@@ -153,7 +148,22 @@ function ScanFlow() {
     }
   }
 
-  const needsPrice = items.some((i) => i.include && i.manualPrice.trim() === "");
+  // The shelf price is no longer asked for as a precondition. This screen
+  // compares flyer against flyer; what the current store charges only enters
+  // when that store advertised the item, and then it comes from its own flyer
+  // rather than from somebody squinting at a tag.
+  const unsure = items.filter((i) => i.include && needsConfirming(i));
+  const clear = items.filter((i) => i.include && !needsConfirming(i));
+
+  // Editing a card IS the confirmation. Somebody who has typed the brand in
+  // has looked at the item, and asking them to then tick a box to say so is a
+  // second action for a decision they already made.
+  const patchItem = (id: string, patch: Partial<EditableItem>) =>
+    setItems((prev) =>
+      prev.map((it) =>
+        it.id === id ? { ...it, ...patch, userConfirmed: true } : it,
+      ),
+    );
 
   return (
     <main>
@@ -174,8 +184,8 @@ function ScanFlow() {
       />
 
       <MockBanner
-        visible={Boolean(result?.containsMockData) || Boolean(items[0]?.isMock)}
-        dataMode={result?.dataMode}
+        visible={Boolean(items[0]?.isMock)}
+        note="The camera reading came from test fixtures, so these products are invented. Flyer prices are unaffected."
       />
 
       {error ? (
@@ -250,27 +260,66 @@ function ScanFlow() {
             <p className="mb-3 text-xs text-muted">{visionNote}</p>
           ) : null}
 
-          <div className="space-y-3">
-            {items.map((item, index) => (
-              <ConfirmCard
-                key={item.id}
-                item={item}
-                onChange={(patch) =>
-                  setItems((prev) =>
-                    prev.map((it, i) => (i === index ? { ...it, ...patch } : it)),
-                  )
-                }
-              />
-            ))}
+          {/*
+            What the camera caught, and what it did not — split, because they
+            need different things from the reader.
+
+            A confident reading needs a glance. An uncertain one needs a
+            decision, and burying it in a list of twenty identical cards is how
+            it gets waved through. The uncertain ones go first and say so.
+          */}
+          <div className="card mb-4">
+            <p className="font-bold">
+              {items.length} item{items.length === 1 ? "" : "s"} read from your
+              photos
+            </p>
+            <p className="mt-1 text-sm text-muted">
+              {unsure.length === 0
+                ? "All of them were read clearly. Correct anything that looks wrong."
+                : `${unsure.length} could not be read confidently — check ${unsure.length === 1 ? "it" : "those"} first.`}
+            </p>
+            <button
+              type="button"
+              className="btn-secondary mt-3"
+              onClick={() => setStep("capture")}
+            >
+              Photograph something it missed
+            </button>
           </div>
 
-          {needsPrice ? (
-            <div className="mt-4">
-              <Notice tone="warn" title="Shelf prices help a lot">
-                CartMatch cannot independently verify what this store charges, so
-                without the shelf price it cannot calculate a saving. Type the
-                price on the tag for the items you care about.
-              </Notice>
+          {unsure.length > 0 ? (
+            <div className="mb-4">
+              <SectionHeading
+                title="Check these"
+                note="Low confidence, or the product name could not be read. Correct or remove them — a misread product is worse than one left out."
+              />
+              <div className="space-y-3">
+                {unsure.map((item) => (
+                  <ConfirmCard
+                    key={item.id}
+                    item={item}
+                    onChange={(patch) => patchItem(item.id, patch)}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {clear.length > 0 ? (
+            <div className="mb-4">
+              <SectionHeading
+                title="Read clearly"
+                note="Edit any of these if the camera got a detail wrong."
+              />
+              <div className="space-y-3">
+                {clear.map((item) => (
+                  <ConfirmCard
+                    key={item.id}
+                    item={item}
+                    onChange={(patch) => patchItem(item.id, patch)}
+                  />
+                ))}
+              </div>
             </div>
           ) : null}
 
@@ -280,7 +329,7 @@ function ScanFlow() {
             disabled={busy !== null}
             onClick={compare}
           >
-            Find price matches
+            Check against this week&rsquo;s flyers
           </button>
           <button
             type="button"
@@ -293,19 +342,18 @@ function ScanFlow() {
       ) : null}
 
       {/* ---------------------------------------------------------------- */}
-      {step === "results" && result ? (
-        <ResultsView
-          result={result}
-          onProof={setProof}
+      {step === "results" && cart ? (
+        <CartResults
+          cart={cart}
+          currentRetailer={prefs.currentRetailerId!}
+          offerCount={offerCount ?? 0}
           onRescan={() => {
             setStep("capture");
-            setResult(null);
+            setCart(null);
+            setItems([]);
           }}
+          onAddMore={() => setStep("capture")}
         />
-      ) : null}
-
-      {proof ? (
-        <ProofSheet opportunity={proof} onClose={() => setProof(null)} />
       ) : null}
     </main>
   );
@@ -422,148 +470,339 @@ function Field({
 }
 
 // ---------------------------------------------------------------------------
+// THE RESULTS
+// ---------------------------------------------------------------------------
+//
+// Three sections, in the order a shopper's attention should go, and only one
+// of them opens up. "Cheaper somewhere else" is the only outcome that asks
+// anything of them; the other two are told plainly and then left alone.
+//
+// Everything shown here traces to a document the shopper is holding — a flyer
+// they loaded, a page number, a run of dates. That is what a price-match desk
+// asks for, and it is the whole reason this screen no longer talks to a
+// retailer API.
 
-function ResultsView({
-  result,
-  onProof,
+function CartResults({
+  cart,
+  currentRetailer,
+  offerCount,
   onRescan,
+  onAddMore,
 }: {
-  result: PipelineResult;
-  onProof: (o: SavingsOpportunity) => void;
+  cart: CartComparison;
+  currentRetailer: RetailerId;
+  offerCount: number;
   onRescan: () => void;
+  onAddMore: () => void;
 }) {
-  const checkoutReady = result.opportunities.filter((o) => o.checkoutReady);
+  const here = RETAILERS[currentRetailer]?.displayName ?? currentRetailer;
 
   return (
     <section>
       <div className="card mb-4">
         <p className="text-2xl font-extrabold">
-          {result.qualifyingCount} price match
-          {result.qualifyingCount === 1 ? "" : "es"} found
+          {cart.cheaperElsewhere.length === 0
+            ? "Nothing is cheaper elsewhere"
+            : `${cart.cheaperElsewhere.length} item${cart.cheaperElsewhere.length === 1 ? " is" : "s are"} cheaper elsewhere`}
         </p>
-        <p className="text-lg font-bold text-good">
-          Potential savings: <Money cents={result.totalSavingsCents} />
-        </p>
+        {cart.totalSavingCents > 0 ? (
+          <p className="text-lg font-bold text-good">
+            Up to <Money cents={cart.totalSavingCents} /> across your cart
+          </p>
+        ) : null}
         <p className="mt-1 text-xs text-muted">
-          Threshold {formatCents(result.thresholdCents)} · {checkoutReady.length}{" "}
-          checkout-ready
+          {cart.lines.length} item{cart.lines.length === 1 ? "" : "s"} checked
+          against {offerCount} offers from this week&rsquo;s flyers. Only
+          products advertised in a flyer you loaded can appear here.
         </p>
       </div>
 
-      {result.opportunities.length === 0 ? (
-        <Notice tone="warn" title="Nothing cleared the bar">
-          No competitor price was both cheaper by at least{" "}
-          {formatCents(result.thresholdCents)} and verifiable as the same
-          product. That is the app working as intended — it will not show a
-          match it cannot stand behind.
-        </Notice>
-      ) : (
-        <div className="space-y-3">
-          {result.opportunities.map((o) => (
-            <OpportunityCard key={o.id} o={o} onProof={() => onProof(o)} />
-          ))}
-        </div>
-      )}
-
-      {result.unverified.length > 0 ? (
-        <section className="mt-6">
-          <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-muted">
-            Could not verify ({result.unverified.length})
-          </h2>
-          <div className="card space-y-3 text-sm">
-            {result.unverified.map((u, i) => (
-              <div key={i}>
-                <p className="font-semibold">
-                  {u.canonical
-                    ? [u.canonical.brand, u.canonical.name].filter(Boolean).join(" ")
-                    : "Unknown item"}
-                </p>
-                <p className="text-muted">{u.reason}</p>
-                <p className="text-xs text-muted">{u.detail}</p>
-              </div>
+      {/*
+        First and biggest, because it is the only section with anything to do.
+      */}
+      {cart.cheaperElsewhere.length > 0 ? (
+        <div className="mb-5">
+          <SectionHeading
+            title="Cheaper at another store"
+            note="Open one to see the price, the flyer page and the dates it runs — what a price-match desk asks for."
+          />
+          <div className="space-y-3">
+            {cart.cheaperElsewhere.map((line) => (
+              <CheaperCard key={line.item.id} line={line} here={here} />
             ))}
           </div>
-        </section>
+        </div>
       ) : null}
 
-      <div className="mt-6 space-y-2">
-        {checkoutReady.length > 0 ? (
-          <Link href="/checkout" className="btn-primary">
-            Enter Checkout Mode ({checkoutReady.length})
-          </Link>
-        ) : (
-          <Notice tone="warn" title="Checkout Mode unavailable">
-            Checkout Mode only shows results with a verified price and a direct
-            product link. None of these results qualify.
-          </Notice>
-        )}
-        <button type="button" className="btn-secondary" onClick={onRescan}>
-          Scan again
-        </button>
-      </div>
+      {cart.bestHere.length > 0 ? (
+        <div className="mb-5">
+          <SectionHeading
+            title={`Best price is already at ${here}`}
+            note="Advertised where you are standing, and no other flyer beats it."
+          />
+          <div className="space-y-2">
+            {cart.bestHere.map((line) => (
+              <QuietRow
+                key={line.item.id}
+                label={itemLabel(line.item)}
+                right={
+                  line.hereOffer ? (
+                    <span className="font-semibold text-good">
+                      {formatCents(line.hereOffer.price)}
+                    </span>
+                  ) : null
+                }
+                sub={
+                  line.hereOffer
+                    ? `${here} flyer, page ${line.hereOffer.flyerPage}`
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {cart.notInFlyers.length > 0 ? (
+        <div className="mb-5">
+          <SectionHeading
+            title="Not on sale in any flyer this week"
+            note="No flyer you loaded advertises these. That is not a claim about shelf prices — only that nobody advertised them."
+          />
+          <div className="space-y-2">
+            {cart.notInFlyers.map((line) => (
+              <QuietRow key={line.item.id} label={itemLabel(line.item)} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <button type="button" className="btn-secondary mt-2" onClick={onAddMore}>
+        Photograph something it missed
+      </button>
+      <button type="button" className="btn-ghost mt-2" onClick={onRescan}>
+        Start a new cart
+      </button>
     </section>
   );
 }
 
-function OpportunityCard({
-  o,
-  onProof,
-}: {
-  o: SavingsOpportunity;
-  onProof: () => void;
-}) {
-  const current = RETAILERS[o.currentStore.retailerId];
-  const competitor = RETAILERS[o.competitor.retailerId];
+function SectionHeading({ title, note }: { title: string; note: string }) {
   return (
-    <article className="card">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="font-bold leading-tight">
-            {o.canonical.brand} {o.canonical.name}
-          </p>
-          <p className="text-sm text-muted">
-            {[o.canonical.variant, o.canonical.size?.raw].filter(Boolean).join(", ")}
-          </p>
-        </div>
-        <p className="shrink-0 text-xl font-extrabold text-good">
-          <Money cents={o.savingsCents} />
-        </p>
-      </div>
-
-      <div className="mt-3 flex items-center gap-4 text-sm">
-        <span>
-          {current.displayName} <Money cents={o.currentStore.price} className="font-bold" />
-        </span>
-        <span aria-hidden>→</span>
-        <span className="text-brand">
-          {competitor.displayName}{" "}
-          <Money cents={o.competitor.price} className="font-bold" />
-        </span>
-      </div>
-
-      <p className="mt-2">
-        <span className={o.isMock ? "pill-mock" : o.checkoutReady ? "pill-good" : "pill-warn"}>
-          {stateLabel(o.state, o.isMock)}
-        </span>
-      </p>
-
-      <button type="button" className="btn-secondary mt-3" onClick={onProof}>
-        View proof
-      </button>
-    </article>
+    <div className="mb-2">
+      <h2 className="text-sm font-bold uppercase tracking-wide">{title}</h2>
+      <p className="text-xs text-muted">{note}</p>
+    </div>
   );
 }
 
-// ---------------------------------------------------------------------------
+function QuietRow({
+  label,
+  right,
+  sub,
+}: {
+  label: string;
+  right?: React.ReactNode;
+  sub?: string;
+}) {
+  return (
+    <div className="card flex items-baseline justify-between gap-3 py-2">
+      <div className="min-w-0">
+        <p className="truncate text-sm">{label}</p>
+        {sub ? <p className="text-xs text-muted">{sub}</p> : null}
+      </div>
+      {right}
+    </div>
+  );
+}
 
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const s = String(reader.result ?? "");
-      resolve(s.includes(",") ? s.slice(s.indexOf(",") + 1) : s);
+/**
+ * The one card that opens.
+ *
+ * Collapsed it answers "how much and where". Expanded it produces the evidence
+ * — the flyer page itself, the page number, the dates, and the condition if
+ * there is one. Nothing here is fetched until somebody opens it: a signed URL
+ * for every page of every result would be a dozen requests for a screen where
+ * most rows are never touched.
+ */
+function CheaperCard({ line, here }: { line: CartLine; here: string }) {
+  const [open, setOpen] = useState(false);
+  const best = line.bestElsewhere!;
+  const store = RETAILERS[best.retailerId]?.displayName ?? best.retailerId;
+
+  return (
+    <section className="card">
+      <button
+        type="button"
+        className="flex w-full items-start justify-between gap-3 text-left"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <div className="min-w-0">
+          <p className="font-bold leading-tight">{itemLabel(line.item)}</p>
+          <p className="text-xs text-muted">
+            {store} · {formatCents(best.price)}
+            {line.hereOffer
+              ? ` · ${here} ${formatCents(line.hereOffer.price)}`
+              : ` · not advertised at ${here}`}
+          </p>
+        </div>
+        <div className="shrink-0 text-right">
+          {line.savingCents !== null ? (
+            <>
+              <span className="block text-lg font-extrabold text-good">
+                {formatCents(line.savingCents)}
+              </span>
+              <span className="text-xs text-muted">cheaper</span>
+            </>
+          ) : (
+            // No number, because there is no honest number: the shelf price of
+            // a product your shop did not advertise is not in this app.
+            <span className="text-xs text-muted">
+              on sale
+              <br />
+              elsewhere
+            </span>
+          )}
+        </div>
+      </button>
+
+      {open ? (
+        <div className="mt-3 border-t border-line pt-3">
+          {line.savingCents === null ? (
+            <p className="mb-3 rounded-md bg-warn/10 p-2 text-xs text-warn">
+              {here} did not advertise this, so there is no saving to quote —
+              only that {store} has it on sale. Compare it against the shelf
+              tag yourself.
+            </p>
+          ) : null}
+
+          <div className="space-y-1 text-sm">
+            {line.matches.map((offer, i) => (
+              <p
+                key={offer.id}
+                className={`flex justify-between gap-3 ${
+                  i === 0 ? "font-bold text-good" : "text-muted"
+                }`}
+              >
+                <span>
+                  {RETAILERS[offer.retailerId]?.displayName ?? offer.retailerId}
+                </span>
+                <span>
+                  {formatCents(offer.price)} · p.{offer.flyerPage}
+                </span>
+              </p>
+            ))}
+          </div>
+
+          {best.condition !== "UNIT_PRICE" ? (
+            <p className="mt-2 text-xs text-warn">
+              {best.conditionText ?? conditionLabel(best.condition)}
+            </p>
+          ) : null}
+
+          {/*
+            Advertised per pound or per kilo. Shown because it is real
+            information a shopper can act on, and kept out of the arithmetic
+            because a weight price and a package price are not two prices for
+            the same thing.
+          */}
+          {line.measuredMatches.length > 0 ? (
+            <div className="mt-3 rounded-md bg-surface p-2 text-xs">
+              <p className="font-semibold">Also advertised by weight</p>
+              {line.measuredMatches.map((offer) => (
+                <p key={offer.id} className="text-muted">
+                  {RETAILERS[offer.retailerId]?.displayName ?? offer.retailerId}:{" "}
+                  {formatCents(offer.price)} {describeBasis(offer.basis)} — not
+                  compared against a package price.
+                </p>
+              ))}
+            </div>
+          ) : null}
+
+          <p className="mt-3 rounded-lg bg-surface px-2 py-1 text-xs">
+            {citationLine({
+              retailerId: best.retailerId,
+              flyerPage: best.flyerPage,
+              validFrom: best.validFrom,
+              validTo: best.validTo,
+              hasPageImage: true,
+            })}
+          </p>
+
+          {best.confirmedAt === null ? (
+            <p className="mt-1 text-xs text-warn">
+              Not yet confirmed against the page — check it before showing
+              anyone.
+            </p>
+          ) : null}
+
+          <FlyerPage offer={best} />
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * The page itself, fetched only when somebody opens the card.
+ *
+ * A citation a cashier cannot see is an assertion. This is the picture the
+ * shopper holds up, so it is worth a request — but only for the row they
+ * actually opened.
+ */
+function FlyerPage({ offer }: { offer: StoredOffer }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
+
+  useEffect(() => {
+    let live = true;
+    flyerPageUrl(offer.flyerId, offer.flyerPage)
+      .then((found) => {
+        if (!live) return;
+        setUrl(found);
+        setState(found ? "ready" : "missing");
+      })
+      .catch(() => live && setState("missing"));
+    return () => {
+      live = false;
     };
-    reader.onerror = () => reject(new Error("Could not read the photo."));
-    reader.readAsDataURL(file);
-  });
+  }, [offer.flyerId, offer.flyerPage]);
+
+  if (state === "loading") {
+    return <p className="mt-3 text-xs text-muted">Loading the page…</p>;
+  }
+  if (state === "missing" || !url) {
+    return (
+      <p className="mt-3 text-xs text-muted">
+        The page image was not kept for this flyer. The citation above still
+        names the page, so it can be checked in the paper copy.
+      </p>
+    );
+  }
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="mt-3 block">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={url}
+        alt={`Flyer page ${offer.flyerPage}`}
+        className="w-full rounded-xl border border-line"
+      />
+      <span className="mt-1 block text-xs text-muted">
+        Tap to open full size.
+      </span>
+    </a>
+  );
+}
+
+/** A File as base64 without the data: prefix, which is what the API wants. */
+async function fileToBase64(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
 }
