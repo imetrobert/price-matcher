@@ -52,8 +52,16 @@ const MAX_CANVAS_PIXELS = 16_777_216;
 export interface RenderedFlyerPage extends FlyerPdfPage {
   /** JPEG data URL of the rendered page. What Gemini is asked to read. */
   imageDataUrl: string;
+  /**
+   * A small version, for showing the pages back to the person who uploaded
+   * them. Sixteen full-resolution images decoded into one grid is how a phone
+   * tab dies, and the grid only ever needs to be recognisable.
+   */
+  thumbDataUrl: string;
   widthPx: number;
   heightPx: number;
+  /** Size of `imageDataUrl` in kilobytes — what an upload will actually cost. */
+  imageKb: number;
 }
 
 /** Where the ink sits on the page, as fractions of the page box. */
@@ -150,14 +158,21 @@ export async function renderFlyerPdf(
 
       const text = await extractPageText(page);
 
+      // JPEG, not PNG: flyer pages are photographs of food. PNG would be
+      // several times the size for no gain a reader could notice.
+      const imageDataUrl = canvas.toDataURL("image/jpeg", 0.85);
+
       pages.push({
         pageNumber: n,
         text,
-        // JPEG, not PNG: flyer pages are photographs of food. PNG would be
-        // several times the size for no gain a reader could notice.
-        imageDataUrl: canvas.toDataURL("image/jpeg", 0.85),
+        imageDataUrl,
+        thumbDataUrl: makeThumbnail(canvas),
         widthPx: canvas.width,
         heightPx: canvas.height,
+        // Base64 carries four characters per three bytes, so the string length
+        // overstates the payload by a third. Reported as the real number,
+        // because this figure exists to answer "what will this cost to send".
+        imageKb: Math.round((imageDataUrl.length * 3) / 4 / 1024),
       });
 
       // Free the backing store now rather than waiting for collection. Sixteen
@@ -171,6 +186,30 @@ export async function renderFlyerPdf(
   }
 
   return pages;
+}
+
+/**
+ * A grid-sized copy of a rendered page.
+ *
+ * Deliberately taken from the already-rendered canvas rather than by rendering
+ * the page again: the second render would cost as much as the first, and this
+ * is only ever going to be looked at from arm's length.
+ */
+function makeThumbnail(source: HTMLCanvasElement): string {
+  const THUMB_WIDTH = 320;
+  const canvas = document.createElement("canvas");
+  const scale = Math.min(1, THUMB_WIDTH / source.width);
+  canvas.width = Math.max(1, Math.round(source.width * scale));
+  canvas.height = Math.max(1, Math.round(source.height * scale));
+
+  const context = canvas.getContext("2d");
+  if (!context) return "";
+  context.drawImage(source, 0, 0, canvas.width, canvas.height);
+  const url = canvas.toDataURL("image/jpeg", 0.7);
+
+  canvas.width = 0;
+  canvas.height = 0;
+  return url;
 }
 
 /**
