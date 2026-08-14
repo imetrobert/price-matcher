@@ -14,34 +14,30 @@
  * ---------------------------------------------------------------------------
  * WHAT A REAL FLYER PDF LOOKS LIKE — MEASURED, NOT ASSUMED
  * ---------------------------------------------------------------------------
- * From the IGA flyer of 2026-08-13, saved with the site's own print button,
- * rendered through this code in Chromium:
+ * From the IGA flyer of 2026-08-13, rendered through this code in Chromium:
  *
  *   16 pages, 12.6 MB, one JPEG per page, producer "Prawn".
  *   Zero text characters. Every page. It is artwork, not a document.
- *
- * CORRECTION, measured across the full week-33 Montreal set: every OFFICIAL
- * flyer PDF is artwork. Maxi's 17 pages, Walmart's 8, IGA's 16 — none carries
- * a text layer.
- *
- * An earlier note here said Maxi's did, and that was a different file: a
- * print-to-PDF made from the retailer's own print button, which does carry
- * text and also silently truncated the content. The file worth importing is
- * the official one, and it cannot be checked against itself.
- *
- * So the text-layer path below is real, tested, and in practice never fires on
- * a flyer anyone would actually import. It stays because a retailer changing
- * production pipelines is exactly the sort of thing that should be picked up
- * automatically rather than re-derived — but the design must assume artwork,
- * which means every price needs a person's confirmation. That makes
- * confirming only what a cart actually hits the whole design rather than an
- * optimisation of it.
  *   Page box 5809 x 2942 — but the artwork is a PORTRAIT image roughly
  *   1434 x 2867, placed against the left edge of that box.
  *
- * So about three quarters of every page is empty. Rendering the page box to a
- * 1600px canvas gave the flyer itself only ~400px of width, and at that size
- * the product names under the prices are unreadable — the prices survive, the
+ * EVERY OFFICIAL FLYER PDF IS ARTWORK. Measured across the whole week-33
+ * Montreal set: Maxi 17 pages, IGA 16, Walmart 8, not a character in any of
+ * them. An earlier note here said Maxi's carried text; that was a different
+ * file — a print-to-PDF made with the retailer's own print button, which does
+ * carry text and also silently truncated the flyer. The file worth importing
+ * is the official one, and it cannot be checked against itself.
+ *
+ * So the text-layer path below is real, tested, and in practice never fires on
+ * a flyer anyone would actually import. It stays, because a retailer changing
+ * production pipeline is exactly what should be noticed automatically rather
+ * than re-derived by hand. But the design has to assume artwork — which makes
+ * confirming only what a cart actually hits the whole design, not an
+ * optimisation of it.
+ *
+ * THREE QUARTERS OF EVERY PAGE IS EMPTY. Rendering the page box to a 1600px
+ * canvas gave the flyer itself only ~400px of width, and at that size the
+ * product names under the prices are unreadable — the prices survive, the
  * products do not, which is the half that matters for matching.
  *
  * Hence CROP TO CONTENT below. The page is rendered small first, the ink is
