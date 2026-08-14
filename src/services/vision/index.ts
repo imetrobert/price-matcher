@@ -129,3 +129,55 @@ export async function analyzeCartPhotos(
     };
   }
 }
+
+/**
+ * Which Gemini models this project's API key may actually call.
+ *
+ * Exists because a model id is not forever. Google retires them, and a key
+ * issued after a retirement gets a 404 saying "no longer available to new
+ * users" — accurate, and silent on which model to use instead. Guessing a
+ * successor name produces the same 404 one deploy later, so this asks.
+ */
+export async function listGeminiModels(): Promise<
+  | { ok: true; configured: string; models: string[] }
+  | { ok: false; error: string }
+> {
+  if (!supabaseConfigured()) {
+    return { ok: false, error: "Supabase is not configured." };
+  }
+  const token = await getAccessToken();
+  if (!token) return { ok: false, error: "Sign in first." };
+
+  try {
+    const res = await fetch(edgeFunctionUrl("cartmatch-vision"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        apikey: env.supabaseAnonKey,
+      },
+      body: JSON.stringify({ mode: "models" }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) {
+      return {
+        ok: false,
+        error: data?.error ?? `Could not list models (HTTP ${res.status}).`,
+      };
+    }
+    if (!Array.isArray(data.availableModels)) {
+      return {
+        ok: false,
+        error:
+          "The cartmatch-vision Edge Function answering cannot list models yet. Redeploy it.",
+      };
+    }
+    return {
+      ok: true,
+      configured: String(data.configured ?? "unknown"),
+      models: data.availableModels.map(String),
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}

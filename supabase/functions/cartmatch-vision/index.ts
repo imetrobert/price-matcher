@@ -215,6 +215,17 @@ async function authenticate(req: Request): Promise<AuthOutcome> {
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 const MAX_IMAGES = 4;
+
+/**
+ * The model used when CARTMATCH_GEMINI_MODEL is unset.
+ *
+ * A default, not a recommendation. Google retires model ids, and a key issued
+ * after a retirement cannot call the retired id at all — "no longer available
+ * to new users" — so whatever is written here will eventually be wrong for
+ * somebody. When it is, the 404 path lists what the key CAN use rather than
+ * guessing a successor, and the answer goes in CARTMATCH_GEMINI_MODEL.
+ */
+const DEFAULT_MODEL = "gemini-2.5-flash";
 const MAX_BYTES = 8 * 1024 * 1024;
 const TIMEOUT_MS = 45_000;
 
@@ -413,6 +424,32 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "Body must be JSON." }, 400, origin);
   }
 
+  // Answered before any image is required: "which models may I use" is a
+  // question about the API key, not about a photo. Asking it should not need a
+  // cart photo to hand.
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    (payload as { mode?: unknown }).mode === "models"
+  ) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    try {
+      return json(
+        {
+          ok: true,
+          mode: "models",
+          configured: Deno.env.get("CARTMATCH_GEMINI_MODEL") ?? DEFAULT_MODEL,
+          availableModels: await listUsableModels(apiKey, controller.signal),
+        },
+        200,
+        origin,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   const images = extractImages(payload);
   if (images.length === 0) {
     return json({ ok: false, error: "No images supplied." }, 400, origin);
@@ -431,7 +468,7 @@ Deno.serve(async (req: Request) => {
   // project-wide: if another app on this project sets GEMINI_MODEL for its own
   // reasons, inheriting it would silently change which model reads your cart.
   // Unset means the default below, never another app's choice.
-  const model = Deno.env.get("CARTMATCH_GEMINI_MODEL") ?? "gemini-2.5-flash";
+  const model = Deno.env.get("CARTMATCH_GEMINI_MODEL") ?? DEFAULT_MODEL;
   const thinkingBudget = Number.parseInt(
     Deno.env.get("CARTMATCH_GEMINI_THINKING_BUDGET") ?? "0",
     10,
@@ -485,6 +522,30 @@ Deno.serve(async (req: Request) => {
 
     if (!res.ok) {
       const detail = await res.text();
+
+      // A 404 on the model is not a failure to answer — it is the wrong name.
+      // Google retires model ids, and a key issued later than a retirement
+      // cannot use the id at all: "no longer available to new users". Guessing
+      // a replacement name fails the same way, so ASK, and put the real
+      // answer in front of whoever has to fix it.
+      if (res.status === 404) {
+        const available = await listUsableModels(apiKey, controller.signal);
+        return json(
+          {
+            ok: false,
+            code: "MODEL_NOT_AVAILABLE",
+            model,
+            availableModels: available,
+            error:
+              available.length > 0
+                ? `Gemini does not offer "${model}" to this API key. Set CARTMATCH_GEMINI_MODEL to one of: ${available.slice(0, 8).join(", ")}.`
+                : `Gemini does not offer "${model}" to this API key, and the model list could not be read. ${detail.slice(0, 200)}`,
+          },
+          502,
+          origin,
+        );
+      }
+
       return json(
         {
           ok: false,
@@ -538,6 +599,44 @@ Deno.serve(async (req: Request) => {
     clearTimeout(timer);
   }
 });
+
+/**
+ * Which models this key may actually call.
+ *
+ * Asked rather than assumed. The model an app was written against gets retired,
+ * and a key issued after the retirement gets a 404 with a message that is
+ * accurate and unactionable — a newer model, but not which one. Google knows
+ * the answer; this reads it back so nobody has to guess a name and redeploy to
+ * find out whether the guess was right.
+ *
+ * Only models that can generateContent are returned. The list also carries
+ * embedding and other models that would 404 differently and just as usefully.
+ */
+async function listUsableModels(
+  apiKey: string,
+  signal: AbortSignal,
+): Promise<string[]> {
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=100`,
+      { signal },
+    );
+    if (!res.ok) return [];
+    const body = await res.json();
+    const models = Array.isArray(body?.models) ? body.models : [];
+    return models
+      .filter((m: { supportedGenerationMethods?: unknown }) =>
+        Array.isArray(m.supportedGenerationMethods) &&
+        m.supportedGenerationMethods.includes("generateContent"),
+      )
+      .map((m: { name?: unknown }) => String(m.name ?? "").replace(/^models\//, ""))
+      .filter((name: string) => name !== "");
+  } catch {
+    // The point of this call is to improve an error message. Failing to
+    // improve it must never replace the original error with a worse one.
+    return [];
+  }
+}
 
 function callGemini(
   apiKey: string,
