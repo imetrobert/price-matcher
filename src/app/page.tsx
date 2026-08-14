@@ -218,9 +218,34 @@ function Home() {
               Upload this week&rsquo;s flyers
             </Link>
           ) : (
-            <Link href="/deals" className="btn-secondary mt-3">
-              See what is cheaper elsewhere
-            </Link>
+            /*
+              Loaded is the state this screen is in most of the week, so it is
+              the one worth laying out properly. The two things a person does
+              from here — scan the trolley they are pushing, or add a flyer
+              they have just downloaded — belong beside the sentence that says
+              the flyers are ready, not scattered down the page among links
+              that mean nothing until they are.
+
+              Comparing the flyers against each other is a different kind of
+              act: planning rather than shopping. It sits below the settings,
+              on its own.
+            */
+            <div className="mt-3 space-y-2">
+              <Link
+                href="/scan"
+                className={
+                  ready
+                    ? "btn-primary"
+                    : "btn-primary pointer-events-none opacity-40"
+                }
+                aria-disabled={!ready}
+              >
+                Scan your cart
+              </Link>
+              <Link href="/flyers" className="btn-secondary">
+                Import additional flyers
+              </Link>
+            </div>
           )}
         </section>
       ) : null}
@@ -237,21 +262,34 @@ function Home() {
         </Link>
       </section>
 
-      <div className="space-y-3">
-        <Link
-          href="/scan"
-          className={ready ? "btn-primary" : "btn-primary pointer-events-none opacity-40"}
-          aria-disabled={!ready}
-        >
-          Scan cart
-        </Link>
+      {/*
+        Once the flyers are in, scanning and importing have moved up into the
+        card that announces them, and repeating them here would be two buttons
+        for one action. What is left is the planning question — what is cheaper
+        where, across every flyer held — which has no place in the card about
+        loading them.
+      */}
+      {flyers?.readiness === "LOADED" ? (
         <Link href="/deals" className="btn-secondary">
-          Cheaper elsewhere this week
+          Compare flyer savings
         </Link>
-        <Link href="/flyers" className="btn-secondary">
-          Import this week&rsquo;s flyers
-        </Link>
-      </div>
+      ) : (
+        <div className="space-y-3">
+          <Link
+            href="/scan"
+            className={ready ? "btn-primary" : "btn-primary pointer-events-none opacity-40"}
+            aria-disabled={!ready}
+          >
+            Scan cart
+          </Link>
+          <Link href="/deals" className="btn-secondary">
+            Compare flyer savings
+          </Link>
+          <Link href="/flyers" className="btn-secondary">
+            Import this week&rsquo;s flyers
+          </Link>
+        </div>
+      )}
 
       {!ready ? (
         <div className="mt-4">

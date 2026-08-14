@@ -61,6 +61,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 import { quotaMessage } from "../_shared/quota.ts";
+import { DEFAULT_MODEL_CHAIN, modelChain } from "../_shared/models.ts";
 
 // ===========================================================================
 // SECTION 1 — CORS
@@ -240,7 +241,7 @@ const MAX_IMAGES = 4;
  *
  * CARTMATCH_GEMINI_MODEL overrides, and accepts the same comma-separated form.
  */
-const DEFAULT_MODEL = "gemini-3.7-flash,gemini-3.5-flash,gemini-flash-latest";
+const DEFAULT_MODEL = DEFAULT_MODEL_CHAIN;
 const MAX_BYTES = 8 * 1024 * 1024;
 const TIMEOUT_MS = 45_000;
 
@@ -529,10 +530,7 @@ Deno.serve(async (req: Request) => {
   // separated by commas, tried in order — because "this model is busy right
   // now" is a fact about one model at one moment, and a key that can call
   // three of them should not be stopped by the first being under load.
-  const models = (Deno.env.get("CARTMATCH_GEMINI_MODEL") ?? DEFAULT_MODEL)
-    .split(",")
-    .map((m) => m.trim())
-    .filter((m) => m !== "");
+  const models = modelChain(Deno.env.get("CARTMATCH_GEMINI_MODEL"));
   const model = models[0] ?? DEFAULT_MODEL;
   const thinkingBudget = Number.parseInt(
     Deno.env.get("CARTMATCH_GEMINI_THINKING_BUDGET") ?? "0",
