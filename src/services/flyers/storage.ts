@@ -66,7 +66,11 @@ export interface StoredFlyer {
 
 export interface SaveFlyerInput extends StoredFlyer {
   offers: ExtractedOffer[];
-  /** Proof-sized JPEG data URLs, keyed by page number. */
+  /**
+   * Proof-sized JPEG data URLs, keyed by page number. Empty when the shopper
+   * has chosen not to keep pictures — the offers and their page numbers are
+   * saved either way, so a citation still works without them.
+   */
   pageImages: Map<number, string>;
 }
 
@@ -197,6 +201,57 @@ export async function saveFlyer(input: SaveFlyerInput): Promise<SaveOutcome> {
   }
 
   return { ok: true, offersSaved, pagesSaved };
+}
+
+/**
+ * How much storage the kept pages are using, and how close that is to the free
+ * allowance.
+ *
+ * Shown rather than assumed, because "will this cost me money" is a fair
+ * question with a checkable answer. Supabase's free plan includes one
+ * gigabyte; a week of five sixteen-page flyers at proof size is about twenty
+ * megabytes, and the pages are deleted a few days after each flyer expires —
+ * so the steady state is two weeks' worth, not a year's.
+ *
+ * The number that matters is not this week's, it is whether the purge is
+ * running. Without it, twenty megabytes a week reaches a gigabyte in a year.
+ */
+export const FREE_TIER_BYTES = 1_073_741_824;
+
+export interface StorageUsage {
+  bytes: number;
+  files: number;
+  percentOfFreeTier: number;
+}
+
+export async function measureStoredPages(): Promise<StorageUsage> {
+  const empty: StorageUsage = { bytes: 0, files: 0, percentOfFreeTier: 0 };
+  const supabase = client();
+  if (!supabase) return empty;
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth?.user?.id;
+  if (!userId) return empty;
+
+  const flyers = await loadAllFlyers();
+  let bytes = 0;
+  let files = 0;
+
+  for (const flyer of flyers) {
+    const { data } = await supabase.storage
+      .from(FLYER_BUCKET)
+      .list(`${userId}/${flyer.id}`, { limit: 200 });
+    for (const entry of data ?? []) {
+      const size = (entry.metadata as { size?: number } | null)?.size;
+      if (typeof size === "number") bytes += size;
+      files += 1;
+    }
+  }
+
+  return {
+    bytes,
+    files,
+    percentOfFreeTier: Math.round((bytes / FREE_TIER_BYTES) * 1000) / 10,
+  };
 }
 
 /**

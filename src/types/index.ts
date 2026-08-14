@@ -389,6 +389,19 @@ export interface UserPreferences {
   minSavingsCents: Cents;
   currentRetailerId: RetailerId | null;
   currentStoreId: string | null;
+  /**
+   * Whether to keep a picture of each flyer page.
+   *
+   * The page image is the strongest thing to show a cashier, and it is the only
+   * part of this app that consumes storage worth thinking about. Without it the
+   * citation still works — every offer stores its page number, so "IGA flyer,
+   * page 7, valid to Aug 19" survives — but the shopper has to open their own
+   * copy of the flyer to show it.
+   *
+   * A choice rather than a policy, because the trade is somebody else's to
+   * make: better evidence at the till, against a storage bill they may not want.
+   */
+  keepFlyerPages: boolean;
 }
 
 // ---------------------------------------------------------------------------

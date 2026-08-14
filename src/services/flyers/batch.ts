@@ -180,6 +180,11 @@ export function newBatchItem(file: File, index: number): BatchItem {
 export interface BatchOptions {
   onUpdate: (item: BatchItem) => void;
   signal?: AbortSignal;
+  /**
+   * Whether to keep a picture of each page. False saves the offers and their
+   * page numbers and nothing else, which is the zero-storage option.
+   */
+  keepPages?: boolean;
 }
 
 /**
@@ -265,8 +270,13 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
         sourceFilename: current.file.name,
         validitySource: current.validityFrom === "FILENAME" ? "FILENAME" : "COVER",
         offers: result.offers,
-        // Proof size, not extraction size. See renderPages.
-        pageImages: new Map(pages.map((p) => [p.pageNumber, p.proofDataUrl])),
+        // Proof size, not extraction size. See renderPages. Empty when the
+        // shopper has turned pictures off — the citation still works from the
+        // page number, which is stored on every offer regardless.
+        pageImages:
+          options.keepPages === false
+            ? new Map<number, string>()
+            : new Map(pages.map((p) => [p.pageNumber, p.proofDataUrl])),
       });
       if (outcome.ok) {
         saved = { offers: outcome.offersSaved, pages: outcome.pagesSaved };

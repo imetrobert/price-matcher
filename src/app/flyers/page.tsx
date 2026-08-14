@@ -28,7 +28,7 @@
  */
 
 import Link from "next/link";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { Notice, PageHeader } from "@/components/ui";
@@ -41,6 +41,12 @@ import {
   runBatch,
   type BatchItem,
 } from "@/services/flyers/batch";
+import {
+  measureStoredPages,
+  purgeExpiredPages,
+  type StorageUsage,
+} from "@/services/flyers/storage";
+import { DEFAULT_PREFS, loadPrefs, savePrefs } from "@/lib/prefs";
 import { describeBasis } from "@/types/flyer";
 import type { RetailerId } from "@/types";
 
@@ -58,7 +64,27 @@ function FlyerImport() {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [finishedAt, setFinishedAt] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [keepPages, setKeepPages] = useState(DEFAULT_PREFS.keepFlyerPages);
+  const [usage, setUsage] = useState<StorageUsage | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  /**
+   * Purge on arrival, then measure.
+   *
+   * The purge has to happen somewhere, and Postgres cannot reach object
+   * storage. Here is the honest place: the only screen that creates these
+   * files, visited about once a week, which is exactly the cadence the
+   * retention rule needs. A page image kept forever is how twenty megabytes a
+   * week quietly becomes a gigabyte a year.
+   */
+  useEffect(() => {
+    const prefs = loadPrefs();
+    setKeepPages(prefs.keepFlyerPages);
+    void purgeExpiredPages()
+      .then(() => measureStoredPages())
+      .then(setUsage)
+      .catch(() => setUsage(null));
+  }, []);
 
   const onFiles = useCallback((files: FileList) => {
     abortRef.current?.abort();
@@ -88,6 +114,7 @@ function FlyerImport() {
     // than only at the end of a half-hour run.
     const done = await runBatch(counted, {
       signal: controller.signal,
+      keepPages,
       onUpdate: (updated) =>
         setItems((prev) =>
           prev.map((it) => (it.id === updated.id ? updated : it)),
@@ -97,7 +124,8 @@ function FlyerImport() {
     setItems(done);
     setRunning(false);
     setFinishedAt(Date.now());
-  }, [items]);
+    void measureStoredPages().then(setUsage).catch(() => undefined);
+  }, [items, keepPages]);
 
   const totals = useMemo(() => batchTotals(items), [items]);
 
@@ -142,6 +170,41 @@ function FlyerImport() {
           Select all of them together. The files stay on this device — only the
           rendered pages are sent, one at a time, to be read.
         </p>
+
+        {/*
+          The one setting in this app that costs money if it is wrong, so it is
+          here with the numbers beside it rather than buried in preferences.
+        */}
+        <label className="mt-3 flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={keepPages}
+            disabled={running}
+            onChange={(e) => {
+              setKeepPages(e.target.checked);
+              savePrefs({ ...loadPrefs(), keepFlyerPages: e.target.checked });
+            }}
+          />
+          <span>
+            <span className="font-semibold">Keep a picture of each page</span>
+            <span className="block text-xs text-muted">
+              The strongest thing to show a cashier, and the only part of this
+              app that uses storage. Roughly 20 MB a week, deleted three days
+              after each flyer expires. Turn it off and offers still record
+              their page number — you would show the flyer from your own copy.
+            </span>
+          </span>
+        </label>
+
+        {usage ? (
+          <p className="mt-2 text-xs text-muted">
+            Using {(usage.bytes / 1024 / 1024).toFixed(1)} MB across{" "}
+            {usage.files} page{usage.files === 1 ? "" : "s"} —{" "}
+            {usage.percentOfFreeTier}% of the 1 GB free allowance. Expired pages
+            were cleared when this screen opened.
+          </p>
+        ) : null}
 
         {items.length > 0 && !running ? (
           <button
@@ -425,8 +488,10 @@ function FlyerRow({
 
       {item.saved ? (
         <p className="mt-1 text-xs text-good">
-          Saved — {item.saved.offers} offers, {item.saved.pages} pages kept for
-          the till
+          Saved — {item.saved.offers} offers
+          {item.saved.pages > 0
+            ? `, ${item.saved.pages} pages kept for the till`
+            : " (page numbers only, no pictures kept)"}
         </p>
       ) : item.saveError ? (
         <p className="mt-1 text-xs text-bad">{item.saveError}</p>

@@ -19,6 +19,7 @@ export const DEFAULT_PREFS: UserPreferences = {
   minSavingsCents: SAVINGS.defaultThresholdCents,
   currentRetailerId: null,
   currentStoreId: null,
+  keepFlyerPages: true,
 };
 
 export function loadPrefs(): UserPreferences {
@@ -36,6 +37,10 @@ export function loadPrefs(): UserPreferences {
           ? parsed.minSavingsCents
           : SAVINGS.defaultThresholdCents,
       currentRetailerId: (parsed.currentRetailerId ?? null) as RetailerId | null,
+      keepFlyerPages:
+        typeof parsed.keepFlyerPages === "boolean"
+          ? parsed.keepFlyerPages
+          : DEFAULT_PREFS.keepFlyerPages,
       currentStoreId:
         typeof parsed.currentStoreId === "string" ? parsed.currentStoreId : null,
     };
