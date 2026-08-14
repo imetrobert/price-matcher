@@ -29,6 +29,7 @@ function offer(patch: Partial<FlyerOffer> = {}): FlyerOffer {
     size: "650 g",
     price: 599,
     currency: "CAD",
+    basis: "PER_ITEM",
     regularPrice: 749,
     validity: WEEK,
     condition: "UNIT_PRICE",
@@ -84,6 +85,47 @@ describe("conditional offers are shown but never subtracted", () => {
       conditionText: "Limit 4 per family",
     });
     expect(describeCondition(limited)).toBe("Limit 4 per family");
+  });
+});
+
+describe("a price per pound is not a price per package", () => {
+  // From a real Metro tile: "8.96 /lb ... filet de saumon Atlantique frais ...
+  // 19,75/kg ... reg. 14,99/lb". Against a $12.99 package in a cart, naive
+  // subtraction reports $4.03 saved, and the shopper finds out at the till.
+  const salmon = offer({
+    advertisedText: "filet de saumon Atlantique frais, sans arêtes",
+    brand: null,
+    size: null,
+    price: 896,
+    basis: "PER_LB",
+    regularPrice: 1499,
+  });
+
+  it("refuses to subtract it", () => {
+    expect(isDirectlyComparable(salmon)).toBe(false);
+  });
+
+  it("refuses to put it in front of a cashier as a match", () => {
+    expect(offerCanSupportCheckoutProof(salmon)).toBe(false);
+  });
+
+  it("says which unit it is, rather than leaving the number bare", () => {
+    expect(describeCondition(salmon)).toMatch(/per lb/);
+  });
+
+  it("keeps the flyer's own wording when there is some", () => {
+    const limited = offer({
+      basis: "PER_LB",
+      conditionText: "limite 2",
+    });
+    expect(describeCondition(limited)).toBe("per lb — limite 2");
+  });
+
+  it("treats every measured basis the same way", () => {
+    for (const basis of ["PER_LB", "PER_KG", "PER_100G", "PER_100ML"] as const) {
+      expect(isDirectlyComparable(offer({ basis }))).toBe(false);
+    }
+    expect(isDirectlyComparable(offer({ basis: "PER_ITEM" }))).toBe(true);
   });
 });
 

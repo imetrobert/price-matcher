@@ -77,6 +77,7 @@ export function toFlyerOffers(
       size: offer.size,
       price: offer.price,
       currency: offer.currency,
+      basis: offer.basis,
       regularPrice: offer.regularPrice,
       validity: document.validity,
       condition: offer.condition,

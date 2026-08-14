@@ -36,7 +36,7 @@
  */
 
 import type { Cents, CurrencyCode, RetailerId, ValidityPeriod } from "@/types";
-import type { OfferCondition } from "@/types/flyer";
+import type { OfferCondition, PriceBasis } from "@/types/flyer";
 
 /**
  * One page of the PDF, as two independent readings of the same paper.
@@ -68,6 +68,13 @@ export interface ExtractedOffer {
 
   price: Cents;
   currency: CurrencyCode;
+  /**
+   * What the price is the price of. Asked for explicitly, because a flyer
+   * marks "/lb" in six-point type beside a price set forty points tall, and an
+   * extraction that overlooks it produces a number that looks comparable and
+   * is not.
+   */
+  basis: PriceBasis;
   regularPrice: Cents | null;
 
   condition: OfferCondition;

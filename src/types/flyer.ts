@@ -35,6 +35,48 @@
 import type { Cents, CurrencyCode, RetailerId, ValidityPeriod } from "@/types";
 
 /**
+ * What the price is the price OF.
+ *
+ * Added after a Metro flyer tile read "8.96 /lb ... 19,75/kg" for a salmon
+ * fillet. A shopper's cart holds a package; the flyer advertises a pound. The
+ * two numbers look alike, sit in the same field, and subtracting one from the
+ * other invents a saving out of a unit mismatch — a $12.99 package against
+ * $8.96 a pound reports $4.03 saved and is simply wrong.
+ *
+ * Meat, fish and loose produce are priced this way throughout every flyer in
+ * the set, so this is not an edge case; it is a large and valuable part of the
+ * data that must be shown WITHOUT being arithmetic.
+ */
+export type PriceBasis =
+  /** The price of the thing as sold. The only basis this app subtracts. */
+  | "PER_ITEM"
+  | "PER_LB"
+  | "PER_KG"
+  | "PER_100G"
+  | "PER_100ML";
+
+/** True when the price is for a weight or volume rather than for the item. */
+export function isMeasuredBasis(basis: PriceBasis): boolean {
+  return basis !== "PER_ITEM";
+}
+
+/** How the basis is written on a flyer, for showing beside the price. */
+export function describeBasis(basis: PriceBasis): string {
+  switch (basis) {
+    case "PER_ITEM":
+      return "each";
+    case "PER_LB":
+      return "per lb";
+    case "PER_KG":
+      return "per kg";
+    case "PER_100G":
+      return "per 100 g";
+    case "PER_100ML":
+      return "per 100 ml";
+  }
+}
+
+/**
  * How a flyer price is qualified.
  *
  * `UNIT_PRICE` is the simple case and the only one this app can currently treat
@@ -88,6 +130,13 @@ export interface FlyerOffer {
 
   price: Cents;
   currency: CurrencyCode;
+  /**
+   * What `price` is the price of. Never assumed: an offer read from a flyer
+   * without a visible unit marking is PER_ITEM only when the flyer showed no
+   * unit, and the extraction is asked for this explicitly rather than left to
+   * default into the comparable case.
+   */
+  basis: PriceBasis;
   /** Struck-through or "reg." price where the flyer prints one. */
   regularPrice: Cents | null;
 
@@ -131,7 +180,12 @@ export interface FlyerOffer {
  * subtract, because the saving depends on behaviour the app cannot verify.
  */
 export function isDirectlyComparable(offer: FlyerOffer): boolean {
-  return offer.condition === "UNIT_PRICE";
+  if (offer.condition !== "UNIT_PRICE") return false;
+  // A price per pound is a real, useful, advertised price — and it is not a
+  // number that can be subtracted from the price of a package, because the
+  // package's weight is not something a photograph of a cart establishes.
+  if (isMeasuredBasis(offer.basis)) return false;
+  return true;
 }
 
 /**
@@ -167,6 +221,14 @@ export function offerCanSupportCheckoutProof(offer: FlyerOffer): boolean {
  * belong reads as "no strings attached" — a claim nobody made.
  */
 export function describeCondition(offer: FlyerOffer): string {
+  // The basis leads when there is one: "per lb" is the thing that stops a
+  // shopper misreading the number, and it outranks any other qualifier.
+  if (isMeasuredBasis(offer.basis)) {
+    const unit = describeBasis(offer.basis);
+    return offer.conditionText
+      ? `${unit} — ${offer.conditionText}`
+      : `Advertised ${unit}, so it cannot be compared against a package price`;
+  }
   if (offer.conditionText) return offer.conditionText;
   switch (offer.condition) {
     case "UNIT_PRICE":
