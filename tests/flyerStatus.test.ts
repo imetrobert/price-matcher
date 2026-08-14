@@ -49,7 +49,7 @@ describe("partly loaded", () => {
     const status = flyerStatus([flyer({ pagesRead: 2 })], DURING);
     expect(status.readiness).toBe("PARTIAL");
     expect(status.percent).toBe(12);
-    expect(status.headline).toMatch(/12% read/);
+    expect(status.headline).toMatch(/12%/);
   });
 
   it("counts pages across every flyer, not files", () => {

@@ -27,6 +27,20 @@ function Home() {
   const [adapters, setAdapters] = useState<AdapterHealth[] | null>(null);
   const [flyers, setFlyers] = useState<FlyerStatus | null>(null);
 
+  // While pages are still being read, the number on this card changes without
+  // anybody touching the screen — a worker is doing the work on a schedule. A
+  // card that only updates on reload would look stalled while it was in fact
+  // progressing, which is the impression "Finish loading" gave.
+  useEffect(() => {
+    if (flyers?.readiness !== "PARTIAL") return;
+    const timer = setInterval(() => {
+      loadAllFlyers()
+        .then((all) => setFlyers(flyerStatus(all)))
+        .catch(() => undefined);
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, [flyers?.readiness]);
+
   useEffect(() => {
     setPrefs(loadPrefs());
     healthReport().then(setAdapters).catch(() => setAdapters(null));
@@ -67,7 +81,7 @@ function Home() {
           }`}
         >
           <p
-            className={`font-bold ${
+            className={`flex items-center gap-2 font-bold ${
               flyers.readiness === "LOADED"
                 ? "text-good"
                 : flyers.readiness === "PARTIAL"
@@ -75,6 +89,15 @@ function Home() {
                   : ""
             }`}
           >
+            {flyers.readiness === "PARTIAL" ? (
+              // Turning, because it IS turning. The work continues on a
+              // schedule whether or not this screen is open, and a still card
+              // reads as a stalled one.
+              <span
+                aria-hidden
+                className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-line border-t-warn"
+              />
+            ) : null}
             {flyers.headline}
           </p>
           <p className="mt-1 text-sm text-muted">{flyers.detail}</p>
@@ -94,11 +117,24 @@ function Home() {
             </div>
           ) : null}
 
-          {flyers.readiness !== "LOADED" ? (
+          {/*
+            "Finish loading" asked the reader to do something already being
+            done for them. Nothing here needs a person: the only reason to open
+            the import screen mid-run is to add a flyer that was missed.
+          */}
+          {flyers.readiness === "PARTIAL" ? (
+            <>
+              <p className="mt-2 text-xs text-muted">
+                Reading continues on its own — you can close this. This count
+                refreshes every fifteen seconds.
+              </p>
+              <Link href="/flyers" className="btn-secondary mt-3">
+                Add more flyers
+              </Link>
+            </>
+          ) : flyers.readiness === "NONE" ? (
             <Link href="/flyers" className="btn-primary mt-3">
-              {flyers.readiness === "NONE"
-                ? "Upload this week's flyers"
-                : "Finish loading"}
+              Upload this week&rsquo;s flyers
             </Link>
           ) : (
             <Link href="/deals" className="btn-secondary mt-3">

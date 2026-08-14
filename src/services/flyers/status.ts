@@ -131,8 +131,8 @@ export function flyerStatus(
       pagesRead,
       pagesTotal,
       percent,
-      headline: `Loading ${window} — ${percent}% read`,
-      detail: `${names(retailers)}: ${pagesRead} of ${pagesTotal} pages. Pages that were never read are missing offers, not free of them.`,
+      headline: `Reading ${window} — ${percent}%`,
+      detail: `${names(retailers)}: ${pagesRead} of ${pagesTotal} pages read so far. The rest are queued — a page still unread is missing its offers, not free of them.`,
     };
   }
 
