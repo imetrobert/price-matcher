@@ -618,6 +618,32 @@ function FlyerRow({
         which meant a flyer yielding a fifth of its usual offers looked like a
         thin week rather than a rule quietly discarding most of it.
       */}
+      {/*
+        Per page, what the model returned against what survived. A row of
+        zeroes says the model reported nothing; a row where returned far
+        exceeds kept says the parser is eating them. The offer count alone
+        cannot tell those apart, and they need opposite fixes.
+      */}
+      {item.stage === "DONE" && item.result && item.result.pageYield.length > 0 ? (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs text-muted">
+            Per-page yield — tap to see which pages came back empty
+          </summary>
+          <p className="mt-1 break-all text-xs text-muted">
+            {item.result.pageYield
+              .map((y) =>
+                y.returned === y.kept
+                  ? `p${y.page}:${y.kept}`
+                  : `p${y.page}:${y.kept}/${y.returned}`,
+              )
+              .join("  ")}
+          </p>
+          <p className="mt-1 text-xs text-muted">
+            Shown as page:kept, or page:kept/returned where the two differ.
+          </p>
+        </details>
+      ) : null}
+
       {item.result && item.result.rejected.length > 0 ? (
         <details className="mt-2">
           <summary className="cursor-pointer text-xs text-warn">

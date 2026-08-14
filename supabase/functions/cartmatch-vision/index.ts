@@ -285,8 +285,13 @@ Return JSON only, matching the provided schema.`;
  * failure rather than a silent PER_ITEM.
  */
 const FLYER_PROMPT =
-  "You are reading one page of a Canadian grocery flyer. List every advertised " +
-  "product offer on the page.\n\n" +
+  "You are reading one page of a Canadian grocery flyer. List EVERY advertised " +
+  "product offer on the page — work across the whole page, tile by tile, and " +
+  "do not stop after the first few. A full page of a Montreal grocery flyer " +
+  "typically carries between ten and thirty offers; a page of this kind with " +
+  "no offers at all is rare and usually means a section divider or a page of " +
+  "policy text. If a page really has none, return an empty list, but check the " +
+  "whole page first.\n\n" +
   "For each offer:\n" +
   "- advertisedText: the product wording exactly as printed, in the flyer's own " +
   "language. Do not translate, tidy or expand it.\n" +

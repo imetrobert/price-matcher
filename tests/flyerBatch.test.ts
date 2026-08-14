@@ -102,6 +102,7 @@ describe("what the batch reports when it is done", () => {
       result: {
         offers: [],
         rejected: [],
+        pageYield: [],
         failedPages: [],
         notAttempted: [],
         model: "m",
@@ -123,6 +124,7 @@ describe("what the batch reports when it is done", () => {
         result: {
           offers: [],
           rejected: [],
+          pageYield: [],
           failedPages: [{ pageNumber: 2, error: "quota" }],
           notAttempted: [3, 4, 5],
           model: "m",

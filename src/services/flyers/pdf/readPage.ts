@@ -287,6 +287,16 @@ export interface ReadFlyerResult {
   /** Pages that were tried and refused, with the reason for each. */
   failedPages: { pageNumber: number; error: string }[];
   /**
+   * What each page yielded: how many offers the model returned, and how many
+   * survived the parser.
+   *
+   * The distinction the whole diagnosis turns on. A page reporting 0 returned
+   * means the model looked and found nothing; a page reporting 18 returned and
+   * 3 kept means the rules threw fifteen away. Opposite faults with opposite
+   * fixes, and an offer count alone cannot tell them apart.
+   */
+  pageYield: { page: number; returned: number; kept: number }[];
+  /**
    * Pages the run never got to.
    *
    * Kept apart from `failedPages` because conflating them lies. A Super C run
@@ -335,6 +345,7 @@ export async function readFlyerPages(
   const offers: ExtractedOffer[] = [];
   const rejected: string[] = [];
   const failedPages: { pageNumber: number; error: string }[] = [];
+  const pageYield: { page: number; returned: number; kept: number }[] = [];
   let model: string | null = null;
   let retailerName: string | null = null;
   let validFrom: string | null = null;
@@ -392,6 +403,11 @@ export async function readFlyerPages(
       continue;
     }
     anySucceeded = true;
+    pageYield.push({
+      page: page.pageNumber,
+      returned: outcome.offers.length + outcome.rejected.length,
+      kept: outcome.offers.length,
+    });
     offers.push(...outcome.offers);
     rejected.push(...outcome.rejected);
     model = outcome.model;
@@ -459,6 +475,11 @@ export async function readFlyerPages(
       await wait(interval, options.signal);
       const retry = await readFlyerPage(page, options.signal, undefined, true);
       if (retry.ok) {
+        pageYield.push({
+          page: failure.pageNumber,
+          returned: retry.offers.length + retry.rejected.length,
+          kept: retry.offers.length,
+        });
         offers.push(...retry.offers);
         rejected.push(...retry.rejected);
         model = retry.model;
@@ -479,6 +500,7 @@ export async function readFlyerPages(
   return {
     offers,
     rejected,
+    pageYield: pageYield.sort((a, b) => a.page - b.page),
     failedPages,
     notAttempted:
       stoppedAt === -1
