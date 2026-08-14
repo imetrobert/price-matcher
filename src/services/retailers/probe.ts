@@ -76,6 +76,8 @@ export interface ProbeResult {
   contentLength?: number | null;
   /** True when the first bytes carry the PDF signature. */
   looksLikePdf?: boolean;
+  /** PDF URLs named in the page — how a viewer reveals where its flyer lives. */
+  flyerPdfs?: string[];
 }
 
 /** Does this look like a flyer viewer rather than a product page? */
@@ -159,6 +161,11 @@ export function summariseProbe(r: ProbeResult): string {
   // A flyer viewer is judged on different evidence. It has no Product block and
   // never will, so the product-page verdict would call every success a failure.
   if (isFlyerTarget(r) && r.status < 400) {
+    // A named PDF beats page images outright: it is the whole flyer, in one
+    // file, from the retailer, and it is what the print button produces.
+    if (r.flyerPdfs && r.flyerPdfs.length > 0) {
+      return `This page names ${r.flyerPdfs.length} PDF${r.flyerPdfs.length === 1 ? "" : "s"}. Fetch the page, read the URL, fetch the file — no guessing needed.`;
+    }
     if (r.flyerImages === undefined) {
       return `HTTP ${r.status}, ${r.bytes} bytes — but the Edge Function answering is build "${r.functionBuild ?? "older than build markers"}", which cannot look for page images. The retailer is fine; the deploy did not take.`;
     }

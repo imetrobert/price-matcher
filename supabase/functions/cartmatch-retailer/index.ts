@@ -190,6 +190,11 @@ const ALLOWED_HOSTS = new Set([
   // Being here permits a fetch of a URL a person supplies. It is not a licence
   // to enumerate the bucket, and nothing in this file lists or walks it.
   "stgraddaradfprod.blob.core.windows.net",
+  // Metro Inc's own blob storage, serving the Super C and Metro flyer PDFs.
+  // A second, differently shaped source: an opaque publication id and a version
+  // hash, so its URLs cannot be derived — they have to be found on the page
+  // that publishes them, which is the fetch that already works.
+  "metrocommonapi.blob.core.windows.net",
 ]);
 
 /**
@@ -204,7 +209,7 @@ const ALLOWED_HOSTS = new Set([
  * So every response now says which build produced it. Bump this string
  * whenever the file changes in a way a caller could notice.
  */
-const FUNCTION_BUILD = "2026-08-14-binary-aware";
+const FUNCTION_BUILD = "2026-08-14-find-pdfs";
 
 const MAX_REDIRECTS = 3;
 const TIMEOUT_MS = 20_000;
@@ -436,6 +441,16 @@ interface ProbeResult {
   sampleImages: string[];
   /** Context around a caller-supplied substring, when one was given. */
   matches: string[];
+  /**
+   * PDF URLs found in the body.
+   *
+   * The question that replaced "does the page carry its images". Every flyer
+   * viewer measured so far keeps its pages out of the HTML — but the PDF those
+   * pages come from lives on blob storage, and if the viewer page names it,
+   * the chain is: fetch the page (works), read the URL, fetch the file.
+   * Reported, never followed.
+   */
+  flyerPdfs: string[];
   /** Headers that name the protection doing the refusing. */
   signals: Record<string, string>;
   /** Content-Length as the server declared it, for a file we do not read. */
@@ -505,6 +520,7 @@ function summarise(
     imageHosts: imageHostCounts(body),
     sampleImages: sampleImageUrls(body),
     matches: find ? contextAround(body, find) : [],
+    flyerPdfs: findPdfUrls(body),
     contentLength: declaredLength(res),
     looksLikePdf: body.startsWith("%PDF-"),
   };
@@ -582,6 +598,7 @@ async function summariseBinary(
     imageHosts: {},
     sampleImages: [],
     matches: [],
+    flyerPdfs: [],
   };
 }
 
@@ -676,6 +693,23 @@ function imageHostCounts(body: string): Record<string, number> {
     }
   }
   return counts;
+}
+
+/**
+ * PDF URLs in the body.
+ *
+ * The query string is kept: Metro's flyer PDFs carry a `?version=` hash that
+ * is part of the address, and a URL trimmed at the `?` is a URL that 404s.
+ */
+function findPdfUrls(body: string): string[] {
+  const pattern =
+    /https?:(?:\\?\/){2}[^\s"'<>]{8,400}?\.pdf(?:\?[^\s"'<>]{0,200})?/gi;
+  const found = new Set<string>();
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(body)) !== null && found.size < 12) {
+    found.add(match[0].replace(/\\\//g, "/"));
+  }
+  return [...found];
 }
 
 /** A handful of image URLs verbatim and unfiltered, so a person can judge. */
