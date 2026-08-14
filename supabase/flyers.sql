@@ -175,6 +175,26 @@ create policy "cartmatch_flyers delete (cartmatch)"
   for delete to authenticated
   using (public.has_app_access('cartmatch') and user_id = auth.uid());
 
+-- ---------------------------------------------------------------------------
+-- Checking an offer against the page it came from
+-- ---------------------------------------------------------------------------
+-- Every offer is stored as a CANDIDATE: `confirmed_at` stays null until a
+-- person has looked at the flyer page and agreed. Every screen in this app
+-- says so — "not yet confirmed against the page, check it before showing
+-- anyone" — and for a long time there was no way to do the checking. The
+-- warning was built and the action was not, which trains people to read past
+-- the warning.
+--
+-- `rejected_at` is the other verdict, and it needs its own column rather than
+-- a deletion. A wrong reading deleted is a wrong reading the next import
+-- recreates; recorded, it stays out of every comparison and remains visible as
+-- evidence of what the extraction got wrong.
+--
+-- Both are nullable and both are null by default, so nothing that already
+-- exists changes meaning.
+alter table public.cartmatch_flyer_offers
+  add column if not exists rejected_at timestamptz;
+
 drop policy if exists "cartmatch_flyer_offers select (cartmatch)" on public.cartmatch_flyer_offers;
 create policy "cartmatch_flyer_offers select (cartmatch)"
   on public.cartmatch_flyer_offers

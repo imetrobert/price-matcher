@@ -29,6 +29,7 @@ function offer(patch: Partial<StoredOffer> = {}): StoredOffer {
     conditionText: null,
     flyerPage: 3,
     confirmedAt: null,
+    rejectedAt: null,
     validFrom: "2026-08-13",
     validTo: "2026-08-19",
     ...patch,
@@ -331,5 +332,37 @@ describe("saying what the comparison was working from", () => {
     expect(summary.offersConsidered).toBe(1);
     expect(summary.offersConditionalUsable).toBe(1);
     expect(summary.offersNeverComparable).toBe(1);
+  });
+});
+
+describe("which readings are worth a person's time", () => {
+  // A week is around nine hundred offers. The queue on /confirm is built from
+  // both sides of every price gap, because a saving is a subtraction and a
+  // wrong number on the dearer side invents a gap just as effectively as a
+  // wrong one on the cheaper.
+
+  it("names both sides of a gap, not only the cheaper one", () => {
+    const offers = [
+      offer({ id: "a", retailerId: "maxi", advertisedText: "Lait 2% 2 L", price: 599 }),
+      offer({ id: "b", retailerId: "iga", advertisedText: "Lait 2% 2 L", price: 399 }),
+    ];
+    const gap = findPriceGaps(offers, 50)[0]!;
+    expect(gap.cheapest.id).toBe("b");
+    expect(gap.dearest.id).toBe("a");
+  });
+
+  it("leaves an offer no comparison depends on out of the reckoning", () => {
+    // Advertised at one shop only. Nothing hangs on whether it was read
+    // correctly, so nobody should be asked to check it.
+    const offers = [
+      offer({ id: "a", retailerId: "maxi", advertisedText: "Lait 2% 2 L", price: 599 }),
+      offer({ id: "b", retailerId: "iga", advertisedText: "Lait 2% 2 L", price: 399 }),
+      offer({ id: "c", retailerId: "maxi", advertisedText: "Sirop d'érable 540 ml", price: 999 }),
+    ];
+    const involved = new Set(
+      findPriceGaps(offers, 50).flatMap((g) => [g.cheapest.id, g.dearest.id]),
+    );
+    expect(involved.has("c")).toBe(false);
+    expect(involved.size).toBe(2);
   });
 });

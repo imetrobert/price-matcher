@@ -193,7 +193,11 @@ function CheckoutCard({ line, here }: { line: CartLine; here: RetailerId }) {
           against the page by a person. Look at the page below before showing it
           to anyone.
         </p>
-      ) : null}
+      ) : (
+        <p className="mt-2 rounded-md bg-good/10 p-2 text-sm text-good">
+          You checked this against the page.
+        </p>
+      )}
 
       <CheckoutPageImage flyerId={best.flyerId} page={best.flyerPage} />
 

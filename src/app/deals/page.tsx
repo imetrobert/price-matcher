@@ -264,6 +264,20 @@ function Deals() {
         ))}
       </div>
 
+      {!loading && gaps.some((g) => g.cheapest.confirmedAt === null) ? (
+        <div className="mt-5">
+          <Notice tone="warn" title="These are model readings, not checked prices">
+            A price here was read off flyer artwork and nothing has corroborated
+            it. Checking one takes a few seconds — the page is right there.
+            <span className="mt-3 block">
+              <Link href="/confirm" className="btn-primary">
+                Check the prices behind these gaps
+              </Link>
+            </span>
+          </Notice>
+        </div>
+      ) : null}
+
       {!loading && offers.length > 0 ? (
         <div className="mt-5">
           <Notice tone="info" title="Where this stops">
@@ -353,7 +367,11 @@ function GapCard({ gap }: { gap: PriceGap }) {
         <p className="mt-1 text-xs text-warn">
           Not yet confirmed against the page — check it before showing anyone.
         </p>
-      ) : null}
+      ) : (
+        <p className="mt-1 text-xs text-good">
+          Checked against the page by you.
+        </p>
+      )}
     </section>
   );
 }

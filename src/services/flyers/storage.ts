@@ -364,6 +364,72 @@ export async function retryFailedPages(): Promise<
   return { ok: true, requeued: data?.length ?? 0 };
 }
 
+/**
+ * The three verdicts a person can pass on a stored reading.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS EXISTS AT ALL
+ * ---------------------------------------------------------------------------
+ * Every offer is a CANDIDATE: a model read a number off artwork and nothing
+ * corroborated it. Every screen says so. For a long time there was no way to
+ * do the checking those warnings asked for — the warning was built and the
+ * action was not, and a warning nobody can act on is one people learn to read
+ * past.
+ *
+ * CONFIRM records that somebody compared the stored price against the page.
+ * REJECT records that they compared it and it was wrong.
+ * CORRECT records what the page actually said, and counts as confirming: a
+ * person who typed the right price has plainly looked at it.
+ *
+ * A correction sets the price and nothing else. Editing the wording would
+ * change what the offer matches against, which is a different act from fixing
+ * a misread number and would quietly move an offer onto another product.
+ */
+export async function confirmOffer(
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return await setVerdict(id, { confirmed_at: new Date().toISOString(), rejected_at: null });
+}
+
+export async function rejectOffer(
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return await setVerdict(id, { rejected_at: new Date().toISOString(), confirmed_at: null });
+}
+
+export async function correctOfferPrice(
+  id: string,
+  priceCents: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  // The same floor and ceiling the parser applies. A correction typed by hand
+  // goes through the rules a model's answer goes through, or the hand-typed
+  // path becomes the way an impossible price gets in.
+  if (!Number.isInteger(priceCents) || priceCents < 0) {
+    return { ok: false, error: "A price must be a whole number of cents." };
+  }
+  if (priceCents > 100_000) {
+    return { ok: false, error: "That is not a grocery price." };
+  }
+  return await setVerdict(id, {
+    price_cents: priceCents,
+    confirmed_at: new Date().toISOString(),
+    rejected_at: null,
+  });
+}
+
+async function setVerdict(
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const supabase = client();
+  if (!supabase) return { ok: false, error: "Storage is not configured." };
+  const { error } = await supabase
+    .from("cartmatch_flyer_offers")
+    .update(patch)
+    .eq("id", id);
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
 export type SaveOutcome =
   | { ok: true; offersSaved: number; pagesSaved: number }
   | { ok: false; error: string };
@@ -587,6 +653,14 @@ export interface StoredOffer {
   conditionText: string | null;
   flyerPage: number;
   confirmedAt: string | null;
+  /**
+   * When a person looked at the page and said this reading is wrong.
+   *
+   * Recorded rather than deleted. A wrong reading deleted is one the next
+   * import recreates; recorded, it stays out of every comparison and remains
+   * visible as evidence of what the extraction got wrong.
+   */
+  rejectedAt: string | null;
   validFrom: string;
   validTo: string;
 }
@@ -609,7 +683,11 @@ export async function loadCurrentOffers(
     .from("cartmatch_flyer_offers")
     .select("*, cartmatch_flyers!inner(retailer_id, valid_from, valid_to)")
     .lte("cartmatch_flyers.valid_from", today)
-    .gte("cartmatch_flyers.valid_to", today);
+    .gte("cartmatch_flyers.valid_to", today)
+    // A reading somebody has looked at and called wrong is not a price. Kept
+    // in the table as a record of what the extraction got wrong; never
+    // fetched into a comparison.
+    .is("rejected_at", null);
 
   if (error || !data) return [];
 
@@ -634,6 +712,7 @@ export async function loadCurrentOffers(
       conditionText: row.condition_text ? String(row.condition_text) : null,
       flyerPage: Number(row.flyer_page),
       confirmedAt: row.confirmed_at ? String(row.confirmed_at) : null,
+      rejectedAt: row.rejected_at ? String(row.rejected_at) : null,
       validFrom: String(flyer.valid_from),
       validTo: String(flyer.valid_to),
     };
