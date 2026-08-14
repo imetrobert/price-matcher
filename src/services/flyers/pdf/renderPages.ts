@@ -62,6 +62,21 @@ const DEFAULT_TARGET_WIDTH = 1600;
 /** Beyond this, a phone browser starts failing to allocate canvases. */
 const MAX_CANVAS_PIXELS = 16_777_216;
 
+/**
+ * Longest side of a page image, in pixels.
+ *
+ * The area cap above is not enough on its own. A Walmart page renders 1600 x
+ * 4282 — well under sixteen megapixels, and long enough that Gemini answered
+ * HTTP 400 INVALID_ARGUMENT to it while Maxi's 1600 x 3146 pages went through
+ * on the same request shape. Shape, not size, was the difference.
+ *
+ * 3500 keeps every flyer measured comfortably inside, and costs a tall page
+ * about a fifth of its height in resolution — which still leaves the small
+ * print readable, since the constraint that set the target width was the
+ * product names and those scale with it.
+ */
+const MAX_LONG_SIDE = 3500;
+
 export interface RenderedFlyerPage extends FlyerPdfPage {
   /** JPEG data URL of the rendered page. What Gemini is asked to read. */
   imageDataUrl: string;
@@ -183,6 +198,16 @@ export async function renderFlyerPdf(
         unscaled.width * ink.width * scale * unscaled.height * ink.height * scale;
       if (pixels > MAX_CANVAS_PIXELS) {
         scale *= Math.sqrt(MAX_CANVAS_PIXELS / pixels);
+      }
+
+      // Shape as well as size. A page can sit inside the area cap and still be
+      // too long for the model to accept.
+      const longSide = Math.max(
+        unscaled.width * ink.width * scale,
+        unscaled.height * ink.height * scale,
+      );
+      if (longSide > MAX_LONG_SIDE) {
+        scale *= MAX_LONG_SIDE / longSide;
       }
 
       // offsetX/offsetY shift the page within the canvas, in device pixels, so
