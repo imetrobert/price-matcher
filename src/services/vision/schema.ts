@@ -146,3 +146,41 @@ function cleanUpc(v: unknown): string | null {
 function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
+
+/**
+ * What the camera could see but not name.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY A COUNT OF FAILURES IS PART OF THE READING
+ * ---------------------------------------------------------------------------
+ * Six products read from a photograph of eleven is not a reading of that cart,
+ * and nothing in the response distinguished it from a photograph of six. The
+ * shopper is the only one who can fix it — another angle, moving the bread —
+ * and they can only decide to if somebody tells them there is something to
+ * fix.
+ *
+ * Deliberately a count and a sentence, not a list. An item nobody can identify
+ * has no fields to report, and inventing placeholder cards for them would put
+ * unnamed rows in a list whose whole job is naming things.
+ */
+export interface CoverageReport {
+  /** Distinct items visibly present that could not be identified at all. */
+  obscured: number;
+  /** Why, in the model's own words, or null. */
+  note: string | null;
+}
+
+export function parseCoverage(raw: unknown): CoverageReport {
+  if (typeof raw !== "object" || raw === null) return { obscured: 0, note: null };
+  const row = raw as { obscured_count?: unknown; obscured_note?: unknown };
+
+  // Absent, negative or non-integer all mean the same thing: no usable claim
+  // about what was missed. Zero is the honest floor — never a guess upward.
+  const count =
+    typeof row.obscured_count === "number" && Number.isFinite(row.obscured_count)
+      ? Math.max(0, Math.round(row.obscured_count))
+      : 0;
+
+  const note = cleanString(row.obscured_note);
+  return { obscured: count, note: count > 0 ? note : null };
+}

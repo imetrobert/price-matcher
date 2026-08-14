@@ -15,7 +15,11 @@
 import { edgeFunctionUrl, env, supabaseConfigured, visionProviderName } from "@/config/env";
 import { getAccessToken } from "@/lib/auth/session";
 import { mockRecognizeCart } from "@/services/vision/mock";
-import { parseVisionResponse } from "@/services/vision/schema";
+import {
+  parseCoverage,
+  parseVisionResponse,
+  type CoverageReport,
+} from "@/services/vision/schema";
 import type { DetectedProduct } from "@/types";
 
 export { visionProviderName };
@@ -36,7 +40,14 @@ export type VisionErrorCode =
   | "BAD_RESPONSE";
 
 export type VisionOutcome =
-  | { ok: true; products: DetectedProduct[]; isMock: boolean; note: string }
+  | {
+      ok: true;
+      products: DetectedProduct[];
+      isMock: boolean;
+      note: string;
+      /** What the photo contained that could not be identified. */
+      coverage: CoverageReport;
+    }
   | { ok: false; error: string; code: VisionErrorCode };
 
 export async function analyzeCartPhotos(
@@ -120,6 +131,7 @@ export async function analyzeCartPhotos(
       products,
       isMock: false,
       note: `Recognized by ${data.model ?? "Gemini"} via Supabase Edge Function.`,
+      coverage: parseCoverage(data.raw),
     };
   } catch (err) {
     return {

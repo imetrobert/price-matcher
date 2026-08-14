@@ -262,6 +262,12 @@ Rules you must follow:
 - If a product line is printed on the package (for example "Pro", "Zero", "Light", "Organic"), include it in product_name exactly as shown. This distinction matters.
 - Ignore non-product items: the cart itself, shelves, hands, floor, other shoppers.
 
+Also report how much of the cart you could NOT read, which is as important as what you could:
+- "obscured_count": how many DISTINCT items are visibly present but cannot be identified at all — buried under other items, facing away, wrapped in an opaque bag, cut off by the edge of the frame. Count the items you can see are there but cannot name. Do not include them in "products"; a guess is worse than an admission.
+- "obscured_note": one short sentence saying why, in plain words a shopper would recognise — for example "three items underneath the bread are not visible" or "the back row is facing away". Null when nothing is obscured.
+- Count an item once. If you can read a product but not its size, that is a low-confidence PRODUCT, not an obscured one.
+- If the whole cart is clearly visible, return 0 and null.
+
 Return JSON only, matching the provided schema.`;
 
 /**
@@ -411,6 +417,16 @@ const CART_VISION_SCHEMA = {
         required: ["confidence"],
       },
     },
+    /**
+     * How much of the cart could not be read at all.
+     *
+     * A list of six products from a photograph containing eleven is not a
+     * reading of that cart, and until now nothing distinguished the two. The
+     * shopper is the only one who can decide whether to take another photo,
+     * and they can only decide that if they are told what was missed.
+     */
+    obscured_count: { type: "integer", nullable: true },
+    obscured_note: { type: "string", nullable: true },
   },
   required: ["products"],
 };

@@ -8,7 +8,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { env } from "@/config/env";
-import { parseVisionResponse } from "@/services/vision/schema";
+import { parseVisionResponse, parseCoverage } from "@/services/vision/schema";
 
 describe("vision response parsing", () => {
   it("parses a well-formed detection", () => {
@@ -172,5 +172,39 @@ describe("vision mode is decided separately from price data mode", () => {
     process.env[DATA] = "MOCK";
     process.env[VISION] = "LIVE";
     expect(env.dataMode).toBe("MOCK");
+  });
+});
+
+describe("what the camera could see but not name", () => {
+  // Six products read from a photograph of eleven is not a reading of that
+  // cart, and a list of six looks identical either way.
+
+  it("carries the count and the reason through", () => {
+    const coverage = parseCoverage({
+      products: [],
+      obscured_count: 3,
+      obscured_note: "three items underneath the bread are not visible",
+    });
+    expect(coverage.obscured).toBe(3);
+    expect(coverage.note).toMatch(/underneath the bread/);
+  });
+
+  it("reads an absent field as nothing hidden, never as unknown", () => {
+    // An older function, or a reply that omitted it. Zero is the honest floor
+    // and is never guessed upward.
+    expect(parseCoverage({ products: [] }).obscured).toBe(0);
+  });
+
+  it("refuses a negative or fractional count", () => {
+    expect(parseCoverage({ obscured_count: -4 }).obscured).toBe(0);
+    expect(parseCoverage({ obscured_count: 2.6 }).obscured).toBe(3);
+  });
+
+  it("drops a note that belongs to no hidden item", () => {
+    // A reason for nothing is a sentence that would be shown under a heading
+    // saying items were missed, when none were.
+    expect(
+      parseCoverage({ obscured_count: 0, obscured_note: "all clear" }).note,
+    ).toBeNull();
   });
 });

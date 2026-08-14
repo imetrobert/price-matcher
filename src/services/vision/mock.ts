@@ -9,7 +9,10 @@
  * avoid. Every detection is stamped `isMock: true`.
  */
 
-import { parseVisionResponse } from "@/services/vision/schema";
+import {
+  parseVisionResponse,
+  type CoverageReport,
+} from "@/services/vision/schema";
 import type { DetectedProduct } from "@/types";
 
 interface VisionImageLike {
@@ -18,7 +21,13 @@ interface VisionImageLike {
 }
 
 type MockOutcome =
-  | { ok: true; products: DetectedProduct[]; isMock: boolean; note: string }
+  | {
+      ok: true;
+      products: DetectedProduct[];
+      isMock: boolean;
+      note: string;
+      coverage: CoverageReport;
+    }
   | { ok: false; error: string; code: "NO_IMAGES" };
 
 /**
@@ -134,5 +143,9 @@ export async function mockRecognizeCart(
     products,
     isMock: true,
     note: `MOCK recognition — the photo was not analysed (${opts.reason}). These products come from src/services/vision/mock.ts.`,
+    // Nothing was looked at, so nothing can be reported as hidden. Claiming
+    // full coverage of a photo nobody read would be the fixture asserting
+    // something about the shopper's actual cart.
+    coverage: { obscured: 0, note: null },
   };
 }

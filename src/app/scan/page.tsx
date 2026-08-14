@@ -20,10 +20,12 @@ import { RETAILERS } from "@/config/retailers";
 import { formatCents, tryParsePriceToCents } from "@/lib/money";
 import { DEFAULT_PREFS, loadPrefs, saveLastResult } from "@/lib/prefs";
 import { analyzeCartPhotos } from "@/services/vision";
+import type { CoverageReport } from "@/services/vision/schema";
 import {
   compareCartToFlyers,
   itemLabel,
   needsConfirming,
+  NEEDS_A_LOOK_BELOW,
   type CartComparison,
   type CartLine,
 } from "@/services/flyers/cartMatch";
@@ -62,6 +64,7 @@ function ScanFlow() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [visionNote, setVisionNote] = useState<string | null>(null);
+  const [coverage, setCoverage] = useState<CoverageReport>({ obscured: 0, note: null });
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -106,6 +109,14 @@ function ScanFlow() {
         return;
       }
       setVisionNote(outcome.note);
+      // Accumulated across photos. A second angle that reveals what the first
+      // hid should lower this, so the count is replaced per run rather than
+      // summed — but a second photo of a DIFFERENT part of the cart adds its
+      // own hidden items, so the larger of the two is the honest figure.
+      setCoverage((prev) => ({
+        obscured: Math.max(prev.obscured, outcome.coverage.obscured),
+        note: outcome.coverage.note ?? prev.note,
+      }));
       // Appended, not replaced. Photographing a missed item is the second half
       // of "what did the camera catch" — a shopper who spots a gap in the list
       // must be able to fill it without losing everything already confirmed.
@@ -278,6 +289,32 @@ function ScanFlow() {
                 ? "All of them were read clearly. Correct anything that looks wrong."
                 : `${unsure.length} could not be read confidently — check ${unsure.length === 1 ? "it" : "those"} first.`}
             </p>
+
+            <CoverageNote coverage={coverage} />
+
+            {/*
+              Bulk approval for the confident ones, so the shopper's attention
+              goes where it is worth something. Approving a card here is the
+              same claim as editing one — "I looked, this is right" — and the
+              button says how many and at what confidence rather than asking
+              for a blanket yes.
+            */}
+            {clear.length > 0 && clear.some((i) => !i.userConfirmed) ? (
+              <button
+                type="button"
+                className="btn-secondary mt-3"
+                onClick={() =>
+                  setItems((prev) =>
+                    prev.map((it) =>
+                      needsConfirming(it) ? it : { ...it, userConfirmed: true },
+                    ),
+                  )
+                }
+              >
+                Accept the {clear.filter((i) => !i.userConfirmed).length} read
+                clearly
+              </button>
+            ) : null}
             <button
               type="button"
               className="btn-secondary mt-3"
@@ -347,10 +384,12 @@ function ScanFlow() {
           cart={cart}
           currentRetailer={prefs.currentRetailerId!}
           offerCount={offerCount ?? 0}
+          coverage={coverage}
           onRescan={() => {
             setStep("capture");
             setCart(null);
             setItems([]);
+            setCoverage({ obscured: 0, note: null });
           }}
           onAddMore={() => setStep("capture")}
         />
@@ -368,16 +407,13 @@ function ConfirmCard({
   item: EditableItem;
   onChange: (patch: Partial<EditableItem>) => void;
 }) {
-  const uncertain = item.confidence < 0.9;
   return (
     <div className={`card ${item.include ? "" : "opacity-50"}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-bold leading-tight">
-            <span className={uncertain ? "text-warn" : "text-good"}>
-              {uncertain ? "?" : "✓"}
-            </span>{" "}
-            {[item.brand, item.productName].filter(Boolean).join(" ")}
+            {[item.brand, item.productName].filter(Boolean).join(" ") ||
+              "Could not read this package"}
           </p>
           <p className="text-sm text-muted">
             {[item.variant, item.size, item.fatPercentage ? `${item.fatPercentage}%` : null]
@@ -385,7 +421,7 @@ function ConfirmCard({
               .join(" · ") || "Details unread"}
           </p>
           <p className="mt-1 text-xs text-muted">
-            Confidence {(item.confidence * 100).toFixed(0)}%
+            <ConfidenceBadge item={item} />
             {item.notes ? ` · ${item.notes}` : ""}
           </p>
         </div>
@@ -486,12 +522,14 @@ function CartResults({
   cart,
   currentRetailer,
   offerCount,
+  coverage,
   onRescan,
   onAddMore,
 }: {
   cart: CartComparison;
   currentRetailer: RetailerId;
   offerCount: number;
+  coverage: CoverageReport;
   onRescan: () => void;
   onAddMore: () => void;
 }) {
@@ -515,6 +553,13 @@ function CartResults({
           against {offerCount} offers from this week&rsquo;s flyers. Only
           products advertised in a flyer you loaded can appear here.
         </p>
+
+        {/*
+          Repeated on the results, not only on the confirm step. This is where
+          somebody decides they are done, and "nothing else is cheaper" reads
+          very differently when three items were never looked at.
+        */}
+        <CoverageNote coverage={coverage} />
       </div>
 
       {/*
@@ -584,6 +629,60 @@ function CartResults({
         Start a new cart
       </button>
     </section>
+  );
+}
+
+/**
+ * How much of the cart the camera could not read.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY A COUNT OF FAILURES BELONGS ON SCREEN
+ * ---------------------------------------------------------------------------
+ * Six products read from a photograph of eleven is not a reading of that cart,
+ * and a list of six looks identical either way. The shopper is the only one
+ * who can fix it — another angle, lifting the bread — and they will only think
+ * to if somebody says there is something to fix.
+ *
+ * Silent when nothing was hidden, because a reassurance printed on every scan
+ * is one nobody reads on the scan where it changes.
+ */
+function CoverageNote({ coverage }: { coverage: CoverageReport }) {
+  if (coverage.obscured <= 0) return null;
+  return (
+    <p className="mt-3 rounded-md bg-warn/10 p-2 text-xs text-warn">
+      <span className="font-semibold">
+        {coverage.obscured} item{coverage.obscured === 1 ? "" : "s"} could be
+        seen but not identified.
+      </span>{" "}
+      {coverage.note ?? "They are hidden behind or underneath something."} They
+      are not in the list below — photograph them separately, or take another
+      angle.
+    </p>
+  );
+}
+
+/**
+ * Confidence as a word first, a number second.
+ *
+ * "62%" invites arithmetic nobody should do. "Low" is the actionable reading,
+ * and the figure is kept beside it for anyone who wants to sort by it.
+ */
+function ConfidenceBadge({ item }: { item: EditableItem }) {
+  const pct = Math.round(item.confidence * 100);
+  const band =
+    item.userConfirmed
+      ? { label: "You confirmed", cls: "text-good" }
+      : item.confidence >= 0.9
+        ? { label: "High", cls: "text-good" }
+        : item.confidence >= NEEDS_A_LOOK_BELOW
+          ? { label: "Medium", cls: "text-muted" }
+          : { label: "Low", cls: "text-warn" };
+
+  return (
+    <span className={`text-xs font-semibold ${band.cls}`}>
+      {band.label}
+      {item.userConfirmed ? "" : ` · ${pct}%`}
+    </span>
   );
 }
 
