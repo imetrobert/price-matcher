@@ -128,6 +128,22 @@ export interface FlyerOffer {
   brand: string | null;
   size: string | null;
 
+  /**
+   * The retailer's own article number, when the flyer prints one.
+   *
+   * Walmart's flyer prints "N° 51087737" under each tile. That is not a GTIN —
+   * it is Walmart's internal number and means nothing at any other retailer —
+   * but it is an exact identifier for THAT retailer's product, and neither Maxi
+   * nor IGA publishes anything comparable.
+   *
+   * What it buys: an offer can be tied to the retailer's own catalogue entry
+   * rather than matched by brand, name and size, so a re-import recognises the
+   * same product and a match against that retailer's shelf is exact rather than
+   * inferred. What it does not buy: cross-retailer matching, which still needs
+   * a barcode nobody prints.
+   */
+  retailerSku: string | null;
+
   price: Cents;
   currency: CurrencyCode;
   /**

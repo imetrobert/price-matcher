@@ -65,6 +65,8 @@ export interface ExtractedOffer {
   advertisedText: string;
   brand: string | null;
   size: string | null;
+  /** The retailer's article number where the flyer prints one ("N° 51087737"). */
+  retailerSku: string | null;
 
   price: Cents;
   currency: CurrencyCode;

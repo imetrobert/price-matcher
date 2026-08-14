@@ -75,6 +75,7 @@ export function toFlyerOffers(
       advertisedText: offer.advertisedText,
       brand: offer.brand,
       size: offer.size,
+      retailerSku: offer.retailerSku,
       price: offer.price,
       currency: offer.currency,
       basis: offer.basis,

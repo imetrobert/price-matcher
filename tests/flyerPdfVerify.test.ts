@@ -19,6 +19,7 @@ function offer(overrides: Partial<ExtractedOffer> = {}): ExtractedOffer {
     advertisedText: "Oikos Greek yogurt plain 0% 650 g",
     brand: "Oikos",
     size: "650 g",
+    retailerSku: null,
     price: 749,
     currency: "CAD",
     basis: "PER_ITEM",

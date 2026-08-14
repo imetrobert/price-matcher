@@ -27,6 +27,7 @@ function offer(patch: Partial<FlyerOffer> = {}): FlyerOffer {
     advertisedText: "Oikos Greek yogurt 650 g",
     brand: "Oikos",
     size: "650 g",
+    retailerSku: null,
     price: 599,
     currency: "CAD",
     basis: "PER_ITEM",
@@ -85,6 +86,32 @@ describe("conditional offers are shown but never subtracted", () => {
       conditionText: "Limit 4 per family",
     });
     expect(describeCondition(limited)).toBe("Limit 4 per family");
+  });
+});
+
+describe("the article number a flyer prints", () => {
+  // Walmart's week-33 page 1 prints "N° 51087737" under the corn, "N° 30019893"
+  // under the blueberries, and so on. Maxi and IGA print nothing comparable.
+  const corn = offer({
+    advertisedText: "Épi de maïs / Corn",
+    brand: null,
+    size: null,
+    retailerSku: "51087737",
+    price: 44,
+  });
+
+  it("is carried on the offer, not thrown away", () => {
+    expect(corn.retailerSku).toBe("51087737");
+  });
+
+  it("changes nothing about whether the offer may be compared", () => {
+    // It identifies the product at ONE retailer. It is not a barcode, so it
+    // cannot make a cross-retailer match, and it must not look like it can.
+    expect(isDirectlyComparable(corn)).toBe(true);
+    expect(isDirectlyComparable(offer({ retailerSku: null }))).toBe(true);
+    expect(
+      isDirectlyComparable(offer({ retailerSku: "51087737", basis: "PER_LB" })),
+    ).toBe(false);
   });
 });
 
