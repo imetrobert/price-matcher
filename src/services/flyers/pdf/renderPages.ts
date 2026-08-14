@@ -20,11 +20,22 @@
  *   16 pages, 12.6 MB, one JPEG per page, producer "Prawn".
  *   Zero text characters. Every page. It is artwork, not a document.
  *
- * Flyers differ on this, and the difference is worth knowing. Measured across
- * the week-33 Montreal set: Maxi's PDF carries a real text layer, Walmart's
- * and Super C's do not. So a Maxi price can be corroborated against the
- * flyer's own characters, and a Walmart one cannot — same week, same city,
- * different production pipeline.
+ * CORRECTION, measured across the full week-33 Montreal set: every OFFICIAL
+ * flyer PDF is artwork. Maxi's 17 pages, Walmart's 8, IGA's 16 — none carries
+ * a text layer.
+ *
+ * An earlier note here said Maxi's did, and that was a different file: a
+ * print-to-PDF made from the retailer's own print button, which does carry
+ * text and also silently truncated the content. The file worth importing is
+ * the official one, and it cannot be checked against itself.
+ *
+ * So the text-layer path below is real, tested, and in practice never fires on
+ * a flyer anyone would actually import. It stays because a retailer changing
+ * production pipelines is exactly the sort of thing that should be picked up
+ * automatically rather than re-derived — but the design must assume artwork,
+ * which means every price needs a person's confirmation. That makes
+ * confirming only what a cart actually hits the whole design rather than an
+ * optimisation of it.
  *   Page box 5809 x 2942 — but the artwork is a PORTRAIT image roughly
  *   1434 x 2867, placed against the left edge of that box.
  *
@@ -349,7 +360,7 @@ async function extractPageText(page: {
 export function describeTextCoverage(pages: RenderedFlyerPage[]): string {
   const withText = pages.filter((p) => p.text.length >= 40).length;
   if (withText === 0) {
-    return "The words on this flyer are printed into the artwork, the way ink is printed on paper. You can read them; the app cannot read them as text, so it has nothing to check a price against. Every price it finds will need your confirmation before it can be shown to a cashier.";
+    return "The words on this flyer are printed into the artwork, the way ink is printed on paper — which is true of every official flyer PDF measured so far. You can read them; the app cannot read them as text, so it has nothing to check a price against. Prices from this flyer need your confirmation before they can be shown to a cashier, and you will only be asked about the ones something in your cart actually matches.";
   }
   if (withText === pages.length) {
     return "Every page carries real text, not just artwork. A price read from this flyer can be checked against the flyer's own words automatically, so most of it should need no confirming.";
