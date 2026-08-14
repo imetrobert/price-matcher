@@ -122,18 +122,31 @@ function Home() {
                   : ""
             }`}
           >
+            {/*
+              Three states, three marks — because "is it working right now?"
+              is answered at a glance or not at all.
+
+                turning ring   pages are being read
+                solid disc     queued, but blocked on something outside the
+                               app: a quota that resets tomorrow, most often
+                (nothing)      stopped, with nothing left in the queue
+
+              The middle one used to spin like the first, which said the work
+              was in progress when it was waiting out a daily limit — the
+              difference between "a few more minutes" and "tomorrow morning".
+            */}
             {flyers.readiness === "PARTIAL" && !flyers.stalled ? (
-              // Turning, because it IS turning. The work continues on a
-              // schedule whether or not this screen is open, and a still card
-              // reads as a stalled one.
-              //
-              // The converse matters more: a spinner over a queue that has
-              // stopped is a screen telling somebody to keep waiting for
-              // something that is never going to arrive.
-              <span
-                aria-hidden
-                className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-line border-t-warn"
-              />
+              flyers.waitingReason ? (
+                <span
+                  aria-hidden
+                  className="h-4 w-4 shrink-0 rounded-full bg-warn"
+                />
+              ) : (
+                <span
+                  aria-hidden
+                  className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-line border-t-warn"
+                />
+              )
             ) : null}
             {flyers.headline}
           </p>

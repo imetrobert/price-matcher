@@ -49,7 +49,7 @@ import { quotaMessage } from "../_shared/quota.ts";
 
 /** Which build answered. Same reason as the other functions: a silent stale
  *  deploy is indistinguishable from a working one until you check. */
-const FUNCTION_BUILD = "2026-08-14-worker-7";
+const FUNCTION_BUILD = "2026-08-14-worker-8";
 
 /**
  * Pages per tick.
@@ -86,7 +86,31 @@ const MAX_ATTEMPTS = 5;
  */
 const PAGES_PER_REQUEST = Number(Deno.env.get("CARTMATCH_PAGES_PER_REQUEST") ?? "3");
 
-const DEFAULT_MODEL = "gemini-3.7-flash,gemini-3.5-flash,gemini-flash-latest";
+/**
+ * The chain, best first, longest allowance last.
+ *
+ * Measured from the project's own rate-limit page rather than assumed. On the
+ * free tier every full flash model carries 20 requests per day — 3.7, 3.5,
+ * 3.6, 3 and 2.5 alike — while the Lite models carry 500. The allowance is per
+ * model, so a chain is not a fallback list here so much as a sum: five full
+ * models are a hundred requests a day between them, which at three pages to a
+ * request is three hundred pages, against a week that needs about seventy.
+ *
+ * Lite comes last on purpose. It has twenty-five times the allowance and less
+ * of everything else, and a flyer page is small type over artwork. Reaching it
+ * means the good pools are spent, and a page read by a weaker model beats a
+ * page not read at all — the `model` column records which read what, so a bad
+ * batch stays traceable to the model that produced it.
+ */
+const DEFAULT_MODEL = [
+  "gemini-3.7-flash",
+  "gemini-3.5-flash",
+  "gemini-3.6-flash",
+  "gemini-3-flash",
+  "gemini-2.5-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+].join(",");
 const TIMEOUT_MS = 90_000;
 const FLYER_BUCKET = "cartmatch-flyers";
 
