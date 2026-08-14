@@ -230,9 +230,13 @@ const MAX_IMAGES = 4;
  * reasoning. Pinning a version buys reproducibility nobody here needs and
  * costs a breakage every time Google moves on.
  *
- * CARTMATCH_GEMINI_MODEL still overrides, for anyone who wants a fixed one.
+ * The default is a LIST. "gemini-flash-latest" answers first when it can, and
+ * a project whose flash tier is under load falls through to a pro model rather
+ * than failing the page — a slower answer beats no answer once a week.
+ *
+ * CARTMATCH_GEMINI_MODEL overrides, and accepts the same comma-separated form.
  */
-const DEFAULT_MODEL = "gemini-flash-latest";
+const DEFAULT_MODEL = "gemini-flash-latest,gemini-2.5-pro";
 const MAX_BYTES = 8 * 1024 * 1024;
 const TIMEOUT_MS = 45_000;
 
@@ -496,7 +500,15 @@ Deno.serve(async (req: Request) => {
   // project-wide: if another app on this project sets GEMINI_MODEL for its own
   // reasons, inheriting it would silently change which model reads your cart.
   // Unset means the default below, never another app's choice.
-  const model = Deno.env.get("CARTMATCH_GEMINI_MODEL") ?? DEFAULT_MODEL;
+  // A LIST, not a name. CARTMATCH_GEMINI_MODEL may be one id or several
+  // separated by commas, tried in order — because "this model is busy right
+  // now" is a fact about one model at one moment, and a key that can call
+  // three of them should not be stopped by the first being under load.
+  const models = (Deno.env.get("CARTMATCH_GEMINI_MODEL") ?? DEFAULT_MODEL)
+    .split(",")
+    .map((m) => m.trim())
+    .filter((m) => m !== "");
+  const model = models[0] ?? DEFAULT_MODEL;
   const thinkingBudget = Number.parseInt(
     Deno.env.get("CARTMATCH_GEMINI_THINKING_BUDGET") ?? "0",
     10,
@@ -520,25 +532,44 @@ Deno.serve(async (req: Request) => {
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    let res = await callGemini(
-      apiKey,
-      model,
-      parts,
-      flyerMode,
-      supportsThinking(model),
-      Number.isFinite(thinkingBudget) ? thinkingBudget : 0,
-      controller.signal,
-    );
+    // Walk the list until one answers. A 503 or 429 moves to the next model
+    // immediately rather than after a client-side wait: falling through costs
+    // one request, and waiting out a busy model costs the caller half a minute
+    // for something another model would have answered at once.
+    let res: Response | null = null;
+    let used = model;
+    for (const candidate of models) {
+      used = candidate;
+      res = await callGemini(
+        apiKey,
+        candidate,
+        parts,
+        flyerMode,
+        supportsThinking(candidate),
+        Number.isFinite(thinkingBudget) ? thinkingBudget : 0,
+        controller.signal,
+      );
+      if (res.ok) break;
+      // 404 means this key cannot call that id at all — try the next one
+      // rather than reporting a name the caller never chose.
+      if (res.status !== 503 && res.status !== 429 && res.status !== 404) break;
+      if (candidate !== models[models.length - 1]) {
+        console.warn(`[cartmatch] ${candidate} returned ${res.status}; trying next model.`);
+      }
+    }
+    if (!res) {
+      return json({ ok: false, error: "No model was configured." }, 500, origin);
+    }
 
     // thinkingConfig only exists on 2.5+. If the gate guessed wrong for a
     // future model family, drop it and retry rather than failing a scan.
-    if (!res.ok && res.status === 400 && supportsThinking(model)) {
+    if (!res.ok && res.status === 400 && supportsThinking(used)) {
       const detail = await res.text();
       if (/thinking/i.test(detail)) {
         console.warn(
-          `[cartmatch] ${model} rejected thinkingConfig; retrying without it.`,
+          `[cartmatch] ${used} rejected thinkingConfig; retrying without it.`,
         );
-        res = await callGemini(apiKey, model, parts, flyerMode, false, 0, controller.signal);
+        res = await callGemini(apiKey, used, parts, flyerMode, false, 0, controller.signal);
       } else {
         return json(
           { ok: false, error: `Gemini returned HTTP 400. ${detail.slice(0, 400)}` },
@@ -562,12 +593,12 @@ Deno.serve(async (req: Request) => {
           {
             ok: false,
             code: "MODEL_NOT_AVAILABLE",
-            model,
+            model: used,
             availableModels: available,
             error:
               available.length > 0
-                ? `Gemini does not offer "${model}" to this API key. Set CARTMATCH_GEMINI_MODEL to one of: ${available.slice(0, 20).join(", ")}.`
-                : `Gemini does not offer "${model}" to this API key, and the model list could not be read. ${detail.slice(0, 200)}`,
+                ? `Gemini does not offer ${models.map((m) => `"${m}"`).join(" or ")} to this API key. Set CARTMATCH_GEMINI_MODEL to one of: ${available.slice(0, 20).join(", ")}.`
+                : `Gemini does not offer "${used}" to this API key, and the model list could not be read. ${detail.slice(0, 200)}`,
           },
           502,
           origin,
@@ -635,7 +666,7 @@ Deno.serve(async (req: Request) => {
     // The raw shape is returned as-is; the browser validates and normalises it
     // with the same parseVisionResponse() used everywhere else, so there is
     // exactly one implementation of that logic.
-    return json({ ok: true, raw: parsed, model, mode: flyerMode ? "flyer" : "cart" }, 200, origin);
+    return json({ ok: true, raw: parsed, model: used, mode: flyerMode ? "flyer" : "cart" }, 200, origin);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const aborted = message.toLowerCase().includes("abort");
