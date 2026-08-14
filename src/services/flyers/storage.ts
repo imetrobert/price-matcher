@@ -222,20 +222,37 @@ export interface FlyerQueueCounts {
   done: number;
   failed: number;
   /**
-   * What a still-queued page last came back with, when one has been tried.
+   * What a still-queued page came back with RECENTLY.
    *
    * A page can be queued and going nowhere: an exhausted daily quota returns
    * it to the queue untouched, correctly, because the page is fine and the key
    * is not. Without this the card would spin all night over a run that cannot
    * move until the quota resets, which is the difference between "nearly done"
    * and "come back tomorrow".
+   *
+   * Recent is the load-bearing word. A queued page keeps the message from its
+   * last attempt until something overwrites it, so the first version of this
+   * showed a 404 about a model name that had been fixed hours before, under a
+   * heading that said "Waiting:" — a true sentence about the past presented as
+   * the reason for the present. Anything older than the window below is
+   * history and is not shown.
    */
   waitingReason: string | null;
 }
 
 export type QueueByFlyer = Record<string, FlyerQueueCounts>;
 
-export async function queueSummary(): Promise<QueueByFlyer> {
+/**
+ * How recent a failure has to be to describe the present.
+ *
+ * The worker ticks every minute, so anything still blocking the queue will
+ * have said so within the last few. Fifteen minutes is generous enough to
+ * survive a slow tick and short enough that this evening's fixed problem stops
+ * being reported as tonight's.
+ */
+const REASON_FRESH_MS = 15 * 60_000;
+
+export async function queueSummary(now: Date = new Date()): Promise<QueueByFlyer> {
   const supabase = client();
   if (!supabase) return {};
 
@@ -244,9 +261,10 @@ export async function queueSummary(): Promise<QueueByFlyer> {
   // cheaper than five round trips asking the server to count.
   const { data, error } = await supabase
     .from("cartmatch_flyer_pages")
-    .select("flyer_id, status, last_error");
+    .select("flyer_id, status, last_error, errored_at");
   if (error || !data) return {};
 
+  const byFlyer: Record<string, QueueRow[]> = {};
   const out: QueueByFlyer = {};
   for (const row of data) {
     const flyer = String(row.flyer_id);
@@ -265,18 +283,47 @@ export async function queueSummary(): Promise<QueueByFlyer> {
     else if (status === "DONE") counts.done += 1;
     else if (status === "FAILED") counts.failed += 1;
 
-    // Only from a page that is still waiting. A reason attached to a page that
-    // has since been read is history, and reporting it would describe a
-    // problem that is over.
-    if (
-      status === "PENDING" &&
-      counts.waitingReason === null &&
-      row.last_error
-    ) {
-      counts.waitingReason = String(row.last_error);
-    }
+    (byFlyer[flyer] ??= []).push(row as QueueRow);
   }
+
+  for (const [flyer, rows] of Object.entries(byFlyer)) {
+    out[flyer]!.waitingReason = pickWaitingReason(rows, now);
+  }
+
   return out;
+}
+
+/** One page row, as far as the waiting reason is concerned. */
+export interface QueueRow {
+  status: unknown;
+  last_error?: unknown;
+  errored_at?: unknown;
+}
+
+/**
+ * The reason this flyer's queue is not moving, or null.
+ *
+ * Pure, and separated out because the rule is the whole point: only a page
+ * that is still waiting, and only a message recent enough to be about now.
+ *
+ * An undated message counts as history rather than as current. Rows written
+ * before `errored_at` existed carry real messages about problems long since
+ * dealt with, and the failure mode being fixed here is precisely a true
+ * sentence about the past displayed as a fact about the present.
+ */
+export function pickWaitingReason(
+  rows: QueueRow[],
+  now: Date = new Date(),
+): string | null {
+  for (const row of rows) {
+    if (String(row.status) !== "PENDING") continue;
+    if (!row.last_error) continue;
+    const at = row.errored_at ? Date.parse(String(row.errored_at)) : NaN;
+    if (!Number.isFinite(at)) continue;
+    if (now.getTime() - at >= REASON_FRESH_MS) continue;
+    return String(row.last_error);
+  }
+  return null;
 }
 
 /**

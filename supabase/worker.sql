@@ -47,6 +47,14 @@ create table if not exists public.cartmatch_flyer_pages (
     check (status in ('PENDING', 'READING', 'DONE', 'FAILED')),
   attempts integer not null default 0,
   last_error text,
+  -- When last_error was written.
+  --
+  -- Without it a reason cannot be dated, and a page that is queued keeps the
+  -- message from its last attempt indefinitely. The home screen showed a 404
+  -- about a model name that had been fixed hours earlier, presented as the
+  -- reason the queue was waiting — a true sentence about the past, displayed
+  -- as a fact about now. A reason nobody can date is worse than no reason.
+  errored_at timestamptz,
   -- Which model actually answered. Different pages of one flyer can be read by
   -- different models when the first choice is busy, and knowing which is what
   -- makes a bad batch traceable.
@@ -58,6 +66,10 @@ create table if not exists public.cartmatch_flyer_pages (
   claimed_at timestamptz,
   read_at timestamptz
 );
+
+-- Added after the table shipped, so existing installs get it too.
+alter table public.cartmatch_flyer_pages
+  add column if not exists errored_at timestamptz;
 
 create unique index if not exists cartmatch_flyer_pages_unique
   on public.cartmatch_flyer_pages (flyer_id, page_number);

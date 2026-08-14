@@ -219,7 +219,18 @@ function Home() {
       <MockBanner
         visible={env.dataMode === "MOCK"}
         dataMode={env.dataMode}
-        note="Running on test fixtures. Prices shown anywhere in the app are invented and must not be shown to a cashier."
+        /*
+          Narrowed deliberately, and not to soften it. CARTMATCH_DATA_MODE
+          gates the retailer adapters — see registry.ts — and nothing else.
+          Offers read out of an uploaded flyer never consult it, so claiming
+          every price in the app is invented became false the moment real
+          flyer offers were stored.
+
+          An overclaiming banner is a banner that gets ignored, and this one
+          has to still be believed on the day it is the only thing standing
+          between a fixture and a cashier.
+        */
+        note="Retailer price lookups return test fixtures — those figures were never observed at a store and must not be shown to a cashier. Offers read from flyers you uploaded are unaffected: they come from the PDFs themselves."
       />
 
       <section className="card mb-4">

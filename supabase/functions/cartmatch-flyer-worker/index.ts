@@ -49,7 +49,7 @@ import { quotaMessage } from "../_shared/quota.ts";
 
 /** Which build answered. Same reason as the other functions: a silent stale
  *  deploy is indistinguishable from a working one until you check. */
-const FUNCTION_BUILD = "2026-08-14-worker-4";
+const FUNCTION_BUILD = "2026-08-14-worker-5";
 
 /**
  * Pages per tick.
@@ -234,6 +234,7 @@ async function readOnePage(
         claimed_at: null,
         attempts: Number(page.attempts),
         last_error: error.slice(0, 500),
+        errored_at: new Date().toISOString(),
       })
       .eq("id", id);
     return { page: pageNumber, ok: false, error, quotaGone: true };
@@ -250,6 +251,7 @@ async function readOnePage(
         status: attempts >= MAX_ATTEMPTS ? "FAILED" : "PENDING",
         claimed_at: null,
         last_error: error.slice(0, 500),
+        errored_at: new Date().toISOString(),
       })
       .eq("id", id);
     return { page: pageNumber, ok: false, error };
@@ -362,6 +364,7 @@ async function readOnePage(
         model: used,
         offers_found: offers.length,
         last_error: rejected.length > 0 ? `${rejected.length} tiles discarded` : null,
+        errored_at: null,
       })
       .eq("id", id);
 

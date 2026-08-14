@@ -10,6 +10,7 @@ import {
   flyerId,
   pagePath,
   pagesStillNeeded,
+  pickWaitingReason,
   type StoredFlyer,
 } from "@/services/flyers/storage";
 
@@ -66,5 +67,55 @@ describe("how long a page image is kept", () => {
     const after = new Date("2026-08-19T00:00:00Z");
     after.setUTCDate(after.getUTCDate() + PAGE_GRACE_DAYS + 1);
     expect(pagesStillNeeded(flyer, after)).toBe(false);
+  });
+});
+
+describe("dating the reason a queue is waiting", () => {
+  // A queued page keeps last_error from its last attempt until something
+  // overwrites it. Shown undated under "Waiting:", a 404 about a model name
+  // fixed hours earlier reads as the reason for the present.
+  it("treats an undated reason as history", async () => {
+    const rows = [
+      { flyer_id: "maxi-2026-08-13", status: "PENDING", last_error: "old 404", errored_at: null },
+    ];
+    expect(pickWaitingReason(rows, new Date("2026-08-15T02:39:00Z"))).toBeNull();
+  });
+
+  it("ignores a reason older than the freshness window", async () => {
+    const rows = [
+      {
+        flyer_id: "maxi-2026-08-13",
+        status: "PENDING",
+        last_error: "Gemini 404 on gemini-2.5-flash",
+        errored_at: "2026-08-15T00:10:00Z",
+      },
+    ];
+    expect(pickWaitingReason(rows, new Date("2026-08-15T02:39:00Z"))).toBeNull();
+  });
+
+  it("reports one said in the last few minutes", async () => {
+    const rows = [
+      {
+        flyer_id: "maxi-2026-08-13",
+        status: "PENDING",
+        last_error: "quota for the DAY",
+        errored_at: "2026-08-15T02:36:00Z",
+      },
+    ];
+    expect(pickWaitingReason(rows, new Date("2026-08-15T02:39:00Z"))).toBe(
+      "quota for the DAY",
+    );
+  });
+
+  it("says nothing about a page that has since been read", async () => {
+    const rows = [
+      {
+        flyer_id: "maxi-2026-08-13",
+        status: "DONE",
+        last_error: "3 tiles discarded",
+        errored_at: "2026-08-15T02:38:00Z",
+      },
+    ];
+    expect(pickWaitingReason(rows, new Date("2026-08-15T02:39:00Z"))).toBeNull();
   });
 });
