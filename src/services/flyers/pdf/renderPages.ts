@@ -19,6 +19,12 @@
  *
  *   16 pages, 12.6 MB, one JPEG per page, producer "Prawn".
  *   Zero text characters. Every page. It is artwork, not a document.
+ *
+ * Flyers differ on this, and the difference is worth knowing. Measured across
+ * the week-33 Montreal set: Maxi's PDF carries a real text layer, Walmart's
+ * and Super C's do not. So a Maxi price can be corroborated against the
+ * flyer's own characters, and a Walmart one cannot — same week, same city,
+ * different production pipeline.
  *   Page box 5809 x 2942 — but the artwork is a PORTRAIT image roughly
  *   1434 x 2867, placed against the left edge of that box.
  *
@@ -326,14 +332,27 @@ async function extractPageText(page: {
   }
 }
 
-/** How much of a flyer can be checked automatically, before spending on it. */
+/**
+ * How much of this flyer the app can check for itself.
+ *
+ * Worded carefully, because the obvious phrasing misleads. A flyer whose words
+ * are printed into the artwork is perfectly READABLE — a person sees the
+ * prices and product names exactly as on paper — while carrying no text the
+ * app can check anything against. The first version of this said "pages with
+ * readable text", and someone reasonably replied that the text was clearly
+ * there, just small.
+ *
+ * The distinction matters because it decides how much confirming the person is
+ * signing up for, so it is stated in terms of what the APP can do, never in
+ * terms of what the flyer looks like.
+ */
 export function describeTextCoverage(pages: RenderedFlyerPage[]): string {
   const withText = pages.filter((p) => p.text.length >= 40).length;
   if (withText === 0) {
-    return `No page in this flyer carries readable text, so every price read from it will need your confirmation before it can be shown at a till.`;
+    return "The words on this flyer are printed into the artwork, the way ink is printed on paper. You can read them; the app cannot read them as text, so it has nothing to check a price against. Every price it finds will need your confirmation before it can be shown to a cashier.";
   }
   if (withText === pages.length) {
-    return `Every page carries readable text, so prices can be checked against the flyer's own words.`;
+    return "Every page carries real text, not just artwork. A price read from this flyer can be checked against the flyer's own words automatically, so most of it should need no confirming.";
   }
-  return `${withText} of ${pages.length} pages carry readable text. Prices from the other ${pages.length - withText} will need your confirmation.`;
+  return `${withText} of ${pages.length} pages carry real text and can be checked automatically. On the other ${pages.length - withText}, the words are printed into the artwork, so prices from those pages will need your confirmation.`;
 }

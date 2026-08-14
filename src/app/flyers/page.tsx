@@ -182,7 +182,7 @@ function FlyerImport() {
             <Row label="Page size" value={`${pages[0]!.widthPx} × ${pages[0]!.heightPx} px`} />
             <Row label="Total image data" value={`${(totalKb / 1024).toFixed(1)} MB`} />
             <Row
-              label="Pages with readable text"
+              label="Pages the app can check itself"
               value={`${readable} of ${pages.length}`}
             />
           </section>
@@ -197,8 +197,10 @@ function FlyerImport() {
               tone={readable === 0 ? "warn" : "info"}
               title={
                 readable === 0
-                  ? "This flyer is artwork, with no text to check against"
-                  : "This flyer carries text"
+                  ? "You can read this flyer. The app cannot."
+                  : readable === pages.length
+                    ? "The app can check this flyer against itself"
+                    : "The app can check part of this flyer against itself"
               }
             >
               {describeTextCoverage(pages)}
@@ -224,7 +226,7 @@ function FlyerImport() {
                 />
                 <span className="block px-2 py-1 text-xs text-muted">
                   Page {page.pageNumber} · {page.imageKb} KB ·{" "}
-                  {page.text.length >= 40 ? `${page.text.length} chars` : "no text"}
+                  {page.text.length >= 40 ? "checkable" : "artwork"}
                 </span>
               </button>
             ))}
