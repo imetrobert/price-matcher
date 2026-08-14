@@ -60,7 +60,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: supabase/setup-cli@v1
+      # Two attempts, both authenticated.
+      #
+      # This step failed once with "Failed to resolve latest Supabase CLI
+      # release: rate limit exceeded". The action asks GitHub which release is
+      # newest, and an unauthenticated API call from a shared runner IP is
+      # rate-limited by whoever else is on that IP. Passing the workflow's own
+      # token raises the limit from sixty requests an hour to five thousand.
+      #
+      # The retry covers the rest: a deploy that fails for a reason unrelated
+      # to the code is a deploy that will be assumed to have worked, and that
+      # assumption has already cost this project two debugging sessions.
+      - name: Install Supabase CLI
+        id: cli
+        uses: supabase/setup-cli@v1
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          version: latest
+
+      - name: Install Supabase CLI (retry)
+        if: steps.cli.outcome == 'failure'
+        uses: supabase/setup-cli@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           version: latest
 
