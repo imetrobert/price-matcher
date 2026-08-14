@@ -79,6 +79,22 @@ const RATE_LIMIT_BACKOFF_MS = [25_000, 45_000, 65_000];
  */
 const MIN_REQUEST_INTERVAL_MS = 5_000;
 
+/**
+ * How much to slow down after the key says no, and how far that can go.
+ *
+ * Five seconds is a guess at somebody else's quota, and a guess is wrong for
+ * exactly the reason this keeps happening: the key is shared. Another app on
+ * the same Supabase project can spend the minute's allowance while this one is
+ * behaving, so the right interval is not knowable in advance — but it is
+ * observable. Every rate-limit widens the gap for the rest of the run.
+ *
+ * Capped, because past twenty seconds a page the wait stops being pacing and
+ * becomes a hang; at that point the honest move is to stop and say which pages
+ * were not read.
+ */
+const PACING_BACKOFF_FACTOR = 2;
+const MAX_REQUEST_INTERVAL_MS = 20_000;
+
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -104,10 +120,13 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
 export async function readFlyerPage(
   page: RenderedFlyerPage,
   signal?: AbortSignal,
+  onRateLimited?: () => void,
 ): Promise<ReadPageOutcome> {
   for (let attempt = 0; ; attempt++) {
     const outcome = await readFlyerPageOnce(page);
     if (outcome.ok) return outcome;
+
+    if (outcome.code === "RATE_LIMITED") onRateLimited?.();
 
     const waits =
       outcome.code === "RATE_LIMITED"
@@ -243,6 +262,7 @@ export async function readFlyerPages(
   let model: string | null = null;
   let stoppedAt = -1;
   let lastRequestAt = 0;
+  let interval = MIN_REQUEST_INTERVAL_MS;
 
   for (const [index, page] of pages.entries()) {
     if (options.signal?.aborted) {
@@ -252,8 +272,8 @@ export async function readFlyerPages(
 
     // Pace, rather than sprint and recover. See MIN_REQUEST_INTERVAL_MS.
     const sinceLast = Date.now() - lastRequestAt;
-    if (lastRequestAt > 0 && sinceLast < MIN_REQUEST_INTERVAL_MS) {
-      await wait(MIN_REQUEST_INTERVAL_MS - sinceLast, options.signal);
+    if (lastRequestAt > 0 && sinceLast < interval) {
+      await wait(interval - sinceLast, options.signal);
     }
     lastRequestAt = Date.now();
     options.onProgress?.({
@@ -262,7 +282,12 @@ export async function readFlyerPages(
       offersSoFar: offers.length,
     });
 
-    const outcome = await readFlyerPage(page, options.signal);
+    const outcome = await readFlyerPage(page, options.signal, () => {
+      // Widen for the REST of the run, not just this page. A quota that was
+      // too tight for page two is too tight for page three as well, and
+      // learning that once beats rediscovering it fifteen times.
+      interval = Math.min(interval * PACING_BACKOFF_FACTOR, MAX_REQUEST_INTERVAL_MS);
+    });
     if (!outcome.ok) {
       failedPages.push({ pageNumber: page.pageNumber, error: outcome.error });
       // A stale function or a lost session will fail identically on every
