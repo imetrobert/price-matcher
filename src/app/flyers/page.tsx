@@ -375,6 +375,19 @@ function FlyerImport() {
         </div>
       ) : null}
 
+      {finishedAt && items.some((i) => i.result?.stoppedReason === "RATE_LIMITED") ? (
+        <div className="mb-4">
+          <Notice tone="error" title="The API key ran out of quota">
+            The run stopped there — the remaining flyers were not started,
+            because a quota belongs to the key rather than to a flyer and they
+            would all have failed the same way. The row says whether it was the
+            per-minute or the per-day limit. Note that Gemini&rsquo;s free
+            quota is per Google project, so a second key in the same project
+            shares the same allowance.
+          </Notice>
+        </div>
+      ) : null}
+
       {finishedAt && totals.notSaved > 0 ? (
         <div className="mb-4">
           <Notice tone="error" title="Some flyers were not saved">

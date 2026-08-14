@@ -291,6 +291,16 @@ export interface ReadFlyerResult {
   /** The run dates printed in the flyer, YYYY-MM-DD. */
   validFrom: string | null;
   validTo: string | null;
+  /**
+   * Why the run stopped early, when it did.
+   *
+   * A quota does not belong to a flyer, it belongs to the key — so a caller
+   * working through five files needs to know the difference between "this one
+   * had a bad page" and "nothing else will succeed either". Grinding through
+   * four more flyers to collect four more copies of the same refusal costs
+   * half an hour and teaches nobody anything.
+   */
+  stoppedReason: "RATE_LIMITED" | "OVERLOADED" | "NOT_SIGNED_IN" | null;
 }
 
 /**
@@ -319,6 +329,7 @@ export async function readFlyerPages(
   let validFrom: string | null = null;
   let validTo: string | null = null;
   let stoppedAt = -1;
+  let stoppedReason: ReadFlyerResult["stoppedReason"] = null;
   let lastRequestAt = 0;
   let interval = MIN_REQUEST_INTERVAL_MS;
   let anySucceeded = false;
@@ -353,6 +364,7 @@ export async function readFlyerPages(
       // remaining page. Sixteen copies of one message helps nobody.
       if (outcome.code === "STALE_FUNCTION" || outcome.code === "NOT_SIGNED_IN") {
         stoppedAt = index + 1;
+        stoppedReason = "NOT_SIGNED_IN";
         break;
       }
       // Still refused after every retry. Grinding through fifteen more pages
@@ -360,6 +372,7 @@ export async function readFlyerPages(
       // time; stop, and say exactly which pages were never tried.
       if (outcome.code === "OVERLOADED" || outcome.code === "RATE_LIMITED") {
         stoppedAt = index + 1;
+        stoppedReason = outcome.code;
         break;
       }
       continue;
@@ -447,5 +460,6 @@ export async function readFlyerPages(
     retailerName,
     validFrom,
     validTo,
+    stoppedReason,
   };
 }

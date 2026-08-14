@@ -108,6 +108,7 @@ describe("what the batch reports when it is done", () => {
         retailerName: null,
         validFrom: null,
         validTo: null,
+        stoppedReason: null,
       },
       error: null,
       ...patch,
@@ -128,6 +129,7 @@ describe("what the batch reports when it is done", () => {
           retailerName: null,
           validFrom: null,
           validTo: null,
+          stoppedReason: null,
         },
       }),
     ]);

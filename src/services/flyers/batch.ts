@@ -418,13 +418,32 @@ export async function runBatch(
   options: BatchOptions,
 ): Promise<BatchItem[]> {
   const done: BatchItem[] = [];
+  let quotaGone = false;
+
   for (const item of items) {
     if (options.signal?.aborted) {
       done.push({ ...item, stage: "FAILED", detail: "Cancelled", error: "Cancelled" });
       continue;
     }
-    done.push(await runOne(item, options));
+
+    // A quota belongs to the API key, not to a flyer. Once it is gone the next
+    // four files will fail identically, and rendering eighty more pages to
+    // prove it costs half an hour and teaches nobody anything.
+    if (quotaGone) {
+      done.push({
+        ...item,
+        stage: "WAITING",
+        detail:
+          "Not started — the API key ran out of quota on an earlier flyer. Read again once it resets.",
+      });
+      continue;
+    }
+
+    const finished = await runOne(item, options);
+    done.push(finished);
+    if (finished.result?.stoppedReason === "RATE_LIMITED") quotaGone = true;
   }
+
   return done;
 }
 
