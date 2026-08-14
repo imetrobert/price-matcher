@@ -127,6 +127,22 @@ const MIN_REQUEST_INTERVAL_MS = 5_000;
 const PACING_BACKOFF_FACTOR = 2;
 const MAX_REQUEST_INTERVAL_MS = 45_000;
 
+/**
+ * Could asking again plausibly give a different answer?
+ *
+ * A busy model, an exhausted minute of quota and a dropped connection all pass
+ * with time. A model this key cannot call, a malformed request and a rejected
+ * session do not — and retrying those turns one clear error into sixteen slow
+ * copies of it, which is what a Maxi run spent twelve minutes doing.
+ *
+ * Matched on the message because that is what a failed page carries. Narrow on
+ * purpose: anything unrecognised is treated as permanent, so a new failure
+ * mode announces itself once rather than sixteen times.
+ */
+function isTransient(error: string): boolean {
+  return /busy|quota|connection dropped|timed out|temporar/i.test(error);
+}
+
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -456,12 +472,18 @@ export async function readFlyerPages(
   // Only pages that FAILED are retried, and only once. Pages never attempted
   // are a different problem — the run was cut off, and re-running is the
   // answer to that, not a sweep that would hit the same wall.
+  //
+  // And only pages that failed for a reason a second attempt could change. A
+  // wrong model name fails identically however many times it is asked, and a
+  // sweep over sixteen of those spent twelve minutes proving it while the
+  // progress bar walked backwards through the flyer.
   // ---------------------------------------------------------------------
-  if (failedPages.length > 0 && anySucceeded && !options.signal?.aborted) {
+  const worthRetrying = failedPages.filter((f) => isTransient(f.error));
+  if (worthRetrying.length > 0 && anySucceeded && !options.signal?.aborted) {
     const byNumber = new Map(pages.map((p) => [p.pageNumber, p]));
-    const stillFailed: { pageNumber: number; error: string }[] = [];
+    const stillFailed = failedPages.filter((f) => !isTransient(f.error));
 
-    for (const failure of failedPages) {
+    for (const failure of worthRetrying) {
       if (options.signal?.aborted) {
         stillFailed.push(failure);
         continue;

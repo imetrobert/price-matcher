@@ -230,13 +230,15 @@ const MAX_IMAGES = 4;
  * reasoning. Pinning a version buys reproducibility nobody here needs and
  * costs a breakage every time Google moves on.
  *
- * The default is a LIST. "gemini-flash-latest" answers first when it can, and
- * a project whose flash tier is under load falls through to a pro model rather
- * than failing the page — a slower answer beats no answer once a week.
+ * The default is a LIST, of concrete versions with an alias behind them. An
+ * alias is NOT the safe choice it appears to be: a real key listed
+ * gemini-flash-latest among its available models and then answered 404 to it
+ * on every page. Google advertises ids it will not serve, so the only reliable
+ * strategy is a chain, walked until one answers.
  *
  * CARTMATCH_GEMINI_MODEL overrides, and accepts the same comma-separated form.
  */
-const DEFAULT_MODEL = "gemini-flash-latest,gemini-2.5-pro";
+const DEFAULT_MODEL = "gemini-3.5-flash,gemini-2.5-flash,gemini-flash-latest";
 const MAX_BYTES = 8 * 1024 * 1024;
 const TIMEOUT_MS = 45_000;
 
@@ -748,12 +750,32 @@ function canReadAFlyerPage(name: string): boolean {
   );
 }
 
-/** Aliases first, then flash, then everything else. */
+/**
+ * Best candidate first, measured rather than assumed.
+ *
+ * Aliases used to rank first, on the reasoning that a "-latest" id cannot be
+ * retired underneath a configuration. Then a real key returned
+ * gemini-flash-latest in its own list of available models and then answered
+ * 404 to it, sixteen pages in a row — Google advertises ids it will not serve,
+ * so an alias is no safer than anything else and is harder to diagnose.
+ *
+ * Concrete flash versions now lead, newest first, because those are what
+ * actually answered: gemini-3.5-flash read 257 offers off a Maxi flyer that
+ * gemini-flash-latest could not open. Lite variants follow — cheaper, and they
+ * lose the fine print first, which on a flyer is the size and the unit.
+ * Aliases sit after those as a fallback, and pro last: slower, and this is
+ * transcription rather than reasoning.
+ */
 function rankModel(name: string): number {
-  if (/latest/.test(name)) return /flash/.test(name) ? 0 : 1;
-  if (/flash/.test(name)) return 2;
-  if (/pro/.test(name)) return 3;
-  return 4;
+  const version = Number(/gemini-(\d+(?:\.\d+)?)/.exec(name)?.[1] ?? "0");
+  // Negated so a higher version sorts earlier within each band.
+  if (/flash/.test(name) && !/lite|latest|image|preview/.test(name)) {
+    return 100 - version;
+  }
+  if (/flash/.test(name) && !/latest/.test(name)) return 200 - version;
+  if (/flash/.test(name)) return 300;
+  if (/pro/.test(name)) return 400;
+  return 500;
 }
 
 async function listUsableModels(
