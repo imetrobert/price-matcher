@@ -62,6 +62,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 import { quotaMessage } from "../_shared/quota.ts";
 import { DEFAULT_MODEL_CHAIN, modelChain } from "../_shared/models.ts";
+import { dailyLimit } from "../_shared/budget.ts";
 import { FLYER_PROMPT, FLYER_SCHEMA } from "../_shared/flyerPrompt.ts";
 
 // ===========================================================================
@@ -334,6 +335,10 @@ Deno.serve(async (req: Request) => {
   if (!auth.ok) {
     return json({ ok: false, error: auth.error }, auth.status, origin);
   }
+  // The caller's own token, reused for the usage counter. The counter is a
+  // SECURITY DEFINER function, so this needs no more privilege than the
+  // request already carried.
+  const bearer = (req.headers.get("Authorization") ?? "").slice("Bearer ".length);
 
   // Prefixed first, shared second. Supabase secrets are project-wide, and this
   // project is shared with other apps, so GEMINI_API_KEY may already exist and
@@ -454,6 +459,11 @@ Deno.serve(async (req: Request) => {
         Number.isFinite(thinkingBudget) ? thinkingBudget : 0,
         controller.signal,
       );
+      // Counted on the way out, refused or not: a 429 is still a request as
+      // far as Google's counter is concerned. The scan spends from the whole
+      // allowance — it is the worker that holds back, because a person at a
+      // shelf has no way to wait.
+      void noteRequest(bearer, candidate);
       // A 400 on a request carrying thinkingConfig is far more likely to be
       // that config than the photograph. Retry once without it before
       // blaming anything else — this drops the request to the same shape the
@@ -474,6 +484,7 @@ Deno.serve(async (req: Request) => {
           0,
           controller.signal,
         );
+        void noteRequest(bearer, candidate);
       }
 
       if (res.ok) break;
@@ -517,6 +528,7 @@ Deno.serve(async (req: Request) => {
           Number.isFinite(thinkingBudget) ? thinkingBudget : 0,
           controller.signal,
         );
+        void noteRequest(bearer, suggested);
         if (retry.ok) {
           res = retry;
           used = suggested;
@@ -750,6 +762,38 @@ function callGemini(
       signal,
     },
   );
+}
+
+/**
+ * Record one request against today's count.
+ *
+ * Fire-and-forget, and deliberately not awaited: a shopper waiting on a
+ * photograph should never wait on bookkeeping, and a counter that fails to
+ * write is a slightly low number rather than a failed scan. `dailyLimit` is
+ * imported so this file states which allowance it is spending from, even
+ * though the scan does not throttle itself against it.
+ */
+async function noteRequest(token: string, model: string): Promise<void> {
+  try {
+    const url = Deno.env.get("SUPABASE_URL") ?? "";
+    if (url === "") return;
+    await fetch(`${url}/rest/v1/rpc/cartmatch_note_request`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        apikey: Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      },
+      body: JSON.stringify({ model_name: model }),
+    });
+  } catch {
+    // Bookkeeping. Never the reason a scan fails.
+  }
+}
+
+/** The allowance this model draws on, for anything that wants to report it. */
+export function limitFor(model: string): number {
+  return dailyLimit(model);
 }
 
 function supportsThinking(model: string): boolean {

@@ -47,11 +47,12 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { parseFlyerBatch, parseFlyerExtraction } from "../_shared/parseOffers.ts";
 import { quotaMessage } from "../_shared/quota.ts";
 import { DEFAULT_MODEL_CHAIN, modelChain } from "../_shared/models.ts";
+import { affordableModels, workerCeiling } from "../_shared/budget.ts";
 import { FLYER_PROMPT, FLYER_SCHEMA } from "../_shared/flyerPrompt.ts";
 
 /** Which build answered. Same reason as the other functions: a silent stale
  *  deploy is indistinguishable from a working one until you check. */
-const FUNCTION_BUILD = "2026-08-15-worker-10";
+const FUNCTION_BUILD = "2026-08-15-worker-11";
 
 /**
  * Pages per tick.
@@ -173,7 +174,26 @@ async function handle(req: Request): Promise<Response> {
     return json({ ok: true, build: FUNCTION_BUILD, processed: 0, note: "Queue empty." }, 200);
   }
 
-  const models = modelChain(Deno.env.get("CARTMATCH_GEMINI_MODEL"));
+  const configured = modelChain(Deno.env.get("CARTMATCH_GEMINI_MODEL"));
+
+  // Hold back a few requests on every model so a scan can still be answered.
+  // An import that waits an hour costs nothing; a shopper standing at a shelf
+  // whose photograph will not read has no recourse at all.
+  const used = await requestsToday(supabase);
+  const models = affordableModels(configured, used);
+  if (models.length === 0) {
+    return json(
+      {
+        ok: true,
+        build: FUNCTION_BUILD,
+        processed: 0,
+        note: "Held: every model is at its worker ceiling for today. The rest of each allowance is kept for scanning.",
+        used,
+        ceilings: Object.fromEntries(configured.map((m) => [m, workerCeiling(m)])),
+      },
+      200,
+    );
+  }
 
   const results: unknown[] = [];
 
@@ -253,6 +273,50 @@ async function handle(req: Request): Promise<Response> {
     { ok: true, build: FUNCTION_BUILD, processed: results.length, results },
     200,
   );
+}
+
+/**
+ * What this app has sent today, by model.
+ *
+ * Best-effort on purpose. If the table or the function is missing — a
+ * deployment where budget.sql has not been run — this returns nothing spent,
+ * and the worker behaves exactly as it did before the budget existed. Reading
+ * a counter must never be the reason a flyer goes unread.
+ */
+async function requestsToday(
+  supabase: ReturnType<typeof createClient>,
+): Promise<Record<string, number>> {
+  try {
+    const { data, error } = await supabase.rpc("cartmatch_requests_today");
+    if (error || !Array.isArray(data)) return {};
+    const out: Record<string, number> = {};
+    for (const row of data) {
+      out[String((row as { model: unknown }).model)] = Number(
+        (row as { requests: unknown }).requests ?? 0,
+      );
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Record one request, sent or refused.
+ *
+ * Counted on the way out rather than on success: a 429 is still a request as
+ * far as Google's counter is concerned, and a budget that only counted the
+ * successful ones would run out precisely when it claimed there was room.
+ */
+async function noteRequest(
+  supabase: ReturnType<typeof createClient>,
+  model: string,
+): Promise<void> {
+  try {
+    await supabase.rpc("cartmatch_note_request", { model_name: model });
+  } catch {
+    // Bookkeeping. Never the reason a page fails.
+  }
 }
 
 /**
@@ -354,6 +418,7 @@ async function readBatch(
     for (const candidate of models) {
       used = candidate;
       res = await callGeminiBatch(apiKey, candidate, images, numbers, controller.signal);
+      await noteRequest(supabase, candidate);
       if (res.ok) break;
       if (res.status !== 503 && res.status !== 429 && res.status !== 404) break;
     }
@@ -533,6 +598,7 @@ async function readOnePage(
     for (const candidate of models) {
       used = candidate;
       res = await callGemini(apiKey, candidate, base64, controller.signal);
+      await noteRequest(supabase, candidate);
       if (res.ok) break;
       // Busy, rate-limited or unavailable: try the next model in the same
       // tick. Anything else fails the same way whoever is asked.
@@ -547,6 +613,7 @@ async function readOnePage(
       const suggested = available.find((m) => !models.includes(m));
       if (suggested) {
         const retry = await callGemini(apiKey, suggested, base64, controller.signal);
+        await noteRequest(supabase, suggested);
         if (retry.ok) {
           res = retry;
           used = suggested;
