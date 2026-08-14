@@ -13,7 +13,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { ProofSheet } from "@/components/ProofSheet";
-import { Money, Notice } from "@/components/ui";
+import { MockBanner, Money, Notice } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
 import { loadLastResult } from "@/lib/prefs";
 import type { PipelineResult, SavingsOpportunity } from "@/types";
@@ -54,6 +54,18 @@ export default function CheckoutPage() {
 
   return (
     <main className="flex min-h-[92dvh] flex-col">
+      {/*
+        The one screen a cashier looks at, and until now the only screen
+        showing prices without this. The home screen carried the warning
+        instead, where no price is ever displayed — so the warning sat where
+        it could not be needed and was absent where it could.
+      */}
+      <MockBanner
+        visible={Boolean(result?.containsMockData)}
+        dataMode={result?.dataMode}
+        note="These figures came from test fixtures, not from a retailer. Do not show this screen to a cashier."
+      />
+
       <div className="mb-4 flex items-center justify-between">
         <Link href="/scan" className="text-sm font-semibold text-brand">
           ← Exit

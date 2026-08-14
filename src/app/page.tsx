@@ -4,11 +4,9 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { AuthBar, AuthGuard } from "@/components/AuthGuard";
-import { MockBanner, Notice } from "@/components/ui";
+import { Notice } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
-import { env, visionProviderName } from "@/config/env";
 import { formatCents } from "@/lib/money";
-import { healthReport } from "@/services/retailers/registry";
 import { DEFAULT_PREFS, loadPrefs, prefsAreComplete } from "@/lib/prefs";
 import {
   loadAllFlyers,
@@ -16,7 +14,7 @@ import {
   retryFailedPages,
 } from "@/services/flyers/storage";
 import { flyerStatus, type FlyerStatus } from "@/services/flyers/status";
-import type { AdapterHealth, UserPreferences } from "@/types";
+import type { UserPreferences } from "@/types";
 
 export default function HomePage() {
   return (
@@ -28,7 +26,6 @@ export default function HomePage() {
 
 function Home() {
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFS);
-  const [adapters, setAdapters] = useState<AdapterHealth[] | null>(null);
   const [flyers, setFlyers] = useState<FlyerStatus | null>(null);
   const [retrying, setRetrying] = useState(false);
 
@@ -68,7 +65,6 @@ function Home() {
 
   useEffect(() => {
     setPrefs(loadPrefs());
-    healthReport().then(setAdapters).catch(() => setAdapters(null));
     // Derived from what is stored rather than from a run in progress: a run
     // lives in one browser tab, and the question "do I have this week's
     // prices" has to be answerable from anywhere, including tomorrow.
@@ -229,23 +225,6 @@ function Home() {
         </section>
       ) : null}
 
-      <MockBanner
-        visible={env.dataMode === "MOCK"}
-        dataMode={env.dataMode}
-        /*
-          Narrowed deliberately, and not to soften it. CARTMATCH_DATA_MODE
-          gates the retailer adapters — see registry.ts — and nothing else.
-          Offers read out of an uploaded flyer never consult it, so claiming
-          every price in the app is invented became false the moment real
-          flyer offers were stored.
-
-          An overclaiming banner is a banner that gets ignored, and this one
-          has to still be believed on the day it is the only thing standing
-          between a fixture and a cashier.
-        */
-        note="Retailer price lookups return test fixtures — those figures were never observed at a store and must not be shown to a cashier. Offers read from flyers you uploaded are unaffected: they come from the PDFs themselves."
-      />
-
       <section className="card mb-4">
         <Row label="Current store" value={retailer?.displayName ?? "Not set"} />
         <Row label="Postal code" value={prefs.postalCode || "Not set"} />
@@ -272,9 +251,6 @@ function Home() {
         <Link href="/flyers" className="btn-secondary">
           Import this week&rsquo;s flyers
         </Link>
-        <Link href="/test" className="btn-secondary">
-          Manual product test
-        </Link>
       </div>
 
       {!ready ? (
@@ -285,41 +261,19 @@ function Home() {
         </div>
       ) : null}
 
-      {adapters ? (
-        <section className="mt-6">
-          <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-muted">
-            Service status
-          </h2>
-          <div className="card space-y-2 text-sm">
-            <Row label="Data mode" value={env.dataMode} />
-            <Row label="Photo recognition" value={visionProviderName()} />
-            <div className="border-t border-line pt-2">
-              {adapters.map((a) => (
-                <p key={a.retailerId} className="mb-1 leading-snug">
-                  <span className="font-semibold">
-                    {RETAILERS[a.retailerId]?.displayName ?? a.retailerId}
-                  </span>{" "}
-                  <span
-                    className={
-                      a.status === "AVAILABLE"
-                        ? "pill-good"
-                        : a.status === "MOCK_ONLY"
-                          ? "pill-mock"
-                          : "pill-bad"
-                    }
-                  >
-                    {a.status}
-                  </span>
-                  <span className="block text-xs text-muted">{a.reason}</span>
-                </p>
-              ))}
-            </div>
-          </div>
-          <Link href="/admin" className="btn-ghost mt-2">
-            Developer / debug view
-          </Link>
-        </section>
-      ) : null}
+      {/*
+        The adapter health list lived here: six retailers, all reporting
+        MOCK_ONLY, on the screen somebody opens to ask whether this week's
+        flyers are loaded. It answered a question nobody was asking and
+        crowded out the one they were.
+
+        Prices in this app now come from flyers a person uploaded, and their
+        status is the card at the top. Adapter health is a debugging concern,
+        so it lives where debugging lives.
+      */}
+      <Link href="/admin" className="btn-ghost mt-6">
+        Developer / debug view
+      </Link>
     </main>
   );
 }
