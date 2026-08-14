@@ -76,6 +76,19 @@ const OVERLOAD_BACKOFF_MS = [2_000, 6_000, 15_000];
 const RATE_LIMIT_BACKOFF_MS = [25_000, 45_000, 65_000];
 
 /**
+ * How long to wait when the request never arrived.
+ *
+ * A phone loses a connection, a tab is backgrounded mid-request, a mobile
+ * network hands off between towers — `fetch` rejects and the page is lost. An
+ * IGA run read twelve pages of sixteen and dropped four this way, which is a
+ * quarter of a flyer thrown away by a wobble that a second attempt fixes.
+ *
+ * Short waits: nothing is rate-limiting us here, the connection simply needs a
+ * moment to come back.
+ */
+const NETWORK_BACKOFF_MS = [1_000, 3_000, 8_000];
+
+/**
  * Minimum gap between page requests.
  *
  * Pacing beats recovering. A free key allows something in the region of a
@@ -131,9 +144,18 @@ export async function readFlyerPage(
   page: RenderedFlyerPage,
   signal?: AbortSignal,
   onRateLimited?: () => void,
+  /**
+   * True once any page in this run has been read successfully.
+   *
+   * Changes what a network failure MEANS. With nothing read yet it could
+   * genuinely be a missing deployment or a CORS origin; after twelve good
+   * pages it cannot be either, and saying so sends someone to check settings
+   * that are demonstrably correct.
+   */
+  anySucceeded = false,
 ): Promise<ReadPageOutcome> {
   for (let attempt = 0; ; attempt++) {
-    const outcome = await readFlyerPageOnce(page);
+    const outcome = await readFlyerPageOnce(page, anySucceeded);
     if (outcome.ok) return outcome;
 
     if (outcome.code === "RATE_LIMITED") onRateLimited?.();
@@ -143,7 +165,9 @@ export async function readFlyerPage(
         ? RATE_LIMIT_BACKOFF_MS
         : outcome.code === "OVERLOADED"
           ? OVERLOAD_BACKOFF_MS
-          : null;
+          : outcome.code === "NETWORK"
+            ? NETWORK_BACKOFF_MS
+            : null;
 
     if (waits === null) return outcome;
     if (attempt >= waits.length) return outcome;
@@ -154,6 +178,7 @@ export async function readFlyerPage(
 
 async function readFlyerPageOnce(
   page: RenderedFlyerPage,
+  anySucceeded: boolean,
 ): Promise<ReadPageOutcome> {
   if (!supabaseConfigured()) {
     return { ok: false, error: "Supabase is not configured." };
@@ -224,11 +249,17 @@ async function readFlyerPageOnce(
     const raw = err instanceof Error ? err.message : String(err);
     const networkish =
       err instanceof TypeError || /load failed|failed to fetch/i.test(raw);
+    if (!networkish) return { ok: false, error: raw };
+
     return {
       ok: false,
-      error: networkish
-        ? "Could not reach the flyer reader. Check the Edge Function is deployed and CARTMATCH_ALLOWED_ORIGINS includes this site."
-        : raw,
+      code: "NETWORK",
+      // Two different situations wearing one error. Blaming the deployment
+      // after twelve pages have come back from it sends someone to check
+      // settings the run has already proved correct.
+      error: anySucceeded
+        ? `The connection dropped while sending page ${page.pageNumber}.`
+        : "Could not reach the flyer reader. Check the Edge Function is deployed and CARTMATCH_ALLOWED_ORIGINS includes this site.",
     };
   }
 }
@@ -290,6 +321,7 @@ export async function readFlyerPages(
   let stoppedAt = -1;
   let lastRequestAt = 0;
   let interval = MIN_REQUEST_INTERVAL_MS;
+  let anySucceeded = false;
 
   for (const [index, page] of pages.entries()) {
     if (options.signal?.aborted) {
@@ -314,7 +346,7 @@ export async function readFlyerPages(
       // too tight for page two is too tight for page three as well, and
       // learning that once beats rediscovering it fifteen times.
       interval = Math.min(interval * PACING_BACKOFF_FACTOR, MAX_REQUEST_INTERVAL_MS);
-    });
+    }, anySucceeded);
     if (!outcome.ok) {
       failedPages.push({ pageNumber: page.pageNumber, error: outcome.error });
       // A stale function or a lost session will fail identically on every
@@ -332,6 +364,7 @@ export async function readFlyerPages(
       }
       continue;
     }
+    anySucceeded = true;
     offers.push(...outcome.offers);
     rejected.push(...outcome.rejected);
     model = outcome.model;
@@ -346,6 +379,60 @@ export async function readFlyerPages(
       validFrom = outcome.validFrom;
       validTo = outcome.validTo;
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // One more pass over what dropped out.
+  //
+  // A page lost to a connection wobble is lost for the week otherwise, and a
+  // quarter of a flyer missing is the difference between having this week's
+  // prices and not. By the time the run reaches here the quota window has
+  // moved on anyway, so the second attempt is starting from a better place
+  // than the first.
+  //
+  // Only pages that FAILED are retried, and only once. Pages never attempted
+  // are a different problem — the run was cut off, and re-running is the
+  // answer to that, not a sweep that would hit the same wall.
+  // ---------------------------------------------------------------------
+  if (failedPages.length > 0 && anySucceeded && !options.signal?.aborted) {
+    const byNumber = new Map(pages.map((p) => [p.pageNumber, p]));
+    const stillFailed: { pageNumber: number; error: string }[] = [];
+
+    for (const failure of failedPages) {
+      if (options.signal?.aborted) {
+        stillFailed.push(failure);
+        continue;
+      }
+      const page = byNumber.get(failure.pageNumber);
+      if (!page) {
+        stillFailed.push(failure);
+        continue;
+      }
+
+      options.onProgress?.({
+        page: failure.pageNumber,
+        pageCount: pages.length,
+        offersSoFar: offers.length,
+      });
+
+      await wait(interval, options.signal);
+      const retry = await readFlyerPage(page, options.signal, undefined, true);
+      if (retry.ok) {
+        offers.push(...retry.offers);
+        rejected.push(...retry.rejected);
+        model = retry.model;
+        retailerName ??= retry.retailerName;
+        if (validFrom === null && retry.validFrom && retry.validTo) {
+          validFrom = retry.validFrom;
+          validTo = retry.validTo;
+        }
+        continue;
+      }
+      stillFailed.push({ pageNumber: failure.pageNumber, error: retry.error });
+    }
+
+    failedPages.length = 0;
+    failedPages.push(...stillFailed);
   }
 
   return {
