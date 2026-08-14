@@ -2,7 +2,7 @@
   "name": "cartmatch",
   "version": "0.1.0",
   "private": true,
-  "description": "CartMatch — Montreal grocery price-match assistant (MVP)",
+  "description": "CartMatch \u2014 Montreal grocery price-match assistant (MVP)",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -11,12 +11,15 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npm run typecheck && npm run test && npm run build"
+    "verify": "npm run typecheck && npm run test && npm run build",
+    "prebuild": "node scripts/copy-pdf-worker.mjs",
+    "predev": "node scripts/copy-pdf-worker.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.2",
     "next": "15.1.6",
+    "pdfjs-dist": "^4.10.38",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "server-only": "^0.0.1"
