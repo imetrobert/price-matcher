@@ -200,6 +200,95 @@ export async function queueProgress(flyerId: string): Promise<QueueProgress> {
   return out;
 }
 
+/**
+ * The whole queue at a glance, by flyer.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE HOME SCREEN NEEDS THIS AND `pages_read` IS NOT ENOUGH
+ * ---------------------------------------------------------------------------
+ * `pages_read` counts pages that finished. It cannot distinguish a page still
+ * waiting its turn from a page that ran out of attempts and will never be
+ * tried again — both are simply "not read". So a run that stopped dead looked
+ * exactly like a run in progress: same percentage, same spinner, same "the
+ * rest are queued", forever.
+ *
+ * That is the one thing this card must never get wrong. Somebody deciding
+ * whether to leave for the shops is entitled to know the difference between
+ * "wait ten minutes" and "this is as loaded as it is going to get".
+ */
+export interface FlyerQueueCounts {
+  pending: number;
+  reading: number;
+  done: number;
+  failed: number;
+}
+
+export type QueueByFlyer = Record<string, FlyerQueueCounts>;
+
+export async function queueSummary(): Promise<QueueByFlyer> {
+  const supabase = client();
+  if (!supabase) return {};
+
+  // One query for every page this user owns; RLS scopes it. A week of five
+  // flyers is under a hundred rows, so counting them in the browser is
+  // cheaper than five round trips asking the server to count.
+  const { data, error } = await supabase
+    .from("cartmatch_flyer_pages")
+    .select("flyer_id, status");
+  if (error || !data) return {};
+
+  const out: QueueByFlyer = {};
+  for (const row of data) {
+    const flyer = String(row.flyer_id);
+    const counts =
+      out[flyer] ?? (out[flyer] = { pending: 0, reading: 0, done: 0, failed: 0 });
+    const status = String(row.status);
+    if (status === "PENDING") counts.pending += 1;
+    else if (status === "READING") counts.reading += 1;
+    else if (status === "DONE") counts.done += 1;
+    else if (status === "FAILED") counts.failed += 1;
+  }
+  return out;
+}
+
+/**
+ * Put failed pages back in the queue.
+ *
+ * A page fails for two quite different reasons, and they look identical in the
+ * table: the image is unreadable — which will fail the same way however often
+ * it is asked — or the model of the hour was refusing everybody, which will
+ * not. Only a person knows which happened, because only a person knows that
+ * the model name was just changed. So this is a button, not a sweep: the
+ * worker keeps its rule that attempts run out, and a human can say "try again,
+ * something outside this table changed".
+ *
+ * The database enforces the narrow version of that permission — see the retry
+ * policy in supabase/worker.sql. A browser may move a FAILED page to PENDING
+ * and nothing else; it still cannot mark a page read.
+ */
+export async function retryFailedPages(): Promise<
+  { ok: true; requeued: number } | { ok: false; error: string }
+> {
+  const supabase = client();
+  if (!supabase) return { ok: false, error: "Storage is not configured." };
+
+  const { data, error } = await supabase
+    .from("cartmatch_flyer_pages")
+    .update({
+      status: "PENDING",
+      attempts: 0,
+      claimed_at: null,
+      offers_found: null,
+      model: null,
+      read_at: null,
+    })
+    .eq("status", "FAILED")
+    .select("id");
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, requeued: data?.length ?? 0 };
+}
+
 export type SaveOutcome =
   | { ok: true; offersSaved: number; pagesSaved: number }
   | { ok: false; error: string };

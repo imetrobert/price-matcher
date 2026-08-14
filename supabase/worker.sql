@@ -91,9 +91,44 @@ create policy "cartmatch_flyer_pages delete (cartmatch)"
   for delete to authenticated
   using (public.has_app_access('cartmatch') and user_id = auth.uid());
 
--- No update policy for `authenticated` on purpose. Status is the worker's to
--- set, and a browser marking its own pages DONE would let a page be recorded
--- as read without anything having read it.
+-- One update, and only one: putting a page that gave up back in the queue.
+--
+-- Status is otherwise the worker's to set — a browser marking its own pages
+-- DONE would let a page be recorded as read without anything having read it,
+-- and offers that no model produced would then be presented at a till.
+--
+-- USING says which rows may be touched at all: only this user's FAILED pages.
+-- WITH CHECK says what they may become: PENDING, with the attempt count and
+-- every result field cleared. The two together mean the single reachable move
+-- is FAILED -> PENDING. DONE cannot be written from a browser, because a row
+-- would have to be FAILED to be updatable and PENDING to survive the check.
+--
+-- It exists because "this page failed" and "this page will always fail" are
+-- different claims, and the table cannot tell them apart. A page that failed
+-- because the model of the hour was refusing everybody is worth another try
+-- once the model name changes; a page that failed on a corrupt image is not.
+-- Only the person who changed the setting knows which, so this is a button
+-- rather than an automatic sweep — the worker keeps its rule that attempts
+-- run out on their own.
+drop policy if exists "cartmatch_flyer_pages retry (cartmatch)" on public.cartmatch_flyer_pages;
+create policy "cartmatch_flyer_pages retry (cartmatch)"
+  on public.cartmatch_flyer_pages
+  for update to authenticated
+  using (
+    public.has_app_access('cartmatch')
+    and user_id = auth.uid()
+    and status = 'FAILED'
+  )
+  with check (
+    public.has_app_access('cartmatch')
+    and user_id = auth.uid()
+    and status = 'PENDING'
+    and attempts = 0
+    and offers_found is null
+    and model is null
+    and read_at is null
+    and claimed_at is null
+  );
 
 -- ---------------------------------------------------------------------------
 -- Recovering a page a worker took and never finished

@@ -10,7 +10,11 @@ import { env, visionProviderName } from "@/config/env";
 import { formatCents } from "@/lib/money";
 import { healthReport } from "@/services/retailers/registry";
 import { DEFAULT_PREFS, loadPrefs, prefsAreComplete } from "@/lib/prefs";
-import { loadAllFlyers } from "@/services/flyers/storage";
+import {
+  loadAllFlyers,
+  queueSummary,
+  retryFailedPages,
+} from "@/services/flyers/storage";
 import { flyerStatus, type FlyerStatus } from "@/services/flyers/status";
 import type { AdapterHealth, UserPreferences } from "@/types";
 
@@ -26,17 +30,22 @@ function Home() {
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFS);
   const [adapters, setAdapters] = useState<AdapterHealth[] | null>(null);
   const [flyers, setFlyers] = useState<FlyerStatus | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   // While pages are still being read, the number on this card changes without
   // anybody touching the screen — a worker is doing the work on a schedule. A
   // card that only updates on reload would look stalled while it was in fact
   // progressing, which is the impression "Finish loading" gave.
+  //
+  // Polling stops once the queue is empty. A stalled run has nothing to
+  // report every ten seconds, and a request that can only ever return the
+  // same number is a request not worth making on a phone battery.
   useEffect(() => {
-    if (flyers?.readiness !== "PARTIAL") return;
+    if (flyers?.readiness !== "PARTIAL" || flyers.stalled) return;
 
     const refreshStatus = () =>
-      loadAllFlyers()
-        .then((all) => setFlyers(flyerStatus(all)))
+      Promise.all([loadAllFlyers(), queueSummary()])
+        .then(([all, queue]) => setFlyers(flyerStatus(all, new Date(), queue)))
         .catch(() => undefined);
 
     const timer = setInterval(refreshStatus, 10_000);
@@ -55,7 +64,7 @@ function Home() {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [flyers?.readiness]);
+  }, [flyers?.readiness, flyers?.stalled]);
 
   useEffect(() => {
     setPrefs(loadPrefs());
@@ -63,10 +72,18 @@ function Home() {
     // Derived from what is stored rather than from a run in progress: a run
     // lives in one browser tab, and the question "do I have this week's
     // prices" has to be answerable from anywhere, including tomorrow.
-    loadAllFlyers()
-      .then((all) => setFlyers(flyerStatus(all)))
+    Promise.all([loadAllFlyers(), queueSummary()])
+      .then(([all, queue]) => setFlyers(flyerStatus(all, new Date(), queue)))
       .catch(() => setFlyers(null));
   }, []);
+
+  const requeue = async () => {
+    setRetrying(true);
+    await retryFailedPages();
+    const [all, queue] = await Promise.all([loadAllFlyers(), queueSummary()]);
+    setFlyers(flyerStatus(all, new Date(), queue));
+    setRetrying(false);
+  };
 
   const ready = prefsAreComplete(prefs) && prefs.currentRetailerId !== null;
   const retailer = prefs.currentRetailerId
@@ -105,10 +122,14 @@ function Home() {
                   : ""
             }`}
           >
-            {flyers.readiness === "PARTIAL" ? (
+            {flyers.readiness === "PARTIAL" && !flyers.stalled ? (
               // Turning, because it IS turning. The work continues on a
               // schedule whether or not this screen is open, and a still card
               // reads as a stalled one.
+              //
+              // The converse matters more: a spinner over a queue that has
+              // stopped is a screen telling somebody to keep waiting for
+              // something that is never going to arrive.
               <span
                 aria-hidden
                 className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-line border-t-warn"
@@ -138,7 +159,30 @@ function Home() {
             done for them. Nothing here needs a person: the only reason to open
             the import screen mid-run is to add a flyer that was missed.
           */}
-          {flyers.readiness === "PARTIAL" ? (
+          {flyers.readiness === "PARTIAL" && flyers.stalled ? (
+            <>
+              <p className="mt-2 text-xs text-muted">
+                {flyers.pagesFailed > 0
+                  ? "Pages give up after five tries. If the reason has since been fixed — a model name changed, a quota reset — put them back in the queue."
+                  : "Nothing is waiting to be read. Re-import the flyers that are short of pages."}
+              </p>
+              {flyers.pagesFailed > 0 ? (
+                <button
+                  type="button"
+                  onClick={requeue}
+                  disabled={retrying}
+                  className="btn-primary mt-3 disabled:opacity-50"
+                >
+                  {retrying
+                    ? "Queueing…"
+                    : `Try the ${flyers.pagesFailed} failed ${flyers.pagesFailed === 1 ? "page" : "pages"} again`}
+                </button>
+              ) : null}
+              <Link href="/flyers" className="btn-secondary mt-3">
+                Add more flyers
+              </Link>
+            </>
+          ) : flyers.readiness === "PARTIAL" ? (
             <>
               <p className="mt-2 text-xs text-muted">
                 Reading continues on its own — you can close this. The count

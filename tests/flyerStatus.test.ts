@@ -112,3 +112,71 @@ describe("loaded", () => {
     expect(status.validTo).toBe("2026-08-20");
   });
 });
+
+describe("stopped, versus still going", () => {
+  // The bug this covers held a spinner at 31% for an evening: the card counted
+  // pages that finished, so a queue that had run out of attempts looked
+  // identical to one still working through the backlog.
+
+  it("says nothing is queued when nothing is", () => {
+    const status = flyerStatus([flyer({ pagesRead: 5 })], DURING, {
+      "maxi-2026-08-13": { pending: 0, reading: 0, done: 5, failed: 12 },
+    });
+    expect(status.readiness).toBe("PARTIAL");
+    expect(status.stalled).toBe(true);
+    expect(status.pagesFailed).toBe(12);
+    expect(status.headline).toMatch(/stopped/i);
+    expect(status.detail).toMatch(/nothing is queued/);
+    // The old wording promised an arrival that was not coming.
+    expect(status.detail).not.toMatch(/The rest are queued/);
+  });
+
+  it("is not stalled while pages are still waiting their turn", () => {
+    // A failure alongside live work is not a stopped run.
+    const status = flyerStatus([flyer({ pagesRead: 5 })], DURING, {
+      "maxi-2026-08-13": { pending: 11, reading: 1, done: 5, failed: 1 },
+    });
+    expect(status.stalled).toBe(false);
+    expect(status.detail).toMatch(/The rest are queued/);
+  });
+
+  it("treats a page being read as work in progress", () => {
+    const status = flyerStatus([flyer({ pagesRead: 16 })], DURING, {
+      "maxi-2026-08-13": { pending: 0, reading: 1, done: 16, failed: 0 },
+    });
+    expect(status.stalled).toBe(false);
+  });
+
+  it("does not claim the work stopped when it cannot see the queue", () => {
+    // No counts supplied. Not knowing is not evidence of having stopped, and
+    // the screen must not invent the stronger claim.
+    const status = flyerStatus([flyer({ pagesRead: 5 })], DURING);
+    expect(status.stalled).toBe(false);
+    expect(status.headline).toMatch(/Reading Aug 13/);
+  });
+
+  it("ignores failures belonging to a flyer that has expired", () => {
+    // Last week's abandoned pages must not stall this week's card.
+    const status = flyerStatus(
+      [flyer({ pagesRead: 4 }), flyer({ id: "iga-2026-08-06", validFrom: "2026-08-06", validTo: "2026-08-12" })],
+      DURING,
+      {
+        "maxi-2026-08-13": { pending: 13, reading: 0, done: 4, failed: 0 },
+        "iga-2026-08-06": { pending: 0, reading: 0, done: 3, failed: 14 },
+      },
+    );
+    expect(status.stalled).toBe(false);
+    expect(status.pagesFailed).toBe(0);
+  });
+
+  it("stalls without failures when pages were never queued at all", () => {
+    // Uploaded, never enqueued — a different fault with the same symptom, and
+    // the wording has to stop short of blaming a failure that did not happen.
+    const status = flyerStatus([flyer({ pagesRead: 3 })], DURING, {
+      "maxi-2026-08-13": { pending: 0, reading: 0, done: 3, failed: 0 },
+    });
+    expect(status.stalled).toBe(true);
+    expect(status.pagesFailed).toBe(0);
+    expect(status.detail).toMatch(/never queued/);
+  });
+});
