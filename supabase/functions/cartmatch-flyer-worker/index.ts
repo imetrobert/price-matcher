@@ -47,10 +47,11 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { parseFlyerBatch, parseFlyerExtraction } from "../_shared/parseOffers.ts";
 import { quotaMessage } from "../_shared/quota.ts";
 import { DEFAULT_MODEL_CHAIN, modelChain } from "../_shared/models.ts";
+import { FLYER_PROMPT, FLYER_SCHEMA } from "../_shared/flyerPrompt.ts";
 
 /** Which build answered. Same reason as the other functions: a silent stale
  *  deploy is indistinguishable from a working one until you check. */
-const FUNCTION_BUILD = "2026-08-14-worker-9";
+const FUNCTION_BUILD = "2026-08-15-worker-10";
 
 /**
  * Pages per tick.
@@ -764,117 +765,9 @@ async function listUsableModels(
   }
 }
 
-/** Concrete flash first, newest first; then lite, then aliases, then pro. */
-function rankModel(name: string): number {
-  const version = Number(/gemini-(\d+(?:\.\d+)?)/.exec(name)?.[1] ?? "0");
-  if (/flash/.test(name) && !/lite|latest|image|preview/.test(name)) {
-    return 100 - version;
-  }
-  if (/flash/.test(name) && !/latest/.test(name)) return 200 - version;
-  if (/flash/.test(name)) return 300;
-  if (/pro/.test(name)) return 400;
-  return 500;
-}
+// The prompt and schema live in _shared/flyerPrompt.ts — one set of
+// instructions, because the worker and the vision function read the same pages.
 
-function encodeBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(binary);
-}
-
-function json(body: unknown, status: number): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-  });
-}
-
-// ===========================================================================
-// The prompt and schema, identical in intent to cartmatch-vision's flyer mode.
-// ===========================================================================
-
-const FLYER_PROMPT =
-  "You are reading one page of a Canadian grocery flyer. List EVERY advertised " +
-  "product offer on the page — work across the whole page, tile by tile, and " +
-  "do not stop after the first few. A full page of a Montreal grocery flyer " +
-  "typically carries between ten and thirty offers.\n\n" +
-  "For each offer:\n" +
-  "- advertisedText: the product wording exactly as printed, in the flyer's own " +
-  "language. Do not translate or tidy it.\n" +
-  "- brand: the brand name if printed, otherwise null.\n" +
-  "- size: the pack size as printed (\"551 mL\", \"375 g\"), otherwise null.\n" +
-  "- retailerSku: the retailer's article number if the tile prints one, digits " +
-  "only, otherwise null.\n" +
-  "- priceDollars and priceCents: the two numerals of the sale price exactly as " +
-  "shown. A large 4 with a small 99 is priceDollars 4, priceCents 99. A price " +
-  "shown as 44 cents is priceDollars 0, priceCents 44.\n" +
-  "- basis: PER_ITEM when the price is for the item as sold, PER_LB when marked " +
-  "/lb, PER_KG when marked /kg, PER_100G or PER_100ML when marked per 100 g or " +
-  "100 ml. Look carefully: the unit is printed much smaller than the price.\n" +
-  "- regularDollars and regularCents: the struck-through or \"reg.\" price if " +
-  "printed, otherwise null.\n" +
-  "- regularBasis: what the REGULAR price is per. Flyers often print a sale " +
-  "price per pound beside a regular price per kilogram — read each one's own " +
-  "unit.\n" +
-  "- condition: UNIT_PRICE for a plain price; MULTI_BUY for \"2 for $5\"; " +
-  "LOYALTY_ONLY when a card is required; LIMIT_APPLIES for a quantity limit; " +
-  "WITH_PURCHASE when it depends on buying something else.\n" +
-  "- conditionText: the qualifying words exactly as printed, otherwise null.\n\n" +
-  "Report only what is printed on this page. If you cannot read a price " +
-  "clearly, omit that offer rather than guessing at it.";
-
-const FLYER_SCHEMA = {
-  type: "object",
-  properties: {
-    offers: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          advertisedText: { type: "string" },
-          brand: { type: "string", nullable: true },
-          size: { type: "string", nullable: true },
-          retailerSku: { type: "string", nullable: true },
-          priceDollars: { type: "integer" },
-          priceCents: { type: "integer" },
-          basis: {
-            type: "string",
-            enum: ["PER_ITEM", "PER_LB", "PER_KG", "PER_100G", "PER_100ML"],
-          },
-          regularDollars: { type: "integer", nullable: true },
-          regularCents: { type: "integer", nullable: true },
-          regularBasis: {
-            type: "string",
-            nullable: true,
-            enum: ["PER_ITEM", "PER_LB", "PER_KG", "PER_100G", "PER_100ML"],
-          },
-          condition: {
-            type: "string",
-            enum: [
-              "UNIT_PRICE",
-              "MULTI_BUY",
-              "LOYALTY_ONLY",
-              "LIMIT_APPLIES",
-              "WITH_PURCHASE",
-            ],
-          },
-          conditionText: { type: "string", nullable: true },
-        },
-        required: [
-          "advertisedText",
-          "priceDollars",
-          "priceCents",
-          "basis",
-          "condition",
-        ],
-      },
-    },
-  },
-  required: ["offers"],
-} as const;
 
 const batchPrompt = (pages: number[]): string =>
   `You are reading ${pages.length} pages of one Canadian grocery flyer: ` +

@@ -43,6 +43,8 @@ import {
   type BatchItem,
 } from "@/services/flyers/batch";
 import {
+  loadAllFlyers,
+  type StoredFlyer,
   measureStoredPages,
   purgeExpiredPages,
   type StorageUsage,
@@ -67,6 +69,7 @@ function FlyerImport() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [keepPages, setKeepPages] = useState(DEFAULT_PREFS.keepFlyerPages);
   const [usage, setUsage] = useState<StorageUsage | null>(null);
+  const [held, setHeld] = useState<StoredFlyer[] | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   /**
@@ -85,6 +88,7 @@ function FlyerImport() {
       .then(() => measureStoredPages())
       .then(setUsage)
       .catch(() => setUsage(null));
+    void loadAllFlyers().then(setHeld).catch(() => setHeld(null));
   }, []);
 
   const onFiles = useCallback((files: FileList) => {
@@ -151,6 +155,8 @@ function FlyerImport() {
         subtitle="Drop them all in. Uploading takes a couple of minutes, then you can close the tab — the reading finishes on its own."
         backHref="/"
       />
+
+      <HeldFlyers flyers={held} />
 
       <section className="card mb-4">
         <label className="mb-1 block text-sm font-semibold" htmlFor="pdfs">
@@ -324,6 +330,7 @@ function FlyerImport() {
                     ),
                   );
                   void measureStoredPages().then(setUsage).catch(() => undefined);
+                  void loadAllFlyers().then(setHeld).catch(() => undefined);
                 }}
               />
             ))}
@@ -734,6 +741,130 @@ function Row({ label, value }: { label: string; value: string }) {
     <p className="flex justify-between gap-3 border-b border-line py-1 last:border-0">
       <span className="text-muted">{label}</span>
       <span className="text-right font-semibold">{value}</span>
+    </p>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WHAT IS ALREADY HELD
+// ---------------------------------------------------------------------------
+//
+// This screen used to be write-only: a file picker with no idea what it had
+// already been given. So the two questions somebody actually arrives with —
+// which shops have I done, and is any of this still good — could only be
+// answered by going back to the home card, and the second one not at all.
+//
+// Both are answered against today's date, printed here rather than assumed,
+// because the whole judgement is relative to it and a flyer expires while
+// nobody is looking.
+
+/** A date as a shopper reads it. Noon UTC so it never slips back a day. */
+function readableDay(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString("en-CA", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function HeldFlyers({ flyers }: { flyers: StoredFlyer[] | null }) {
+  const today = todayIso();
+
+  if (flyers === null) return null;
+
+  const current = flyers
+    .filter((f) => f.validFrom <= today && today <= f.validTo)
+    .sort((a, b) => a.retailerId.localeCompare(b.retailerId));
+
+  // Only recent history. A flyer from six weeks ago is not a prompt to do
+  // anything; last week's is, because it is what somebody would otherwise
+  // mistake for this week's.
+  const expired = flyers
+    .filter((f) => f.validTo < today)
+    .sort((a, b) => b.validTo.localeCompare(a.validTo))
+    .slice(0, 4);
+
+  const upcoming = flyers.filter((f) => f.validFrom > today);
+
+  return (
+    <section className="card mb-4">
+      <p className="font-bold">Flyers you already hold</p>
+      <p className="mt-1 text-xs text-muted">Today is {readableDay(today)}.</p>
+
+      {current.length === 0 ? (
+        <p className="mt-3 rounded-md bg-warn/10 p-2 text-sm text-warn">
+          {expired.length > 0
+            ? `Nothing covers today. The newest you hold ran to ${readableDay(expired[0]!.validTo)} — those prices have expired and this week's need uploading.`
+            : "Nothing has been loaded yet."}
+        </p>
+      ) : (
+        <div className="mt-3 space-y-1">
+          {current.map((f) => (
+            <HeldFlyerRow key={f.id} flyer={f} today={today} />
+          ))}
+        </div>
+      )}
+
+      {upcoming.length > 0 ? (
+        <div className="mt-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+            Starts later
+          </p>
+          {upcoming.map((f) => (
+            <HeldFlyerRow key={f.id} flyer={f} today={today} />
+          ))}
+        </div>
+      ) : null}
+
+      {expired.length > 0 && current.length > 0 ? (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs text-muted">
+            {expired.length} expired flyer{expired.length === 1 ? "" : "s"} still
+            stored
+          </summary>
+          <div className="mt-1 space-y-1">
+            {expired.map((f) => (
+              <HeldFlyerRow key={f.id} flyer={f} today={today} />
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-muted">
+            Their offers are no longer compared. Page pictures are deleted three
+            days after a flyer expires.
+          </p>
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
+function HeldFlyerRow({ flyer, today }: { flyer: StoredFlyer; today: string }) {
+  const live = flyer.validFrom <= today && today <= flyer.validTo;
+  const complete = flyer.pagesRead >= flyer.pageCount;
+
+  return (
+    <p className="flex flex-wrap items-baseline justify-between gap-x-3 border-b border-line py-1 text-sm last:border-0">
+      <span className="font-semibold">
+        {RETAILERS[flyer.retailerId]?.displayName ?? flyer.retailerId}
+      </span>
+      <span className={live ? "text-xs text-muted" : "text-xs text-muted line-through"}>
+        {readableDay(flyer.validFrom)} – {readableDay(flyer.validTo)}
+      </span>
+      {/*
+        Pages read against pages held, because a flyer can be current and
+        still be missing most of its offers — and on this screen that is
+        actionable: it is the one place a re-import happens.
+      */}
+      <span className={complete ? "text-xs text-good" : "text-xs text-warn"}>
+        {complete
+          ? `all ${flyer.pageCount} pages`
+          : `${flyer.pagesRead} of ${flyer.pageCount} pages`}
+      </span>
     </p>
   );
 }
