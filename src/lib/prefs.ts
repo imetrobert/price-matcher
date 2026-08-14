@@ -68,9 +68,15 @@ export function prefsAreComplete(p: UserPreferences): boolean {
   return p.postalCode.trim() !== "";
 }
 
-// --- Last pipeline result, shared between /scan and /checkout ---------------
+// --- Last cart comparison, shared between /scan and /checkout ---------------
+//
+// v2 because the shape changed entirely: v1 held a pipeline result priced
+// against retailer adapters, and Checkout Mode read it. Prices now come from
+// flyers. A new key rather than a migration — a stored v1 result is a set of
+// mock prices, and the right thing to do with one is forget it, not translate
+// it into the new shape and show it at a till.
 
-const RESULT_KEY = "cartmatch.lastResult.v1";
+const RESULT_KEY = "cartmatch.lastCart.v2";
 
 export function saveLastResult(result: unknown): void {
   if (typeof window === "undefined") return;

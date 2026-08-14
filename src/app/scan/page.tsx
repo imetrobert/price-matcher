@@ -148,9 +148,18 @@ function ScanFlow() {
       // accepts.
       const offers = await loadCurrentOffers();
       setOfferCount(offers.length);
-      setCart(
-        compareCartToFlyers(chosen, offers, prefs.currentRetailerId!),
+      const comparison = compareCartToFlyers(
+        chosen,
+        offers,
+        prefs.currentRetailerId!,
       );
+      setCart(comparison);
+      // Kept for Checkout Mode, which shows one match at a time at a till.
+      saveLastResult({
+        comparison,
+        currentRetailer: prefs.currentRetailerId!,
+        at: new Date().toISOString(),
+      });
       setStep("results");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Comparison failed.");
@@ -620,6 +629,14 @@ function CartResults({
             ))}
           </div>
         </div>
+      ) : null}
+
+      {cart.cheaperElsewhere.some(
+        (l) => l.savingCents !== null && l.bestElsewhere?.condition === "UNIT_PRICE",
+      ) ? (
+        <Link href="/checkout" className="btn-primary mt-2">
+          Checkout mode — one at a time, large
+        </Link>
       ) : null}
 
       <button type="button" className="btn-secondary mt-2" onClick={onAddMore}>

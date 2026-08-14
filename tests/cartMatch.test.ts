@@ -8,7 +8,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { compareCartToFlyers, needsConfirming, itemLabel } from "@/services/flyers/cartMatch";
+import {
+  compareCartToFlyers,
+  needsConfirming,
+  itemLabel,
+  type CartLine,
+} from "@/services/flyers/cartMatch";
 import type { StoredOffer } from "@/services/flyers/storage";
 import type { DetectedProduct, RetailerId } from "@/types";
 
@@ -253,5 +258,61 @@ describe("naming an item in a list", () => {
     expect(
       itemLabel(item({ brand: null, productName: null, size: null })),
     ).toBe("Unidentified item");
+  });
+});
+
+describe("what may be shown to a cashier", () => {
+  // Mirrors the gate in /checkout. Kept here because it is a claim about the
+  // data, not about a screen: a match with no computable gap, a conditional
+  // price, or no page behind it must not reach a till whatever renders it.
+
+  const gate = (line: CartLine) =>
+    line.savingCents !== null &&
+    line.bestElsewhere !== null &&
+    line.hereOffer !== null &&
+    line.bestElsewhere.condition === "UNIT_PRICE";
+
+  it("admits a gap between two advertised prices", () => {
+    const cart = compareCartToFlyers(
+      [item()],
+      [
+        offer({ id: "a", retailerId: "iga" as RetailerId, price: 599 }),
+        offer({ id: "b", retailerId: "maxi" as RetailerId, price: 399 }),
+      ],
+      "iga" as RetailerId,
+    );
+    expect(gate(cart.cheaperElsewhere[0]!)).toBe(true);
+  });
+
+  it("refuses one where your own shop never advertised the product", () => {
+    // Nothing to subtract from. The results screen still shows it; a till is
+    // not the place to explain that the gap is unknown.
+    const cart = compareCartToFlyers(
+      [item()],
+      [offer({ retailerId: "maxi" as RetailerId, price: 399 })],
+      "iga" as RetailerId,
+    );
+    expect(cart.cheaperElsewhere).toHaveLength(1);
+    expect(gate(cart.cheaperElsewhere[0]!)).toBe(false);
+  });
+
+  it("refuses a card price even when it was opted into", () => {
+    const cart = compareCartToFlyers(
+      [item()],
+      [
+        offer({ id: "a", retailerId: "iga" as RetailerId, price: 599 }),
+        offer({
+          id: "b",
+          retailerId: "maxi" as RetailerId,
+          price: 399,
+          condition: "LOYALTY_ONLY",
+          conditionText: "avec carte",
+        }),
+      ],
+      "iga" as RetailerId,
+      { includeConditional: true },
+    );
+    expect(cart.cheaperElsewhere).toHaveLength(1);
+    expect(gate(cart.cheaperElsewhere[0]!)).toBe(false);
   });
 });
