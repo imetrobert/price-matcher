@@ -48,7 +48,7 @@ import { parseFlyerExtraction } from "../_shared/parseOffers.ts";
 
 /** Which build answered. Same reason as the other functions: a silent stale
  *  deploy is indistinguishable from a working one until you check. */
-const FUNCTION_BUILD = "2026-08-14-worker-1";
+const FUNCTION_BUILD = "2026-08-14-worker-2";
 
 /**
  * Pages per tick.
@@ -74,6 +74,23 @@ const TIMEOUT_MS = 90_000;
 const FLYER_BUCKET = "cartmatch-flyers";
 
 Deno.serve(async (req: Request) => {
+  try {
+    return await handle(req);
+  } catch (err) {
+    // The whole handler, wrapped. A scheduled job posting into a function that
+    // throws gets "Internal Server Error" and cron records a success, so the
+    // failure is invisible from both ends. The message goes in the body where
+    // net._http_response will keep it.
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[cartmatch-worker] ${message}`);
+    return json(
+      { ok: false, build: FUNCTION_BUILD, error: message.slice(0, 500) },
+      500,
+    );
+  }
+});
+
+async function handle(req: Request): Promise<Response> {
   if (req.method !== "POST") {
     return json({ ok: false, error: "Use POST." }, 405);
   }
@@ -109,7 +126,17 @@ Deno.serve(async (req: Request) => {
   }
 
   // Free any page a previous tick claimed and never finished.
-  await supabase.rpc("cartmatch_release_stale_pages").catch(() => undefined);
+  //
+  // try/catch rather than .catch(): a supabase-js query builder is PromiseLike
+  // and does not reliably carry a .catch method, so calling one throws a
+  // TypeError before the query is even sent — which is how this function
+  // answered 500 to every scheduled tick with nothing in the body to say why.
+  try {
+    await supabase.rpc("cartmatch_release_stale_pages");
+  } catch {
+    // Nothing to release, or the function is missing. Neither should stop a
+    // tick from doing the work it came for.
+  }
 
   const { data: queued, error: queueError } = await supabase
     .from("cartmatch_flyer_pages")
@@ -155,7 +182,7 @@ Deno.serve(async (req: Request) => {
     { ok: true, build: FUNCTION_BUILD, processed: results.length, results },
     200,
   );
-});
+}
 
 async function readOnePage(
   supabase: ReturnType<typeof createClient>,
@@ -273,13 +300,20 @@ async function readOnePage(
 
     // The flyer's own tally, so the home screen can say how much is read
     // without counting rows on every visit.
-    await supabase.rpc("cartmatch_recount_flyer", { flyer: flyerId }).catch(
-      () => undefined,
-    );
+    try {
+      await supabase.rpc("cartmatch_recount_flyer", { flyer: flyerId });
+    } catch {
+      // The tally is a convenience for the home screen; the offers are already
+      // saved, and a failed recount must not fail a page that was read.
+    }
 
     // The extraction-sized image has done its job. The proof-sized copy is a
     // separate object and stays for the till.
-    await supabase.storage.from(FLYER_BUCKET).remove([path]).catch(() => undefined);
+    try {
+      await supabase.storage.from(FLYER_BUCKET).remove([path]);
+    } catch {
+      // A leftover extraction image costs storage and nothing else.
+    }
 
     return { page: pageNumber, ok: true, offers: offers.length, model: used };
   } catch (err) {
