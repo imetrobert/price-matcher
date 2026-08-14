@@ -41,7 +41,54 @@ function splitDataUrl(dataUrl: string): { base64: string; mimeType: string } {
   return { mimeType: match[1] ?? "image/jpeg", base64: match[2] ?? "" };
 }
 
+/**
+ * How long to wait before asking again, per attempt.
+ *
+ * Widening, because a demand spike lasts longer than a moment and hammering it
+ * every two seconds is both rude and unhelpful. Four attempts spanning about
+ * half a minute covers the spikes seen so far without leaving someone staring
+ * at a phone indefinitely — and a page that is still refused after that is
+ * reported as refused rather than retried forever.
+ */
+const OVERLOAD_BACKOFF_MS = [2_000, 6_000, 15_000];
+
+function wait(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+/**
+ * Read one page, waiting out a busy model rather than giving up on it.
+ *
+ * The first real run lost pages 3 to 7 of eight to "this model is currently
+ * experiencing high demand" — a transient condition that says nothing about
+ * the flyer, recorded as five unreadable pages. Choosing a quieter model helps
+ * and does not fix it; waiting does.
+ *
+ * Only overload is retried. A malformed page, a bad key or a wrong model would
+ * fail identically however many times it is asked, and retrying those would
+ * turn one clear error into four slow ones.
+ */
 export async function readFlyerPage(
+  page: RenderedFlyerPage,
+  signal?: AbortSignal,
+): Promise<ReadPageOutcome> {
+  for (let attempt = 0; ; attempt++) {
+    const outcome = await readFlyerPageOnce(page);
+    if (outcome.ok) return outcome;
+    if (outcome.code !== "OVERLOADED") return outcome;
+    if (attempt >= OVERLOAD_BACKOFF_MS.length) return outcome;
+    if (signal?.aborted) return outcome;
+    await wait(OVERLOAD_BACKOFF_MS[attempt]!, signal);
+  }
+}
+
+async function readFlyerPageOnce(
   page: RenderedFlyerPage,
 ): Promise<ReadPageOutcome> {
   if (!supabaseConfigured()) {
@@ -75,11 +122,13 @@ export async function readFlyerPage(
       return {
         ok: false,
         code:
-          res.status === 401
-            ? "NOT_SIGNED_IN"
-            : res.status === 403
-              ? "NOT_AUTHORIZED"
-              : "API_ERROR",
+          data?.code === "OVERLOADED"
+            ? "OVERLOADED"
+            : res.status === 401
+              ? "NOT_SIGNED_IN"
+              : res.status === 403
+                ? "NOT_AUTHORIZED"
+                : "API_ERROR",
         error: data?.error ?? `Reading page ${page.pageNumber} failed (HTTP ${res.status}).`,
       };
     }
@@ -156,7 +205,7 @@ export async function readFlyerPages(
       offersSoFar: offers.length,
     });
 
-    const outcome = await readFlyerPage(page);
+    const outcome = await readFlyerPage(page, options.signal);
     if (!outcome.ok) {
       failedPages.push({ pageNumber: page.pageNumber, error: outcome.error });
       // A stale function or a lost session will fail identically on every
@@ -164,6 +213,10 @@ export async function readFlyerPages(
       if (outcome.code === "STALE_FUNCTION" || outcome.code === "NOT_SIGNED_IN") {
         break;
       }
+      // Still busy after every retry. Grinding through eleven more pages to
+      // collect eleven more copies of "the model is busy" wastes the person's
+      // time and the retailer's nothing; stop and say so once.
+      if (outcome.code === "OVERLOADED") break;
       continue;
     }
     offers.push(...outcome.offers);

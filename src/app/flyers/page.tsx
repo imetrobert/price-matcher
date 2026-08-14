@@ -262,6 +262,10 @@ function FlyerImport() {
                 <Spinner
                   label={`Reading page ${reading.page} of ${reading.pageCount} — ${reading.offersSoFar} offers so far…`}
                 />
+                <p className="mt-2 text-xs text-muted">
+                  A page can pause here for up to half a minute if the model is
+                  busy. It waits and asks again rather than skipping the page.
+                </p>
               </div>
             ) : (
               <button type="button" className="btn-primary" onClick={() => void runRead()}>

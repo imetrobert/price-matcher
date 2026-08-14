@@ -546,6 +546,27 @@ Deno.serve(async (req: Request) => {
         );
       }
 
+      // Busy is not broken. 503 means the model is under load and 429 means
+      // this key is going too fast; both are answered by waiting, and neither
+      // says anything about the page. Labelled so the caller can retry rather
+      // than record a page as unreadable — a flyer that loses five pages of
+      // eight to a passing spike is a flyer nobody can shop from.
+      if (res.status === 503 || res.status === 429) {
+        return json(
+          {
+            ok: false,
+            code: "OVERLOADED",
+            retryAfterSeconds: Number(res.headers.get("retry-after") ?? "") || null,
+            error:
+              res.status === 503
+                ? `The ${model} model is busy right now.`
+                : `Sending pages faster than this key is allowed.`,
+          },
+          503,
+          origin,
+        );
+      }
+
       return json(
         {
           ok: false,
