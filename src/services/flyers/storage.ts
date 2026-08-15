@@ -762,6 +762,92 @@ function readStoredBox(value: unknown): [number, number, number, number] | null 
   return [ymin, xmin, ymax, xmax];
 }
 
+/**
+ * How much a flyer would take with it.
+ *
+ * Asked before deleting rather than after, because "delete Metro" and "delete
+ * 7 pages and 84 offers" are different decisions and only the second one can
+ * be made knowingly.
+ */
+export async function flyerContents(
+  flyerId: string,
+): Promise<{ pages: number; offers: number }> {
+  const supabase = client();
+  if (!supabase) return { pages: 0, offers: 0 };
+
+  const [pages, offers] = await Promise.all([
+    supabase
+      .from("cartmatch_flyer_pages")
+      .select("id", { count: "exact", head: true })
+      .eq("flyer_id", flyerId),
+    supabase
+      .from("cartmatch_flyer_offers")
+      .select("id", { count: "exact", head: true })
+      .eq("flyer_id", flyerId),
+  ]);
+
+  return { pages: pages.count ?? 0, offers: offers.count ?? 0 };
+}
+
+/**
+ * Remove a flyer entirely: its offers, its queued pages and its pictures.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS EXISTS
+ * ---------------------------------------------------------------------------
+ * Not every PDF a store publishes is a price list. A recipe booklet, a pharmacy
+ * insert, last week's file picked by mistake — each imports happily and then
+ * contributes to comparisons, because nothing downstream can tell that the
+ * prices came from the wrong document. Re-importing does not help: a different
+ * file gets a different flyer id and the wrong one stays.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT IS ACTUALLY DELETED
+ * ---------------------------------------------------------------------------
+ * Everything, and the pictures first. Offers and queued pages cascade from the
+ * flyer row, but object storage does not: deleting the row alone would leave
+ * the pictures behind with nothing left that knows their names — the same
+ * orphan the purge was written to collect, created deliberately.
+ *
+ * So the images go first and the row goes last. A failure part-way leaves a
+ * flyer whose pictures are gone, which the screens already handle by naming
+ * the source PDF instead. The reverse order would leave files nothing can
+ * reach.
+ */
+export async function deleteFlyer(
+  flyerId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const supabase = client();
+  if (!supabase) return { ok: false, error: "Storage is not configured." };
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth?.user?.id;
+  if (!userId) return { ok: false, error: "Sign in first." };
+
+  // Whatever is actually in there, rather than a page count that may be wrong.
+  const { data: files } = await supabase.storage
+    .from(FLYER_BUCKET)
+    .list(`${userId}/${flyerId}`, { limit: 500 });
+
+  if (files && files.length > 0) {
+    await supabase.storage
+      .from(FLYER_BUCKET)
+      .remove(files.map((f) => `${userId}/${flyerId}/${f.name}`));
+  }
+
+  // Explicit rather than relying on the cascade alone: RLS applies to these
+  // deletes, and a row this user cannot delete should fail here where it can
+  // be reported, not silently survive a cascade.
+  await supabase.from("cartmatch_flyer_offers").delete().eq("flyer_id", flyerId);
+  await supabase.from("cartmatch_flyer_pages").delete().eq("flyer_id", flyerId);
+
+  const { error } = await supabase
+    .from("cartmatch_flyers")
+    .delete()
+    .eq("id", flyerId);
+
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
 /** Every flyer held, current or not — for the management screen. */
 export async function loadAllFlyers(): Promise<StoredFlyer[]> {
   const supabase = client();

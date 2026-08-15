@@ -141,6 +141,21 @@ from public.cartmatch_flyers f
 where f.valid_to >= current_date order by f.retailer_id;
 ```
 
+### The wrong PDF was imported
+
+Not every file a store publishes is a price list — a recipe booklet, a
+pharmacy insert, last week's file picked by mistake. Each imports happily and
+then feeds comparisons, because nothing downstream can tell that the prices
+came from the wrong document. Re-importing does not help: a different file
+gets a different flyer id and the wrong one stays.
+
+Open **Import this week's flyers**, find it under "Flyers you already hold",
+and press the **×**. It asks once, naming how many offers and pages will go,
+and removes the offers, the queued pages and the pictures together.
+
+A tell that a flyer is the wrong document: a page count far from the others.
+A weekly circular runs sixteen or seventeen pages; seven is usually a booklet.
+
 ### An offer's price is wrong
 
 Open **`/confirm`** from the deals screen. It queues the offers a comparison

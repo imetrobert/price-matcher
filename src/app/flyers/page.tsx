@@ -43,6 +43,8 @@ import {
   type BatchItem,
 } from "@/services/flyers/batch";
 import {
+  deleteFlyer,
+  flyerContents,
   loadAllFlyers,
   type StoredFlyer,
   measureStoredPages,
@@ -156,7 +158,13 @@ function FlyerImport() {
         backHref="/"
       />
 
-      <HeldFlyers flyers={held} />
+      <HeldFlyers
+        flyers={held}
+        onRemoved={() => {
+          void loadAllFlyers().then(setHeld).catch(() => undefined);
+          void measureStoredPages().then(setUsage).catch(() => undefined);
+        }}
+      />
 
       <section className="card mb-4">
         <label className="mb-1 block text-sm font-semibold" htmlFor="pdfs">
@@ -773,7 +781,13 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function HeldFlyers({ flyers }: { flyers: StoredFlyer[] | null }) {
+function HeldFlyers({
+  flyers,
+  onRemoved,
+}: {
+  flyers: StoredFlyer[] | null;
+  onRemoved: () => void;
+}) {
   const today = todayIso();
 
   if (flyers === null) return null;
@@ -806,7 +820,7 @@ function HeldFlyers({ flyers }: { flyers: StoredFlyer[] | null }) {
       ) : (
         <div className="mt-3 space-y-1">
           {current.map((f) => (
-            <HeldFlyerRow key={f.id} flyer={f} today={today} />
+            <HeldFlyerRow key={f.id} flyer={f} today={today} onRemoved={onRemoved} />
           ))}
         </div>
       )}
@@ -817,7 +831,7 @@ function HeldFlyers({ flyers }: { flyers: StoredFlyer[] | null }) {
             Starts later
           </p>
           {upcoming.map((f) => (
-            <HeldFlyerRow key={f.id} flyer={f} today={today} />
+            <HeldFlyerRow key={f.id} flyer={f} today={today} onRemoved={onRemoved} />
           ))}
         </div>
       ) : null}
@@ -830,7 +844,7 @@ function HeldFlyers({ flyers }: { flyers: StoredFlyer[] | null }) {
           </summary>
           <div className="mt-1 space-y-1">
             {expired.map((f) => (
-              <HeldFlyerRow key={f.id} flyer={f} today={today} />
+              <HeldFlyerRow key={f.id} flyer={f} today={today} onRemoved={onRemoved} />
             ))}
           </div>
           <p className="mt-1 text-xs text-muted">
@@ -843,28 +857,100 @@ function HeldFlyers({ flyers }: { flyers: StoredFlyer[] | null }) {
   );
 }
 
-function HeldFlyerRow({ flyer, today }: { flyer: StoredFlyer; today: string }) {
+function HeldFlyerRow({
+  flyer,
+  today,
+  onRemoved,
+}: {
+  flyer: StoredFlyer;
+  today: string;
+  onRemoved: () => void;
+}) {
   const live = flyer.validFrom <= today && today <= flyer.validTo;
   const complete = flyer.pagesRead >= flyer.pageCount;
 
+  // Two taps, and the second one says what it is about to destroy.
+  //
+  // Not every PDF a store publishes is a price list — a recipe booklet, a
+  // pharmacy insert, last week's file picked by mistake. Each imports happily
+  // and then feeds comparisons, because nothing downstream can tell the prices
+  // came from the wrong document. So removing one has to be possible.
+  //
+  // It also cannot be undone: the offers go, the pictures go, and getting them
+  // back means importing the PDF again. Hence the count in the confirmation —
+  // "delete Metro" and "delete 7 pages and 84 offers" are different decisions,
+  // and only the second can be made knowingly.
+  const [confirming, setConfirming] = useState(false);
+  const [contents, setContents] = useState<{ pages: number; offers: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const ask = async () => {
+    setConfirming(true);
+    setContents(await flyerContents(flyer.id));
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    setError(null);
+    const result = await deleteFlyer(flyer.id);
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    onRemoved();
+  };
+
   return (
-    <p className="flex flex-wrap items-baseline justify-between gap-x-3 border-b border-line py-1 text-sm last:border-0">
-      <span className="font-semibold">
-        {RETAILERS[flyer.retailerId]?.displayName ?? flyer.retailerId}
-      </span>
-      <span className={live ? "text-xs text-muted" : "text-xs text-muted line-through"}>
-        {readableDay(flyer.validFrom)} – {readableDay(flyer.validTo)}
-      </span>
-      {/*
-        Pages read against pages held, because a flyer can be current and
-        still be missing most of its offers — and on this screen that is
-        actionable: it is the one place a re-import happens.
-      */}
-      <span className={complete ? "text-xs text-good" : "text-xs text-warn"}>
-        {complete
-          ? `all ${flyer.pageCount} pages`
-          : `${flyer.pagesRead} of ${flyer.pageCount} pages`}
-      </span>
-    </p>
+    <div className="border-b border-line py-1 last:border-0">
+      <p className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
+        <span className="font-semibold">
+          {RETAILERS[flyer.retailerId]?.displayName ?? flyer.retailerId}
+        </span>
+        <span className={live ? "text-xs text-muted" : "text-xs text-muted line-through"}>
+          {readableDay(flyer.validFrom)} – {readableDay(flyer.validTo)}
+        </span>
+        {/*
+          Pages read against pages held, because a flyer can be current and
+          still be missing most of its offers — and on this screen that is
+          actionable: it is the one place a re-import happens.
+        */}
+        <span className={complete ? "text-xs text-good" : "text-xs text-warn"}>
+          {complete
+            ? `all ${flyer.pageCount} pages`
+            : `${flyer.pagesRead} of ${flyer.pageCount} pages`}
+        </span>
+        <button
+          type="button"
+          onClick={() => (confirming ? setConfirming(false) : void ask())}
+          className="shrink-0 px-2 text-sm font-bold text-muted"
+          aria-label={`Remove the ${RETAILERS[flyer.retailerId]?.displayName ?? flyer.retailerId} flyer`}
+        >
+          {confirming ? "Cancel" : "\u00d7"}
+        </button>
+      </p>
+
+      {confirming ? (
+        <div className="mt-1 rounded-md bg-warn/10 p-2 text-xs">
+          <p className="text-warn">
+            Remove this flyer and everything read from it
+            {contents
+              ? ` — ${contents.offers} offer${contents.offers === 1 ? "" : "s"} and ${contents.pages} page${contents.pages === 1 ? "" : "s"}`
+              : ""}
+            ? It cannot be undone; importing the PDF again is the only way back.
+          </p>
+          {error ? <p className="mt-1 text-bad">{error}</p> : null}
+          <button
+            type="button"
+            onClick={() => void remove()}
+            disabled={busy}
+            className="btn-secondary mt-2 disabled:opacity-50"
+          >
+            {busy ? "Removing…" : "Yes, remove it"}
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
