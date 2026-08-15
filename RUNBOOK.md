@@ -305,6 +305,28 @@ explaining that you open a flyer and press its PDF button. That link is one
 line in `src/components/WhereToGetFlyers.tsx` (`RADDAR_URL`) — change it there
 if a better source turns up.
 
+### Pasting links instead of downloading
+
+The import screen has "Or paste links to the PDFs" under the file picker. One
+https link per line, up to six. Each is fetched by the **`cartmatch-flyer-fetch`**
+Edge Function — the browser cannot do it, because this is a static site and no
+flyer host sends CORS headers for another domain — and what comes back becomes
+a file named from the link's last path segment. Everything after that is
+identical to choosing a file, store and date inference included.
+
+**If a link fails**, the message names the file and the reason:
+
+| Message | What it means |
+|---|---|
+| "did not return a PDF" | The link goes to a viewer page, not the file. Use the link the PDF button itself opens. |
+| "not one of the known flyer sites" | Members are limited to `FLYER_HOSTS` in `supabase/functions/_shared/pdfUrl.ts`. You hold app_admin, so any https link works for you. |
+| "not reachable from here" | A private or loopback address. Refused for everybody, admin included, on purpose. |
+| HTTP 404 or 403 | The link has expired — flyer URLs carry version suffixes that change weekly. Get a fresh one. |
+
+Nothing is polled, crawled or fetched on a schedule: it fetches one document
+when you press the button, which is the same document you could download by
+clicking the link yourself.
+
 The picture in that panel is a **drawing** of raddar's button bar, not a
 screenshot, so it cannot break by being edited and carries none of their
 artwork. To use a real screenshot instead: commit an image at

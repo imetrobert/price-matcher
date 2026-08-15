@@ -33,6 +33,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Notice, PageHeader } from "@/components/ui";
 import { WhereToGetFlyers } from "@/components/WhereToGetFlyers";
+import { fetchFlyerByUrl, splitUrls } from "@/services/flyers/fetchByUrl";
 import { RETAILERS } from "@/config/retailers";
 import { formatCents } from "@/lib/money";
 import {
@@ -76,6 +77,9 @@ function FlyerImport() {
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [usage, setUsage] = useState<StorageUsage | null>(null);
   const [held, setHeld] = useState<StoredFlyer[] | null>(null);
+  const [urls, setUrls] = useState("");
+  const [urlError, setUrlError] = useState<string | null>(null);
+  const [fetching, setFetching] = useState<{ done: number; total: number } | null>(null);
   // Why the held list could not be read, when it could not. Distinct from an
   // empty list, which invites the opposite action.
   const [heldError, setHeldError] = useState<string | null>(null);
@@ -111,13 +115,49 @@ function FlyerImport() {
       );
   }, []);
 
-  const onFiles = useCallback((files: FileList) => {
+  const onFiles = useCallback((files: File[]) => {
     abortRef.current?.abort();
-    setItems([...files].map((file, i) => newBatchItem(file, i)));
+    setItems(files.map((file, i) => newBatchItem(file, i)));
     setFinishedAt(null);
     setStartedAt(null);
     setOverlayDismissed(false);
   }, []);
+
+  /**
+   * Fetch pasted links, then hand the results to `onFiles` unchanged.
+   *
+   * The whole design of this feature is that one line down, a link and a
+   * chosen file are the same thing. Nothing after this point knows the
+   * difference — the store and the week still come out of the filename, the
+   * duplicate check still runs, the overlay still reports the same outcome.
+   */
+  const onUrls = useCallback(async () => {
+    const links = splitUrls(urls);
+    if (links.length === 0) {
+      setUrlError("Paste at least one https:// link to a PDF.");
+      return;
+    }
+    setUrlError(null);
+    setFetching({ done: 0, total: links.length });
+
+    const files: File[] = [];
+    const failures: string[] = [];
+    for (const [i, link] of links.entries()) {
+      setFetching({ done: i, total: links.length });
+      const got = await fetchFlyerByUrl(link);
+      if (got.ok) files.push(got.file);
+      else failures.push(`${shortLink(link)} — ${got.error}`);
+    }
+    setFetching(null);
+
+    // Partial success is the common case with six links and one typo, and it
+    // must not throw away the five that worked.
+    setUrlError(failures.length > 0 ? failures.join("\n") : null);
+    if (files.length > 0) {
+      onFiles(files);
+      setUrls("");
+    }
+  }, [urls, onFiles]);
 
   const start = useCallback(async () => {
     const controller = new AbortController();
@@ -488,13 +528,73 @@ function FlyerImport() {
           disabled={running}
           className="field w-full"
           onChange={(e) => {
-            if (e.target.files?.length) onFiles(e.target.files);
+            if (e.target.files?.length) onFiles([...e.target.files]);
           }}
         />
         <p className="mt-2 text-xs text-muted">
           Select all of them together. The files stay on this device — only the
           rendered pages are sent, one at a time, to be read.
         </p>
+
+        {/*
+          The other way in.
+
+          Downloading a PDF only to hand it straight back is half a job nobody
+          needs to do — the link is already in your hand. The browser cannot
+          fetch it (this is a static site and no flyer host sends CORS headers
+          for another domain), so a small Edge Function does, and what comes
+          back becomes a File. Everything below this point is unchanged: same
+          store and date inference from the filename, same duplicate check,
+          same overlay.
+        */}
+        <details className="mt-4 rounded-lg border border-line p-3">
+          <summary className="cursor-pointer text-sm font-semibold">
+            Or paste links to the PDFs
+          </summary>
+
+          <label className="mt-3 block text-xs text-muted" htmlFor="pdf-urls">
+            One https:// link per line, up to six. The link must be to the PDF
+            itself — on raddar, that is where the PDF button takes you.
+          </label>
+          <textarea
+            id="pdf-urls"
+            className="field mt-1 w-full font-mono text-xs"
+            rows={4}
+            value={urls}
+            disabled={running || fetching !== null}
+            placeholder={"https://raddar.ca/.../maxi-wk33.pdf\nhttps://raddar.ca/.../iga-wk33.pdf"}
+            onChange={(e) => setUrls(e.target.value)}
+          />
+
+          <button
+            type="button"
+            className="btn-secondary mt-2"
+            disabled={running || fetching !== null || urls.trim() === ""}
+            onClick={() => void onUrls()}
+          >
+            {fetching
+              ? `Fetching ${fetching.done + 1} of ${fetching.total}…`
+              : "Fetch these links"}
+          </button>
+
+          {urlError ? (
+            <div className="mt-2">
+              <Notice tone="warn" title="Some links could not be fetched">
+                {/*
+                  Each failure on its own line, named by its file. With six
+                  links and one typo, "it failed" is not a usable answer.
+                */}
+                <span className="whitespace-pre-line">{urlError}</span>
+              </Notice>
+            </div>
+          ) : null}
+
+          <p className="mt-2 text-xs text-muted">
+            Fetched one at a time, only when you press the button — nothing is
+            polled, crawled or downloaded on a schedule. Links from sites other
+            than the known flyer ones need an admin account.
+          </p>
+        </details>
 
         {/*
           Handing over the same file twice is usually not noticing it was
@@ -1295,4 +1395,15 @@ function HeldFlyerRow({
       ) : null}
     </div>
   );
+}
+
+/** A link at a glance: the filename, or the host when there is not one. */
+function shortLink(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const last = parsed.pathname.split("/").filter(Boolean).pop();
+    return last && last.length <= 40 ? last : parsed.hostname;
+  } catch {
+    return url.slice(0, 40);
+  }
 }
