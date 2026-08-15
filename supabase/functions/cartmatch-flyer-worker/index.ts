@@ -52,7 +52,7 @@ import { FLYER_PROMPT, FLYER_SCHEMA } from "../_shared/flyerPrompt.ts";
 
 /** Which build answered. Same reason as the other functions: a silent stale
  *  deploy is indistinguishable from a working one until you check. */
-const FUNCTION_BUILD = "2026-08-15-worker-13";
+const FUNCTION_BUILD = "2026-08-15-worker-14";
 
 /**
  * Pages per tick.
@@ -182,12 +182,33 @@ async function handle(req: Request): Promise<Response> {
   const used = await requestsToday(supabase);
   const models = affordableModels(configured, used);
   if (models.length === 0) {
+    // Say so on the pages themselves, not only in this reply.
+    //
+    // Holding leaves them PENDING, which is correct — they will be read when
+    // the allowance resets. But PENDING with nothing recorded is precisely the
+    // shape the home card reads as "still working": a spinner over a queue
+    // that will not move until tomorrow, with no reason on screen. That exact
+    // failure cost an evening once already, and it must not be reintroduced by
+    // the mechanism built to prevent a different one.
+    //
+    // Attempts and status are untouched. This is a note, not a verdict.
+    const reason =
+      "Today's model allowance is reserved for scanning. Reading resumes when it resets (midnight Pacific).";
+    try {
+      await supabase
+        .from("cartmatch_flyer_pages")
+        .update({ last_error: reason, errored_at: new Date().toISOString() })
+        .in("id", queued.map((p) => p.id));
+    } catch {
+      // The reply below still carries the reason.
+    }
+
     return json(
       {
         ok: true,
         build: FUNCTION_BUILD,
         processed: 0,
-        note: "Held: every model is at its worker ceiling for today. The rest of each allowance is kept for scanning.",
+        note: reason,
         used,
         ceilings: Object.fromEntries(configured.map((m) => [m, workerCeiling(m)])),
       },
