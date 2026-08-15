@@ -318,6 +318,43 @@ PDF, and any PDF from anywhere imports the same way.
 
 ---
 
+## Getting help from an AI without a code assistant
+
+The repository is public, so an assistant can read any file itself. Open a
+**new conversation** and start with one line:
+
+> Read https://raw.githubusercontent.com/imetrobert/price-matcher/main/AI-BRIEF.md
+> then help me with this. [paste the exact error text]
+
+`AI-BRIEF.md` is written for that purpose: stack, rules, file map, and how a
+fix has to be shaped to be applied from a phone.
+
+**The four things that decide how far a limited allowance goes:**
+
+1. **Start a new conversation for each problem.** A chat re-sends its entire
+   history on every message, so a long thread costs more with each turn while
+   adding nothing. This is the single biggest waste.
+2. **Give the URL, not the file.** `storage.ts` is 1,100 lines and
+   `flyers/page.tsx` is 1,300. Pasting either can cost a day's allowance;
+   linking costs one line. Raw URLs look like
+   `https://raw.githubusercontent.com/imetrobert/price-matcher/main/src/services/flyers/storage.ts`
+3. **Paste error text, not screenshots.** A screenshot costs far more than the
+   sentence it contains, and the text is what matters.
+4. **Ask for the smallest edit that fixes it** — file name, the lines to
+   replace, the replacement. Refuse a whole-file rewrite: it cannot be applied
+   from a phone and it is where new bugs come from.
+
+**Before asking at all**, check the symptom table at the top of this file. Most
+of what has gone wrong so far is answered there with no assistant involved.
+
+**Whatever the fix, CI is the check.** Push to `main`, then watch the Actions
+tab. Typecheck, 448 tests, the env check, the build and the secret scan all run
+before anything deploys, so a bad suggestion fails the build rather than
+reaching a shopper. If the site does not change within ~3 minutes, the build
+failed — open the run and read the first red step.
+
+---
+
 ## Undoing a change that broke something
 
 You do not need a computer, a terminal or a checkout. Everything deploys from
