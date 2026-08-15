@@ -201,8 +201,9 @@ To start it again: the `cron.schedule` block above.
    with a progress bar. The PDFs are being read on this device and have not
    been sent yet, so closing during that loses the render and the files need
    handing over again. The browser will also ask before you leave.
-4. Once the uploads finish the overlay goes and the tab is free — reading
-   carries on server-side whether or not anything is watching.
+4. When the uploads land, the overlay says so — "you can close this tab now" —
+   and offers the home screen. It does not simply disappear, so there is
+   nothing to watch for and nothing to guess.
 5. The home card shows progress and says when it is done, with the dates the
    flyers cover and how many days are left.
 6. Before shopping: **Compare flyer savings**, or scan the cart in the shop.

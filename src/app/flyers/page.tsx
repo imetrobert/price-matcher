@@ -195,18 +195,52 @@ function FlyerImport() {
       />
 
       {/*
-        Held over the screen while the browser half runs.
+        Two overlays, and the second one is the point.
 
-        Not decoration and not a lock — a page cannot prevent a tab closing,
-        which is what the beforeunload handler above is for. This is the
-        explanation that handler cannot give: what is happening, how far along
-        it is, and the one sentence somebody actually needs, which is that this
-        wait ends and then the tab is free.
+        The first is held over the screen while the browser half runs, because
+        that half genuinely cannot be interrupted: the PDFs are rendered on
+        this device and have not been sent, so a tab closed here loses the work.
 
-        Dismissable on purpose. Somebody who wants to look at the list of
-        flyers underneath while it runs should be able to, and blocking that
-        would be the page insisting on its own importance.
+        The second says when that stops being true. An overlay that simply
+        vanishes leaves somebody guessing whether the silence means finished or
+        broken — and guessing wrong in the safe direction means sitting in
+        front of a screen for no reason, which is the cost this whole design is
+        supposed to remove. So the moment the uploads land it says so, plainly,
+        and offers the way out.
+
+        Both are dismissable. Somebody who wants to read the list of held
+        flyers underneath should be able to, and the beforeunload handler is
+        what actually guards the unsafe window regardless of what is drawn.
       */}
+      {!running && finishedAt !== null && !overlayDismissed ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="card w-full max-w-[420px] border border-good/40">
+            <p className="flex items-center gap-2 text-lg font-extrabold text-good">
+              <span aria-hidden>✓</span> Uploaded — you can close this tab now
+            </p>
+            <p className="mt-2 text-sm text-muted">
+              Everything is on the server. The pages are read there from here
+              on, whether or not this tab is open, and nothing is lost by
+              leaving.
+            </p>
+            <p className="mt-2 text-sm text-muted">
+              The home screen shows how far the reading has got, and says when
+              it is done.
+            </p>
+            <Link href="/" className="btn-primary mt-3">
+              Go to the home screen
+            </Link>
+            <button
+              type="button"
+              className="btn-ghost mt-2"
+              onClick={() => setOverlayDismissed(true)}
+            >
+              Stay here and see what was read
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {running && !overlayDismissed ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="card w-full max-w-[420px]">
@@ -257,8 +291,8 @@ function FlyerImport() {
             ) : null}
 
             <p className="mt-3 rounded-md bg-good/10 p-2 text-xs text-good">
-              When this finishes you can close the tab. The reading carries on
-              server-side, and the home screen shows how far it has got.
+              This message will change the moment it is safe to leave — you do
+              not have to watch for it or guess.
             </p>
 
             <button
