@@ -21,17 +21,23 @@
  * ---------------------------------------------------------------------------
  * WHY THESE NUMBERS
  * ---------------------------------------------------------------------------
- * 1280px on the long edge and JPEG quality 0.72 lands around 150–300 KB — a
- * fiftieth of the original — and is comfortably enough to read a brand and a
- * package size off a product facing the camera. It is NOT enough to read fine
- * print on a nutrition panel, which nothing here asks for.
+ * 1600px on the long edge and JPEG quality 0.72 lands around 250–350 KB — a
+ * tenth of the original at worst — and is enough to read a brand, a flavour
+ * and, with luck, the printed weight. It is NOT enough for a nutrition panel,
+ * which nothing here asks for.
+ *
+ * It started at 1280px, which fixed the timeouts and left package sizes
+ * unreadable. Since a product with no size cannot be matched to a flyer at
+ * all, unreadable sizes are not a cosmetic loss — they are the comparison
+ * failing quietly. The extra 100 KB buys back the field the whole match turns
+ * on, and is still an order of magnitude below the 3–4 MB that was timing out.
  *
  * The retry size is smaller again, for the one case where the first attempt
  * timed out anyway: a worse photo that arrives beats a better one that does
  * not.
  */
 
-export const VISION_MAX_EDGE = 1280;
+export const VISION_MAX_EDGE = 1600;
 export const VISION_QUALITY = 0.72;
 
 /** Second attempt, when the first timed out. Smaller and cheaper. */

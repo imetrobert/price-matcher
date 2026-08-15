@@ -99,6 +99,16 @@ export interface DetectedProduct {
   variant: string | null;
   fatPercentage: string | null;
   size: string | null;
+  /**
+   * A size the model proposed because it could not read one.
+   *
+   * Never used by matching and never copied into `size` by the app. It is
+   * shown as a suggestion with its basis, and becomes real only when a person
+   * accepts it — at which point it is their reading, not the model's guess.
+   */
+  sizeGuess: string | null;
+  /** How it arrived at the guess: partial_label, dimensions, typical. */
+  sizeGuessBasis: string | null;
   packageQuantity: number | null;
   visibleUpc: string | null;
   language: string | null;

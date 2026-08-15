@@ -701,12 +701,18 @@ function ConfirmCard({
             value={item.variant ?? ""}
             onChange={(v) => onChange({ variant: v || null })}
           />
-          <Field
-            label="Size"
-            value={item.size ?? ""}
-            onChange={(v) => onChange({ size: v || null })}
-            placeholder="650 g"
-          />
+          <div>
+            <Field
+              label="Size"
+              value={item.size ?? ""}
+              onChange={(v) => onChange({ size: v || null })}
+              // Not a plausible size. A grey "650 g" in an empty box reads as
+              // a value at a glance, which is the worst thing a placeholder
+              // can do on a screen about not inventing numbers.
+              placeholder="type what the label says"
+            />
+            <SizeHelp item={item} onUse={(size) => onChange({ size })} />
+          </div>
           <Field
             label="Qty in cart"
             value={String(item.packageQuantity ?? 1)}
@@ -1402,4 +1408,88 @@ function StartOver({ count, onConfirm }: { count: number; onConfirm: () => void 
       </div>
     </div>
   );
+}
+
+/**
+ * What to do about a size nobody read.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS WORTH A WHOLE COMPONENT
+ * ---------------------------------------------------------------------------
+ * A blank size is not a cosmetic gap. Matching needs a score of 90; with the
+ * size unknown on either side the best available rung is the fuzzy one, capped
+ * at 70. So an item with no size CANNOT match a flyer, ever — it silently
+ * drops out of every comparison, and the screen used to say nothing at all
+ * about it. That is the single likeliest reason a full trolley comes back with
+ * two results.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE SUGGESTION IS NOT SIMPLY FILLED IN
+ * ---------------------------------------------------------------------------
+ * Because a wrong size does not fail safely. "650 g" accepted against a
+ * flyer's 750 g tub is a confident match on the wrong product, carried to a
+ * till with a page number attached. So the guess is shown with what it rests
+ * on and stays out of `size` until somebody says otherwise — and once they do,
+ * it is their reading rather than the model's guess.
+ *
+ * The basis matters more than the number. "Some of the label is legible" and
+ * "this brand usually sells 650 g" are different kinds of claim, and a person
+ * deciding whether to trust it should be told which one they are looking at.
+ */
+function SizeHelp({
+  item,
+  onUse,
+}: {
+  item: EditableItem;
+  onUse: (size: string) => void;
+}) {
+  if (item.size) return null;
+
+  const basis = describeSizeBasis(item.sizeGuessBasis);
+
+  return (
+    <div className="mt-1 rounded-md bg-warn/10 p-2 text-xs">
+      <p className="text-warn">
+        <span className="font-semibold">No size, no match.</span> Flyer prices
+        are matched on brand, name and size — without one this item is left out
+        of the comparison entirely.
+      </p>
+
+      {item.sizeGuess ? (
+        <div className="mt-2">
+          <p>
+            <span className="font-semibold">Suggested {item.sizeGuess}</span>
+            {basis ? ` — ${basis}.` : "."} Not read from your photo.
+          </p>
+          <button
+            type="button"
+            className="btn-secondary mt-1"
+            onClick={() => onUse(item.sizeGuess!)}
+          >
+            Use {item.sizeGuess}
+          </button>
+        </div>
+      ) : (
+        <p className="mt-1">
+          Nothing to suggest — the label was not legible and the package was not
+          recognisable. Type it from the tub.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The basis, as a sentence rather than a token.
+ *
+ * Ordered strongest first, matching the order the model was asked to report
+ * them in, so the first clause a person reads is the best reason there is.
+ */
+function describeSizeBasis(basis: string | null): string | null {
+  if (!basis) return null;
+  const parts: string[] = [];
+  if (basis.includes("partial_label")) parts.push("part of the label is legible");
+  if (basis.includes("dimensions")) parts.push("judged from the package size in the photo");
+  if (basis.includes("typical")) parts.push("the size this product is usually sold in");
+  return parts.length > 0 ? parts.join(", ") : null;
 }

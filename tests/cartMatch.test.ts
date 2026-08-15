@@ -25,6 +25,8 @@ function item(patch: Partial<DetectedProduct> = {}): DetectedProduct {
     variant: null,
     fatPercentage: null,
     size: "2 L",
+    sizeGuess: null,
+    sizeGuessBasis: null,
     packageQuantity: 1,
     visibleUpc: null,
     language: "fr",
