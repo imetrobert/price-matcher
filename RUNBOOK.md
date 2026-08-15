@@ -108,9 +108,10 @@ allowance resets at **midnight Pacific**. Queued pages keep their attempts and
 are read when it does — nothing is lost by waiting.
 
 If it happens every week, the fix is fewer requests rather than more quota:
-set `CARTMATCH_PAGES_PER_REQUEST` to `3` (three pages per request) in Edge
-Function secrets. Setting it to `1` turns batching off if it ever produces bad
-readings.
+set `CARTMATCH_PAGES_PER_REQUEST` to `3` in Edge Function secrets, which sends
+three pages per request and cuts a week from about seventy requests to
+twenty-four. Do that when you can watch the result — compare the per-page
+offer counts against previous weeks and set it back to `1` if they drop.
 
 ### A scan fails but flyers read fine, or the reverse
 
@@ -135,7 +136,7 @@ invocation; no deploy needed.
 
 | Secret | Set it to | Effect |
 |---|---|---|
-| `CARTMATCH_PAGES_PER_REQUEST` | `1` | One page per request. Slower on quota, and the path that read 51 pages successfully. |
+| `CARTMATCH_PAGES_PER_REQUEST` | `3` | Three pages per request — cuts a week from ~70 requests to ~24. **Unproven.** Default is `1`, the path that read 51 pages successfully. |
 | `CARTMATCH_GEMINI_MODEL` | a single model id | Pins one model instead of walking the chain. Leave unset for the seven-model default. |
 | `CARTMATCH_WORKER_KEY` | a new value | Rotates the worker's key. **Must** be changed in the cron job at the same time. |
 
@@ -164,7 +165,9 @@ expires, and the purge runs whenever the import screen is opened.
 Written down so it is not mistaken for proven:
 
 - **Batching** (three pages per request). Every page so far was read singly,
-  because they had all used an attempt before batching shipped.
+  because they had all used an attempt before batching shipped. It is now OFF
+  by default for that reason: turn it on with
+  `CARTMATCH_PAGES_PER_REQUEST=3` when somebody can check the result.
 - **Splitting a tile that advertises two products** ("A ou B"). The instruction
   is in the prompt; no import has run under it.
 - **The request budget.** Requires `supabase/budget.sql`; the reservation has
@@ -173,6 +176,6 @@ Written down so it is not mistaken for proven:
   been scanned against it.
 
 If a Thursday import goes wrong in a way this runbook does not cover, the
-fastest recovery is to set `CARTMATCH_PAGES_PER_REQUEST=1`, delete the
-`cartmatch_api_usage` table, and re-import. That returns the system to the
-configuration that read 867 offers successfully.
+fastest recovery is to clear `CARTMATCH_PAGES_PER_REQUEST` (the default of 1
+is the safe one), drop the `cartmatch_api_usage` table, and re-import. That
+returns the system to the configuration that read 867 offers successfully.

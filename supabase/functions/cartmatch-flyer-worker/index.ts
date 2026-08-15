@@ -52,7 +52,7 @@ import { FLYER_PROMPT, FLYER_SCHEMA } from "../_shared/flyerPrompt.ts";
 
 /** Which build answered. Same reason as the other functions: a silent stale
  *  deploy is indistinguishable from a working one until you check. */
-const FUNCTION_BUILD = "2026-08-15-worker-14";
+const FUNCTION_BUILD = "2026-08-15-worker-15";
 
 /**
  * Pages per tick.
@@ -76,18 +76,32 @@ const MAX_ATTEMPTS = 5;
 /**
  * How many pages ride in one request.
  *
- * A week of five flyers is about seventy pages, and at one request per page
- * that is seventy requests against a per-model daily allowance. Three pages to
- * a request turns the same week into about twenty-four, without reading any
- * fewer pages — the throughput of a tick is unchanged, only the number of times
- * it knocks on the door.
+ * ---------------------------------------------------------------------------
+ * ONE BY DEFAULT, AND THE DEFAULT IS THE POINT
+ * ---------------------------------------------------------------------------
+ * Batching works: three pages to a request turns a week of about seventy pages
+ * from seventy requests into twenty-four, against a per-model allowance of
+ * twenty a day. The reply is checked rather than trusted — one group per page
+ * sent, labels matching exactly the pages sent, and the whole batch discarded
+ * if it cannot be aligned, because an offer filed under the wrong page number
+ * sends somebody to a page that does not carry the product.
  *
- * Only pages that have never been attempted are batched. Anything that has
- * already struggled is read alone, where the model has one page to think about
- * and a failure names one page rather than three. Set to 1 to turn batching off
- * entirely.
+ * It has also never run. Every page read so far was read singly: by the time
+ * batching shipped, each queued page had already spent an attempt, and pages
+ * that have struggled are deliberately read alone. So the code is tested and
+ * the behaviour is not, and those are different things.
+ *
+ * The default is therefore 1 — the path that read 867 offers across 51 pages
+ * without incident. It costs requests and nothing else: a hundred a day across
+ * the model chain against a week of seventy pages still fits, so the saving
+ * batching offers is headroom rather than necessity.
+ *
+ * Set CARTMATCH_PAGES_PER_REQUEST to 3 to turn it on, when somebody is around
+ * to compare the per-page offer counts against the singly-read ones and notice
+ * if they drop. Until then, an unproven optimisation that nobody is watching
+ * is a worse trade than the requests it saves.
  */
-const PAGES_PER_REQUEST = Number(Deno.env.get("CARTMATCH_PAGES_PER_REQUEST") ?? "3");
+const PAGES_PER_REQUEST = Number(Deno.env.get("CARTMATCH_PAGES_PER_REQUEST") ?? "1");
 
 /** See _shared/models.ts — one list, so the worker and the scan agree. */
 const DEFAULT_MODEL = DEFAULT_MODEL_CHAIN;
