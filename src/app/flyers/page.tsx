@@ -159,12 +159,30 @@ function FlyerImport() {
     return { queued, skipped, stuck };
   }, [items]);
 
-  /** The file being worked on, for the overlay. */
+  /**
+   * The file being worked on, and what the app currently believes about it.
+   *
+   * The store matters more than the filename here. It is inferred — from the
+   * name of the file, or from the logo a model read off page one — and it
+   * decides which banner the week's prices are filed under. Seeing "Adonis"
+   * appear while a flyer uploads is the difference between catching a wrong
+   * reading now and finding it on the deals screen on Saturday.
+   */
   const current = useMemo(() => {
     const busy = items.find(
       (i) => i.stage === "RENDERING" || i.stage === "READING",
     );
-    return busy ? `${busy.file.name} — ${busy.detail}` : null;
+    if (!busy) return null;
+    return {
+      name: busy.file.name,
+      detail: busy.detail,
+      store: busy.retailerId
+        ? (RETAILERS[busy.retailerId]?.displayName ?? busy.retailerId)
+        : null,
+      from: busy.retailerFrom,
+      dates:
+        busy.validFrom && busy.validTo ? `${busy.validFrom} – ${busy.validTo}` : null,
+    };
   }, [items]);
 
   /**
@@ -352,10 +370,56 @@ function FlyerImport() {
               />
             </div>
 
-            {/* Which file, so a long wait is legible rather than anonymous. */}
+            {/*
+              Which file, and what the app thinks it is. The store is the part
+              worth reading: it is inferred, and it decides which banner these
+              prices are filed under.
+            */}
             {current ? (
-              <p className="mt-2 truncate text-xs text-muted">{current}</p>
+              <div className="mt-3 rounded-md bg-surface p-2 text-xs">
+                <p className="truncate font-semibold">{current.name}</p>
+                <p className="mt-1 text-muted">{current.detail}</p>
+                <p className="mt-1">
+                  <span className="text-muted">Store: </span>
+                  {current.store ? (
+                    <>
+                      <span className="font-semibold">{current.store}</span>
+                      <span className="text-muted">
+                        {current.from === "FILENAME"
+                          ? " — from the filename"
+                          : current.from === "LOGO"
+                            ? " — from the logo on page one"
+                            : current.from === "CHOSEN"
+                              ? " — you set this"
+                              : ""}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-warn">
+                      not identified yet — reading the cover
+                    </span>
+                  )}
+                </p>
+                {current.dates ? (
+                  <p className="mt-1 text-muted">Valid {current.dates}</p>
+                ) : null}
+              </div>
             ) : null}
+
+            {/*
+              Said here because this is where somebody is looking when a wrong
+              store goes past, and because the honest answer is not "change it
+              now". The banner is decided the moment the cover is read and the
+              pages are uploaded seconds later, so there is no window to catch
+              it in — and once a flyer is stored under a banner, the fix is to
+              remove it and import it again rather than to relabel it.
+            */}
+            <p className="mt-2 text-xs text-muted">
+              If a store is read wrong, let this finish — then remove that flyer
+              with the × in the list behind this and import it again. A flyer
+              whose store could not be read at all is not uploaded, and its row
+              below gets a dropdown to set it.
+            </p>
 
             <p className="mt-3 rounded-md bg-good/10 p-2 text-xs text-good">
               This message will change the moment it is safe to leave — you do

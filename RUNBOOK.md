@@ -141,6 +141,23 @@ from public.cartmatch_flyers f
 where f.valid_to >= current_date order by f.retailer_id;
 ```
 
+### A flyer was filed under the wrong store
+
+The store is inferred — from the filename, or from the logo a model reads off
+page one — and the overlay names it while the flyer uploads, with which of the
+two it came from. That is the moment to notice.
+
+It cannot be corrected mid-flight. The banner is decided the moment the cover
+is read and the pages are uploaded seconds later, so there is no window to
+intervene in, and the flyer id is built from the banner and the week — a stored
+flyer cannot be relabelled, only replaced.
+
+- **Read wrong:** let the import finish, remove that flyer with the × in
+  "Flyers you already hold", and import it again.
+- **Not read at all:** the flyer is not uploaded, and its row on the import
+  screen gets a dropdown. Choose the store and press save, and it queues from
+  there — no need to pick the file again.
+
 ### The wrong PDF was imported
 
 Not every file a store publishes is a price list — a recipe booklet, a
