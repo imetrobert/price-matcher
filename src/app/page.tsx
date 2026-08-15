@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { AuthBar, AuthGuard } from "@/components/AuthGuard";
+import { checkAppAccess } from "@/lib/auth/access";
 import { Notice } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
 import { formatCents } from "@/lib/money";
@@ -28,6 +29,11 @@ function Home() {
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFS);
   const [flyers, setFlyers] = useState<FlyerStatus | null>(null);
   const [retrying, setRetrying] = useState(false);
+  // The debug link is hidden from ordinary members. Cosmetic on its own — the
+  // screen itself checks the same thing, and every row it can reach is
+  // governed by RLS regardless — but a link nobody should follow is a link
+  // worth not showing.
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // While pages are still being read, the number on this card changes without
   // anybody touching the screen — a worker is doing the work on a schedule. A
@@ -71,6 +77,11 @@ function Home() {
     Promise.all([loadAllFlyers(), queueSummary()])
       .then(([all, queue]) => setFlyers(flyerStatus(all, new Date(), queue)))
       .catch(() => setFlyers(null));
+    void checkAppAccess()
+      .then((access) =>
+        setIsAdmin(access.status === "granted" && access.role === "app_admin"),
+      )
+      .catch(() => setIsAdmin(false));
   }, []);
 
   const requeue = async () => {
@@ -340,9 +351,11 @@ function Home() {
         status is the card at the top. Adapter health is a debugging concern,
         so it lives where debugging lives.
       */}
-      <Link href="/admin" className="btn-ghost mt-6">
-        Developer / debug view
-      </Link>
+      {isAdmin ? (
+        <Link href="/admin" className="btn-ghost mt-6">
+          Developer / debug view
+        </Link>
+      ) : null}
     </main>
   );
 }

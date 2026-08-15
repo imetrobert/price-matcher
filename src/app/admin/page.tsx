@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { AdminOnly } from "@/components/AdminOnly";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Notice, PageHeader } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
@@ -44,7 +45,9 @@ interface AuditPayload {
 export default function AdminPage() {
   return (
     <AuthGuard>
-      <AdminView />
+      <AdminOnly>
+        <AdminView />
+      </AdminOnly>
     </AuthGuard>
   );
 }

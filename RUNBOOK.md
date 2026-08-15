@@ -168,6 +168,24 @@ or read badly — tick **"Read again if already loaded"** on the import screen
 before starting. A half-read flyer is never skipped: those are exactly the
 ones worth handing over again.
 
+### The debug view says "admins only"
+
+That screen is limited to accounts holding **app_admin** on cartmatch, and the
+refusal names the role your account actually holds. Roles live in
+`public.app_access`, managed in the Supabase-platform repository — not this
+one, which is why the message points at the table rather than offering an
+UPDATE for it.
+
+```sql
+select * from public.app_access;
+```
+
+Worth knowing what the gate is and is not: it stops an ordinary member
+wandering in. It does not stop somebody who knows the URL and can open a
+developer console. The real boundary is Row Level Security on every row and
+`has_app_access('cartmatch')` inside every Edge Function, both of which apply
+whether or not this screen is reachable.
+
 ### An offer's price is wrong
 
 Open **`/confirm`** from the deals screen. It queues the offers a comparison
