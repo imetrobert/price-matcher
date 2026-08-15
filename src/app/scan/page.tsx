@@ -20,6 +20,7 @@ import { MockBanner, Money, Notice, PageHeader, Spinner } from "@/components/ui"
 import { RETAILERS } from "@/config/retailers";
 import { formatCents, tryParsePriceToCents } from "@/lib/money";
 import { DEFAULT_PREFS, clearLastResult, loadPrefs, saveLastResult } from "@/lib/prefs";
+import { deleteCart, saveCart } from "@/services/carts/history";
 import { analyzeCartPhotos } from "@/services/vision";
 import {
   describeBytes,
@@ -73,6 +74,14 @@ function ScanFlow() {
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFS);
   const [step, setStep] = useState<Step>("capture");
   const [images, setImages] = useState<ShrunkImage[]>([]);
+  /**
+   * This trolley's identity in the saved list.
+   *
+   * Minted when a scan produces results and kept until the cart is discarded.
+   * The comparison is recomputed on every typed shelf price, so without a
+   * stable id one trolley would write a new saved record per keystroke.
+   */
+  const [cartId, setCartId] = useState<string | null>(null);
   const [items, setItems] = useState<EditableItem[]>([]);
   const [cart, setCart] = useState<CartComparison | null>(null);
   const [offerCount, setOfferCount] = useState<number | null>(null);
@@ -206,6 +215,7 @@ function ScanFlow() {
       const loaded = await loadCurrentOffers();
       setOffers(loaded);
       setOfferCount(loaded.length);
+      setCartId((id) => id ?? `cart-${Date.now()}`);
       setStep("results");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Comparison failed.");
@@ -251,7 +261,10 @@ function ScanFlow() {
       currentRetailer: prefs.currentRetailerId,
       at: new Date().toISOString(),
     });
-  }, [step, items, offers, prefs.currentRetailerId]);
+    // And kept for the saved list, which outlives this tab. Same id every
+    // time, so typing a price updates this cart rather than adding another.
+    if (cartId) saveCart(cartId, comparison, prefs.currentRetailerId);
+  }, [step, items, offers, prefs.currentRetailerId, cartId]);
 
   /**
    * Set a shelf price without claiming the identity was confirmed.
@@ -287,6 +300,10 @@ function ScanFlow() {
    * remembering to clear four things.
    */
   const startNewCart = useCallback(() => {
+    // The saved copy goes too. "Start a new cart" has to mean the old one is
+    // gone, not that it quietly moved to a list nobody was told about.
+    if (cartId) deleteCart(cartId);
+    setCartId(null);
     setItems([]);
     setImages([]);
     setCart(null);
@@ -297,7 +314,7 @@ function ScanFlow() {
     setError(null);
     clearLastResult();
     setStep("capture");
-  }, []);
+  }, [cartId]);
 
   const unsure = items.filter((i) => i.include && needsConfirming(i));
   const clear = items.filter((i) => i.include && !needsConfirming(i));
@@ -895,6 +912,13 @@ function CartResults({
       <button type="button" className="btn-secondary mt-2" onClick={onAddMore}>
         Photograph something it missed
       </button>
+      {/*
+        Said here because this is where somebody wonders whether closing the
+        tab loses the work. It does not, and it used to.
+      */}
+      <Link href="/carts" className="btn-secondary mt-2">
+        Saved carts — this one is kept until the flyers expire
+      </Link>
       <div className="mt-2">
         <StartOver count={cart.lines.length} onConfirm={onRescan} />
       </div>

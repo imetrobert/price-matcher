@@ -245,6 +245,29 @@ fixed (`fetchAllRows` in `src/services/flyers/storage.ts` slices every growing
 query), but the arithmetic is worth remembering: **if a total ever lands on a
 round 1000, suspect truncation before you suspect the data.**
 
+### Saved carts
+
+`/carts` lists every trolley scanned this flyer week — date, store, how many
+items, and the total saving where one could be computed. Open one to see the
+same evidence the live results screen shows, or delete it with the button.
+
+**They delete themselves.** A saved cart carries the last day any flyer behind
+it runs, and once that day passes the cart is gone — every number in it came
+from a flyer that stopped running, so none of them is a price any more. The
+deletion happens when the list is read (opening `/carts` or the home screen),
+because a static site has no timer.
+
+A cart that matched no flyer at all has no expiry to read, so it is kept for a
+week from its scan and then dropped.
+
+**They live on the device, in local storage.** Nothing about what anybody buys
+is sent anywhere. The cost of that: carts do not sync between phone and laptop,
+and clearing browsing data removes them. Twenty are kept at most.
+
+Distinct from Checkout Mode's copy, which is in **session** storage and is
+emptied when the tab closes — that one is a handoff between two screens, not
+history.
+
 ### A screen says it "could not check" something
 
 Three screens now say this rather than showing nothing: the home card, the

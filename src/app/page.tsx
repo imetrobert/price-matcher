@@ -17,6 +17,7 @@ import {
   retryFailedPages,
 } from "@/services/flyers/storage";
 import { flyerStatus, type FlyerStatus } from "@/services/flyers/status";
+import { listCarts } from "@/services/carts/history";
 import type { UserPreferences } from "@/types";
 
 export default function HomePage() {
@@ -38,6 +39,9 @@ function Home() {
   // failed queue read looked like a finished one: green, ready, go shopping.
   // An unanswerable question has to look different from a good answer.
   const [checkFailed, setCheckFailed] = useState<string | null>(null);
+  // Counted here so the link can be hidden when there is nothing behind it.
+  // Reading the list is also what deletes carts whose flyers have expired.
+  const [savedCarts, setSavedCarts] = useState(0);
   // The debug link is hidden from ordinary members. Cosmetic on its own — the
   // screen itself checks the same thing, and every row it can reach is
   // governed by RLS regardless — but a link nobody should follow is a link
@@ -80,6 +84,7 @@ function Home() {
 
   useEffect(() => {
     setPrefs(loadPrefs());
+    setSavedCarts(listCarts().length);
     // Derived from what is stored rather than from a run in progress: a run
     // lives in one browser tab, and the question "do I have this week's
     // prices" has to be answerable from anywhere, including tomorrow.
@@ -376,6 +381,16 @@ function Home() {
       {flyers && flyers.readiness !== "NONE" ? (
         <Link href="/deals" className="btn-secondary">
           Compare flyer savings
+        </Link>
+      ) : null}
+
+      {/*
+        Only when there is something to look at. A link to an empty list is a
+        promise of a feature rather than a way to reach one.
+      */}
+      {savedCarts > 0 ? (
+        <Link href="/carts" className="btn-secondary mt-2">
+          Saved carts ({savedCarts})
         </Link>
       ) : null}
 
