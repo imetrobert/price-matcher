@@ -118,6 +118,7 @@ export function retailerFromFilename(name: string): RetailerId | null {
   if (/ maxi /.test(n)) return "maxi";
   if (/ iga /.test(n)) return "iga";
   if (/ provigo /.test(n)) return "provigo";
+  if (/ adonis /.test(n)) return "adonis";
   return null;
 }
 

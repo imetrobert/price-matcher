@@ -43,6 +43,7 @@ export const RETAILER_POLICIES: Record<RetailerId, RetailerPolicy> = {
   metro: unknownPolicy("metro"),
   iga: unknownPolicy("iga"),
   provigo: unknownPolicy("provigo"),
+  adonis: unknownPolicy("adonis"),
 };
 
 export function getPolicy(id: RetailerId): RetailerPolicy {

@@ -20,6 +20,31 @@
 import type { RetailerConfig, RetailerId } from "@/types";
 
 export const RETAILERS: Record<RetailerId, RetailerConfig> = {
+  /*
+    Marché Adonis. Added because a flyer was uploaded for it and the app had
+    no way to say what was wrong: the store could not be identified, and the
+    dropdown offering a correction did not list it either. An import that
+    cannot succeed and cannot explain why is worse than one that refuses.
+
+    Flagged as not supporting product pages or online pricing, which is not a
+    judgement about Adonis — it is what is true of every retailer here. Prices
+    come from the flyers you upload, and no adapter in this app has ever
+    successfully fetched a live price from anybody.
+  */
+  adonis: {
+    id: "adonis",
+    name: "adonis",
+    displayName: "Adonis",
+    enabled: true,
+    region: "Quebec",
+    homepage: "https://www.groupeadonis.ca",
+    supportsProductPages: false,
+    supportsOnlinePricing: false,
+    supportsStoreContext: false,
+    priceReliability: "UNKNOWN",
+    reliabilityNote:
+      "Flyer-only. No adapter has been written and none is planned: prices for this banner come from the PDF a shopper uploads, like every other banner in this app.",
+  },
   maxi: {
     id: "maxi",
     name: "maxi",

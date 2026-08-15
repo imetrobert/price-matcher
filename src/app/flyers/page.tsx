@@ -140,6 +140,25 @@ function FlyerImport() {
 
   const totals = useMemo(() => batchTotals(items), [items]);
 
+  /**
+   * What the run actually achieved, for the overlay that reports it.
+   *
+   * The safe-to-leave message used to fire on the run FINISHING, without
+   * asking whether anything had been queued. So a flyer the app could not
+   * identify — an unknown banner, no dates — produced "Uploaded, you can close
+   * this tab" and a home screen that never mentioned it again. A claim of
+   * success nobody had checked, which is the failure this project keeps
+   * finding and must not ship in its own success message.
+   */
+  const outcome = useMemo(() => {
+    const queued = items.filter((i) => i.stage === "DONE" && i.saved !== null);
+    const skipped = items.filter((i) => i.stage === "SKIPPED");
+    const stuck = items.filter(
+      (i) => i.stage === "FAILED" || (i.stage === "DONE" && i.saved === null),
+    );
+    return { queued, skipped, stuck };
+  }, [items]);
+
   /** The file being worked on, for the overlay. */
   const current = useMemo(() => {
     const busy = items.find(
@@ -214,28 +233,76 @@ function FlyerImport() {
       */}
       {!running && finishedAt !== null && !overlayDismissed ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="card w-full max-w-[420px] border border-good/40">
-            <p className="flex items-center gap-2 text-lg font-extrabold text-good">
-              <span aria-hidden>✓</span> Uploaded — you can close this tab now
-            </p>
-            <p className="mt-2 text-sm text-muted">
-              Everything is on the server. The pages are read there from here
-              on, whether or not this tab is open, and nothing is lost by
-              leaving.
-            </p>
-            <p className="mt-2 text-sm text-muted">
-              The home screen shows how far the reading has got, and says when
-              it is done.
-            </p>
-            <Link href="/" className="btn-primary mt-3">
-              Go to the home screen
-            </Link>
+          <div
+            className={`card w-full max-w-[420px] border ${
+              outcome.queued.length > 0 ? "border-good/40" : "border-warn/40"
+            }`}
+          >
+            {outcome.queued.length > 0 ? (
+              <>
+                <p className="flex items-center gap-2 text-lg font-extrabold text-good">
+                  <span aria-hidden>✓</span> Uploaded — you can close this tab now
+                </p>
+                <p className="mt-2 text-sm text-muted">
+                  {outcome.queued.length} flyer
+                  {outcome.queued.length === 1 ? " is" : "s are"} on the server.
+                  The pages are read there from here on, whether or not this tab
+                  is open, and nothing is lost by leaving.
+                </p>
+              </>
+            ) : (
+              /*
+                Nothing was queued. Still safe to close — there is no work in
+                flight — but saying "uploaded" would be a claim about work that
+                did not happen, and the home screen would then stay silent about
+                a flyer somebody believes they added.
+              */
+              <>
+                <p className="flex items-center gap-2 text-lg font-extrabold text-warn">
+                  <span aria-hidden>!</span> Nothing was uploaded
+                </p>
+                <p className="mt-2 text-sm text-muted">
+                  The run finished without queueing anything, so the home screen
+                  will not show a flyer being read. The reason is on each row
+                  behind this message.
+                </p>
+              </>
+            )}
+
+            {outcome.stuck.length > 0 ? (
+              <div className="mt-3 rounded-md bg-warn/10 p-2 text-xs text-warn">
+                <p className="font-semibold">
+                  {outcome.stuck.length} need
+                  {outcome.stuck.length === 1 ? "s" : ""} attention
+                </p>
+                {outcome.stuck.slice(0, 3).map((i) => (
+                  <p key={i.id} className="mt-1">
+                    {i.file.name}: {i.saveError ?? i.error ?? i.detail}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+
+            {outcome.skipped.length > 0 ? (
+              <p className="mt-2 text-xs text-muted">
+                {outcome.skipped.length} already loaded for this week and left
+                alone.
+              </p>
+            ) : null}
+
+            {outcome.queued.length > 0 ? (
+              <Link href="/" className="btn-primary mt-3">
+                Go to the home screen
+              </Link>
+            ) : null}
             <button
               type="button"
-              className="btn-ghost mt-2"
+              className={outcome.queued.length > 0 ? "btn-ghost mt-2" : "btn-primary mt-3"}
               onClick={() => setOverlayDismissed(true)}
             >
-              Stay here and see what was read
+              {outcome.queued.length > 0
+                ? "Stay here and see what was read"
+                : "See what went wrong"}
             </button>
           </div>
         </div>

@@ -27,7 +27,8 @@ export type RetailerId =
   | "superc"
   | "metro"
   | "iga"
-  | "provigo";
+  | "provigo"
+  | "adonis";
 
 /**
  * How much we trust a retailer's price data. These are NOT guesses — a
