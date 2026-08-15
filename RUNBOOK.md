@@ -199,6 +199,38 @@ comparison permanently without deleting the record.
 
 ---
 
+## Adding a grocery banner the app does not know
+
+The symptom: an import cannot identify the store, and the dropdown offering to
+correct it does not list the one you want.
+
+**Two files, both on GitHub, editable from a phone.** Use the pencil icon on
+each, commit to `main`, and the site rebuilds in about two minutes.
+
+1. **`src/types/index.ts`** — add the id to the `RetailerId` union:
+
+   ```ts
+   export type RetailerId =
+     | "maxi"
+     …
+     | "adonis"
+     | "yourbanner";     // lowercase, no spaces
+   ```
+
+2. **`src/config/retailers.ts`** — copy the `adonis` block, change `id`, `name`
+   and `displayName`. Leave the capability flags false and the reliability
+   UNKNOWN: they describe adapters that fetch live prices, and no adapter in
+   this app has ever fetched one.
+
+Nothing else. The price-match policy table, the store picker and the
+filename recogniser all read the registry, so they learn the new banner on
+their own. `displayName` is what the recogniser matches against — "Super C"
+also matches "superc", so spaces are optional in a filename.
+
+If the build fails, the revert procedure below undoes it.
+
+---
+
 ## Undoing a change that broke something
 
 You do not need a computer, a terminal or a checkout. Everything deploys from

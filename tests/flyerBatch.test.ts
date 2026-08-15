@@ -188,3 +188,34 @@ describe("what the batch reports when it is done", () => {
     expect(totals.flyersDone).toBe(1);
   });
 });
+
+describe("recognising a banner from a filename", () => {
+  // The names come from the registry now rather than a second hardcoded list.
+  // The repetition is how a banner gets added in one place and stays invisible
+  // in the other, which is exactly what happened with Adonis.
+
+  it("reads the banners it knows", () => {
+    expect(retailerFromFilename("Maxi_flyer.pdf")).toBe("maxi");
+    expect(retailerFromFilename("IGA_flyer.pdf")).toBe("iga");
+    expect(retailerFromFilename("Metro Que Weekly.pdf")).toBe("metro");
+    expect(retailerFromFilename("Adonis circulaire.pdf")).toBe("adonis");
+  });
+
+  it("prefers the more specific banner where two names collide", () => {
+    // Super C belongs to Metro Inc and its files carry both names. Longest
+    // name first is what gets this right without naming the pair.
+    expect(retailerFromFilename("SuperC Weekly Flyer Metro Inc.pdf")).toBe("superc");
+    expect(retailerFromFilename("Super C Valid 13-08-26.pdf")).toBe("superc");
+  });
+
+  it("still reads the one alias no display name carries", () => {
+    expect(retailerFromFilename("WM_flyer_wk33.pdf")).toBe("walmart");
+  });
+
+  it("says nothing rather than guessing", () => {
+    // Loblaw and Sobeys files share the token "SA". A guess that is right half
+    // the time is worse than none, because it looks like knowledge.
+    expect(retailerFromFilename("PDF_wk33-2026-SA V6.pdf")).toBeNull();
+    expect(retailerFromFilename("circulaire.pdf")).toBeNull();
+  });
+});

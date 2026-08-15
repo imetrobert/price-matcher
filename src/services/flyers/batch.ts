@@ -110,15 +110,29 @@ export function retailerFromFilename(name: string): RetailerId | null {
   // of underscores, so this is the common case rather than the odd one.
   const n = ` ${name.toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
 
-  // Super C before Metro: it belongs to Metro Inc and its files sometimes
-  // carry both names, and the more specific banner is the right answer.
-  if (/ super\s?c /.test(n)) return "superc";
-  if (/ metro /.test(n)) return "metro";
-  if (/ walmart | wm /.test(n)) return "walmart";
-  if (/ maxi /.test(n)) return "maxi";
-  if (/ iga /.test(n)) return "iga";
-  if (/ provigo /.test(n)) return "provigo";
-  if (/ adonis /.test(n)) return "adonis";
+  // Names from the registry, so adding a banner there teaches this too. That
+  // list used to be repeated here, and the repetition is how a banner gets
+  // added in one place and stays invisible in the other.
+  //
+  // Longest name first. Super C belongs to Metro Inc and its files sometimes
+  // carry both names, so the more specific banner has to be tested first —
+  // sorting by length gets that right without naming the pair.
+  const banners = Object.values(RETAILERS)
+    .flatMap((r) => [
+      { id: r.id, token: r.displayName.toLowerCase() },
+      { id: r.id, token: r.name.toLowerCase() },
+    ])
+    .sort((a, b) => b.token.length - a.token.length);
+
+  for (const { id, token } of banners) {
+    // Spaces in a display name may be absent in a filename: "Super C" arrives
+    // as "superc" as often as "super c".
+    const pattern = token.replace(/[^a-z0-9]+/g, "\\s?");
+    if (new RegExp(` ${pattern} `).test(n)) return id;
+  }
+
+  // The one alias no display name carries.
+  if (/ wm /.test(n)) return "walmart";
   return null;
 }
 

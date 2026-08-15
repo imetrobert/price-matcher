@@ -20,6 +20,7 @@
  * set `sourceUrl` to that page, and set `lastReviewed` to today's date.
  */
 
+import { RETAILERS } from "@/config/retailers";
 import type { RetailerId, RetailerPolicy } from "@/types";
 
 const unknownPolicy = (retailerId: RetailerId): RetailerPolicy => ({
@@ -36,15 +37,22 @@ const unknownPolicy = (retailerId: RetailerId): RetailerPolicy => ({
   lastReviewed: "",
 });
 
-export const RETAILER_POLICIES: Record<RetailerId, RetailerPolicy> = {
-  maxi: unknownPolicy("maxi"),
-  superc: unknownPolicy("superc"),
-  walmart: unknownPolicy("walmart"),
-  metro: unknownPolicy("metro"),
-  iga: unknownPolicy("iga"),
-  provigo: unknownPolicy("provigo"),
-  adonis: unknownPolicy("adonis"),
-};
+/**
+ * Derived from the registry rather than listed again.
+ *
+ * Every entry was `unknownPolicy(id)` — the same value, written out once per
+ * banner, so the list existed only to be forgotten when a banner was added.
+ * It was: adding Adonis produced a type error here, in a file that has nothing
+ * to say about Adonis.
+ *
+ * A published price-match policy, when one is ever recorded, replaces the
+ * entry for that banner. Until then the honest value is the same for
+ * everybody, and deriving it means a new banner is one edit fewer.
+ */
+export const RETAILER_POLICIES: Record<RetailerId, RetailerPolicy> =
+  Object.fromEntries(
+    (Object.keys(RETAILERS) as RetailerId[]).map((id) => [id, unknownPolicy(id)]),
+  ) as Record<RetailerId, RetailerPolicy>;
 
 export function getPolicy(id: RetailerId): RetailerPolicy {
   return RETAILER_POLICIES[id] ?? unknownPolicy(id);
