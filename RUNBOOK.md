@@ -207,6 +207,37 @@ outbound requests on the server's behalf rather than reading the caller's own
 rows. If a probe returns 403 naming your role, that is this check and not a
 network problem.
 
+### A store is missing from the deals screen
+
+First check whether the deals screen lists it at all. Every flyer running today
+now gets a row in the sources list even when it contributed **0 offers**, in
+warning colour, with a line naming it. If it is there at 0, the flyer is loaded
+and the pages are the problem — open `/flyers` and look at that flyer's page
+counts, or run the retry.
+
+If the store is not listed at all, the flyer row itself is missing or its dates
+do not cover today:
+
+```sql
+select f.id, f.retailer_id, f.valid_from, f.valid_to, f.page_count, f.pages_read,
+       (select count(*) from public.cartmatch_flyer_offers o where o.flyer_id = f.id) as offers
+from public.cartmatch_flyers f
+order by f.valid_from desc, f.retailer_id;
+```
+
+A flyer whose `valid_to` is in the past is excluded on purpose — an expired
+flyer is not a stale price, it is not a price.
+
+**The history behind this.** Until August 2026 the sources list was built from
+the offers, so a flyer with none was not shown as having none: it was not shown
+at all, and read exactly like a store nobody had loaded. At the same time every
+query fetching offers was subject to PostgREST's `max-rows` cap — 1000 by
+default — which truncates without any error. Six flyers in one week crossed it
+and Walmart vanished; the totals on screen added up to precisely 1000. Both are
+fixed (`fetchAllRows` in `src/services/flyers/storage.ts` slices every growing
+query), but the arithmetic is worth remembering: **if a total ever lands on a
+round 1000, suspect truncation before you suspect the data.**
+
 ### An offer's price is wrong
 
 Open **`/confirm`** from the deals screen. It queues the offers a comparison

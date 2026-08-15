@@ -37,8 +37,8 @@ import {
   type PriceGap,
 } from "@/services/flyers/compare";
 import {
-  loadAllFlyers,
-  loadCurrentOffers,
+  loadCurrentFlyers,
+  loadCurrentOffersResult,
   type StoredOffer,
 } from "@/services/flyers/storage";
 import { citationLine } from "@/services/flyers/citation";
@@ -68,6 +68,9 @@ function Deals() {
   const [offers, setOffers] = useState<StoredOffer[]>([]);
   const [gaps, setGaps] = useState<PriceGap[]>([]);
   const [summary, setSummary] = useState<ComparisonSummary | null>(null);
+  // Why the offers could not be read, when they could not. Distinct from
+  // "there are none": a broken query must never be reported as an empty week.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [threshold, setThreshold] = useState(DEFAULT_PREFS.minSavingsCents);
   // Off by default. A card price is a price somebody may not be able to pay,
   // and the safe reading has to be the one nobody had to choose.
@@ -76,10 +79,14 @@ function Deals() {
   const refresh = useCallback(
     async (minSaving: number, withConditional: boolean) => {
       setLoading(true);
-      const [loaded, flyers] = await Promise.all([
-        loadCurrentOffers(),
-        loadAllFlyers(),
+      // The flyers running TODAY, not every flyer ever held: this list is what
+      // the sources are built from, and last month's flyer is not a source.
+      const [result, flyers] = await Promise.all([
+        loadCurrentOffersResult(),
+        loadCurrentFlyers(),
       ]);
+      const loaded = result.ok ? result.offers : [];
+      setLoadError(result.ok ? null : result.error);
       const found = findPriceGaps(loaded, minSaving, withConditional);
       setOffers(loaded);
       setGaps(found);
@@ -109,7 +116,21 @@ function Deals() {
         </section>
       ) : null}
 
-      {!loading && offers.length === 0 ? (
+      {/*
+        A failure and an empty week are different answers and get different
+        words. "No flyers loaded" printed over a broken query is a lie the
+        shopper would act on by re-importing flyers they already have.
+      */}
+      {!loading && loadError ? (
+        <div className="mb-4">
+          <Notice tone="warn" title="Could not read this week's offers">
+            {loadError} Nothing below is a complete comparison. Reload the page;
+            if it keeps happening, the flyers screen shows what is stored.
+          </Notice>
+        </div>
+      ) : null}
+
+      {!loading && !loadError && summary && summary.sources.length === 0 ? (
         <div className="mb-4">
           <Notice tone="warn" title="No flyers loaded for this week">
             Nothing has been stored for a flyer running today. Import this
@@ -121,7 +142,7 @@ function Deals() {
         </div>
       ) : null}
 
-      {!loading && summary && offers.length > 0 ? (
+      {!loading && summary && summary.sources.length > 0 ? (
         <section className="card mb-4 text-sm">
           {/*
             Said above the results, because the results are only as good as the
@@ -161,7 +182,7 @@ function Deals() {
                 <span className="text-muted">
                   {day(source.validFrom)} – {day(source.validTo)}
                 </span>
-                <span className="text-muted">
+                <span className={source.offers === 0 ? "text-warn" : "text-muted"}>
                   {source.offers} offers
                   {source.pageCount !== null && source.pagesRead !== null
                     ? ` · ${source.pagesRead}/${source.pageCount} pages`
@@ -170,6 +191,26 @@ function Deals() {
               </p>
             ))}
           </div>
+
+          {/*
+            A store held for this week that put nothing into the comparison.
+            It used to be invisible — no row at all — which read exactly like a
+            store nobody had loaded. Said plainly, because the shopper is the
+            only one who can tell which of the three reasons it is.
+          */}
+          {summary.sources.some((s) => s.offers === 0) ? (
+            <p className="mb-3 rounded-md bg-warn/10 p-2 text-xs text-warn">
+              {summary.sources
+                .filter((s) => s.offers === 0)
+                .map((s) => RETAILERS[s.retailerId]?.displayName ?? s.retailerId)
+                .join(", ")}{" "}
+              {summary.sources.filter((s) => s.offers === 0).length === 1
+                ? "is loaded but has no prices in this comparison"
+                : "are loaded but have no prices in this comparison"}
+              . Either the pages have not been read yet, the reading failed, or
+              the file held no prices. The flyers screen says which.
+            </p>
+          ) : null}
 
           {summary.incomplete ? (
             <p className="mb-3 rounded-md bg-warn/10 p-2 text-xs text-warn">

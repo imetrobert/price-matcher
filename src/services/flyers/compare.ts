@@ -253,11 +253,20 @@ export interface ComparisonSource {
   retailerId: RetailerId;
   validFrom: string;
   validTo: string;
-  /** Offers this flyer contributed, conditional ones included. */
+  /** Offers this flyer contributed, conditional ones included. May be zero. */
   offers: number;
   /** From the flyer record, when it is available. */
   pagesRead: number | null;
   pageCount: number | null;
+}
+
+/** A flyer record as this summary needs it. */
+export interface ComparisonFlyer {
+  retailerId: RetailerId;
+  validFrom: string;
+  validTo: string;
+  pagesRead: number;
+  pageCount: number;
 }
 
 export interface ComparisonSummary {
@@ -294,11 +303,25 @@ export interface ComparisonSummary {
  * the boundary of the answer visible: four stores for the week of the 13th,
  * one of them still sixteen pages short, is a very different claim from four
  * complete flyers.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE LIST IS BUILT FROM THE FLYERS AND NOT FROM THE OFFERS
+ * ---------------------------------------------------------------------------
+ * It used to be built from the offers, which meant a flyer contributing none
+ * was not listed as contributing none — it was not listed at all. A store held
+ * for this week whose pages had not been read yet, or had failed, or had been
+ * read to nothing, was indistinguishable on this screen from a store the
+ * shopper never loaded.
+ *
+ * That is the failure that matters most here, because it is invisible: nobody
+ * notices an absence. So every flyer running today gets a row, zero offers
+ * included, and any offer whose flyer was not supplied gets one too — a
+ * summary must never quietly drop what it was given.
  */
 export function summariseComparison(
   offers: StoredOffer[],
   gaps: PriceGap[],
-  flyers: { retailerId: RetailerId; validFrom: string; pagesRead: number; pageCount: number }[] = [],
+  flyers: ComparisonFlyer[] = [],
 ): ComparisonSummary {
   const byRetailer = new Map<RetailerId, StoredOffer[]>();
   for (const offer of offers) {
@@ -307,23 +330,56 @@ export function summariseComparison(
     byRetailer.set(offer.retailerId, list);
   }
 
-  const sources: ComparisonSource[] = [...byRetailer.entries()]
-    .map(([retailerId, list]) => {
-      const validFrom = list.map((o) => o.validFrom).sort()[0]!;
-      const validTo = list.map((o) => o.validTo).sort().reverse()[0]!;
-      const flyer = flyers.find(
-        (f) => f.retailerId === retailerId && f.validFrom === validFrom,
-      );
-      return {
-        retailerId,
-        validFrom,
-        validTo,
-        offers: list.length,
-        pagesRead: flyer ? flyer.pagesRead : null,
-        pageCount: flyer ? flyer.pageCount : null,
-      };
-    })
-    .sort((a, b) => a.retailerId.localeCompare(b.retailerId));
+  // Keyed by store and week, which is what a flyer is: the same shop's flyer
+  // for two different weeks is two sources, and only one of them can be today's.
+  const key = (retailerId: RetailerId, validFrom: string) =>
+    `${retailerId}|${validFrom}`;
+
+  const counted = new Map<string, StoredOffer[]>();
+  for (const offer of offers) {
+    const k = key(offer.retailerId, offer.validFrom);
+    const list = counted.get(k) ?? [];
+    list.push(offer);
+    counted.set(k, list);
+  }
+
+  const sources: ComparisonSource[] = [];
+  const seen = new Set<string>();
+
+  for (const flyer of flyers) {
+    const k = key(flyer.retailerId, flyer.validFrom);
+    seen.add(k);
+    const list = counted.get(k) ?? [];
+    sources.push({
+      retailerId: flyer.retailerId,
+      validFrom: flyer.validFrom,
+      validTo: flyer.validTo,
+      offers: list.length,
+      pagesRead: flyer.pagesRead,
+      pageCount: flyer.pageCount,
+    });
+  }
+
+  // Offers whose flyer record was not supplied. Callers that pass no flyers at
+  // all rely on this, and it is also the honest reading of a mismatch: the
+  // offers exist, so the source did.
+  for (const [k, list] of counted) {
+    if (seen.has(k)) continue;
+    sources.push({
+      retailerId: list[0]!.retailerId,
+      validFrom: list[0]!.validFrom,
+      validTo: list.map((o) => o.validTo).sort().reverse()[0]!,
+      offers: list.length,
+      pagesRead: null,
+      pageCount: null,
+    });
+  }
+
+  sources.sort(
+    (a, b) =>
+      a.retailerId.localeCompare(b.retailerId) ||
+      a.validFrom.localeCompare(b.validFrom),
+  );
 
   const conditional = offers.filter(isConditional);
 

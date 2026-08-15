@@ -49,6 +49,64 @@ function client(): ReturnType<typeof createClient> | null {
   }
 }
 
+/**
+ * Every row a query matches, fetched in slices.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS EXISTS — READ THIS BEFORE WRITING ANOTHER SELECT
+ * ---------------------------------------------------------------------------
+ * PostgREST caps a single response at the project's `max-rows` setting, 1000
+ * by default. It does not fail, warn, or set a flag when it truncates: a query
+ * matching 1,200 rows returns 1,000 of them and looks exactly like a query
+ * matching 1,000. Everything downstream then computes a confident, wrong,
+ * smaller answer.
+ *
+ * That is not hypothetical here. Six flyers of a normal week crossed the cap
+ * and one whole store silently vanished from the comparison screen — not shown
+ * as missing, simply absent, with the totals adding up to precisely 1000.
+ *
+ * So: any query whose result grows with the data goes through this. It slices
+ * with `.range()` and advances by however many rows actually came back, so it
+ * is correct whatever `max-rows` is set to — including if somebody lowers it.
+ * It stops on a short read of zero, which costs one extra round trip and buys
+ * not having to assume the server's limit matches ours.
+ *
+ * The ordering must be UNIQUE and STABLE. Paging over an unordered query can
+ * return the same row twice and skip another, because two requests are two
+ * different snapshots with no defined order between them.
+ */
+const SLICE = 500;
+
+/** A runaway guard. Hitting it is a bug, and it says so rather than truncating. */
+const MAX_ROWS = 50_000;
+
+type Slice = { data: unknown[] | null; error: { message: string } | null };
+
+/** Exported so the slicing can be tested without a database behind it. */
+export async function fetchAllRows(
+  slice: (from: number, to: number) => PromiseLike<Slice>,
+): Promise<
+  { ok: true; rows: Record<string, unknown>[] } | { ok: false; error: string }
+> {
+  const rows: Record<string, unknown>[] = [];
+  for (let from = 0; ; ) {
+    const { data, error } = await slice(from, from + SLICE - 1);
+    if (error) return { ok: false, error: error.message };
+    if (!data) return { ok: false, error: "The query returned nothing at all." };
+    rows.push(...(data as Record<string, unknown>[]));
+    if (data.length === 0) return { ok: true, rows };
+    from += data.length;
+    if (rows.length >= MAX_ROWS) {
+      // Never return a silently short answer. Somebody has far more data than
+      // this app was built for, and a named failure is the only honest reply.
+      return {
+        ok: false,
+        error: `More than ${MAX_ROWS} rows matched. Delete flyers you no longer need.`,
+      };
+    }
+  }
+}
+
 export const FLYER_BUCKET = "cartmatch-flyers";
 
 /** Kept for a few days past the last advertised day, then deleted. */
@@ -295,10 +353,19 @@ export async function queueSummary(now: Date = new Date()): Promise<QueueByFlyer
   // One query for every page this user owns; RLS scopes it. A week of five
   // flyers is under a hundred rows, so counting them in the browser is
   // cheaper than five round trips asking the server to count.
-  const { data, error } = await supabase
-    .from("cartmatch_flyer_pages")
-    .select("flyer_id, status, last_error, errored_at");
-  if (error || !data) return {};
+  //
+  // Sliced all the same. Pages are never deleted until their flyer is, so this
+  // table grows every week — and a truncated count here would under-report how
+  // much is still unread, which is the one number this function exists to give.
+  const fetched = await fetchAllRows((from, to) =>
+    supabase
+      .from("cartmatch_flyer_pages")
+      .select("flyer_id, status, last_error, errored_at, id")
+      .order("id")
+      .range(from, to),
+  );
+  if (!fetched.ok) return {};
+  const data = fetched.rows;
 
   const byFlyer: Record<string, QueueRow[]> = {};
   const out: QueueByFlyer = {};
@@ -319,7 +386,7 @@ export async function queueSummary(now: Date = new Date()): Promise<QueueByFlyer
     else if (status === "DONE") counts.done += 1;
     else if (status === "FAILED") counts.failed += 1;
 
-    (byFlyer[flyer] ??= []).push(row as QueueRow);
+    (byFlyer[flyer] ??= []).push(row as unknown as QueueRow);
   }
 
   for (const [flyer, rows] of Object.entries(byFlyer)) {
@@ -717,23 +784,43 @@ export interface StoredOffer {
 export async function loadCurrentOffers(
   on: Date = new Date(),
 ): Promise<StoredOffer[]> {
+  const result = await loadCurrentOffersResult(on);
+  return result.ok ? result.offers : [];
+}
+
+/**
+ * The same fetch, with the reason when it fails.
+ *
+ * A screen that says "0 offers" because the query broke is telling the shopper
+ * something false about their flyers. Anything that draws a conclusion from
+ * emptiness — the comparison screen above all — uses this form and says
+ * "could not read" instead.
+ */
+export async function loadCurrentOffersResult(
+  on: Date = new Date(),
+): Promise<{ ok: true; offers: StoredOffer[] } | { ok: false; error: string }> {
   const supabase = client();
-  if (!supabase) return [];
+  if (!supabase) return { ok: false, error: "Storage is not configured." };
   const today = isoDay(on);
 
-  const { data, error } = await supabase
-    .from("cartmatch_flyer_offers")
-    .select("*, cartmatch_flyers!inner(retailer_id, valid_from, valid_to)")
-    .lte("cartmatch_flyers.valid_from", today)
-    .gte("cartmatch_flyers.valid_to", today)
-    // A reading somebody has looked at and called wrong is not a price. Kept
-    // in the table as a record of what the extraction got wrong; never
-    // fetched into a comparison.
-    .is("rejected_at", null);
+  const fetched = await fetchAllRows((from, to) =>
+    supabase
+      .from("cartmatch_flyer_offers")
+      .select("*, cartmatch_flyers!inner(retailer_id, valid_from, valid_to)")
+      .lte("cartmatch_flyers.valid_from", today)
+      .gte("cartmatch_flyers.valid_to", today)
+      // A reading somebody has looked at and called wrong is not a price. Kept
+      // in the table as a record of what the extraction got wrong; never
+      // fetched into a comparison.
+      .is("rejected_at", null)
+      // Unique and stable, so slicing cannot repeat or skip a row.
+      .order("id")
+      .range(from, to),
+  );
 
-  if (error || !data) return [];
+  if (!fetched.ok) return fetched;
 
-  return data.map((row: Record<string, unknown>) => {
+  const offers = fetched.rows.map((row: Record<string, unknown>) => {
     const flyer = row.cartmatch_flyers as Record<string, unknown>;
     return {
       id: String(row.id),
@@ -760,6 +847,8 @@ export async function loadCurrentOffers(
       validTo: String(flyer.valid_to),
     };
   });
+
+  return { ok: true, offers };
 }
 
 /**
@@ -869,12 +958,16 @@ export async function deleteFlyer(
 export async function loadAllFlyers(): Promise<StoredFlyer[]> {
   const supabase = client();
   if (!supabase) return [];
-  const { data, error } = await supabase
-    .from("cartmatch_flyers")
-    .select("*")
-    .order("valid_from", { ascending: false });
-  if (error || !data) return [];
-  return data.map(rowToFlyer);
+  // Sliced, and ordered by id rather than by date, because `valid_from` is not
+  // unique — six flyers share a week — and paging over a non-unique order can
+  // repeat one row and drop another. Sorted for display after it is all here.
+  const fetched = await fetchAllRows((from, to) =>
+    supabase.from("cartmatch_flyers").select("*").order("id").range(from, to),
+  );
+  if (!fetched.ok) return [];
+  return fetched.rows
+    .map(rowToFlyer)
+    .sort((a, b) => b.validFrom.localeCompare(a.validFrom));
 }
 
 function rowToFlyer(row: Record<string, unknown>): StoredFlyer {

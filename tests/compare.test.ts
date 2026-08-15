@@ -299,8 +299,20 @@ describe("saying what the comparison was working from", () => {
       offer({ id: "b", retailerId: "iga", advertisedText: "Pain", price: 399 }),
     ];
     const summary = summariseComparison(offers, [], [
-      { retailerId: "maxi", validFrom: "2026-08-13", pagesRead: 17, pageCount: 17 },
-      { retailerId: "iga", validFrom: "2026-08-13", pagesRead: 4, pageCount: 16 },
+      {
+        retailerId: "maxi",
+        validFrom: "2026-08-13",
+        validTo: "2026-08-19",
+        pagesRead: 17,
+        pageCount: 17,
+      },
+      {
+        retailerId: "iga",
+        validFrom: "2026-08-13",
+        validTo: "2026-08-19",
+        pagesRead: 4,
+        pageCount: 16,
+      },
     ]);
 
     expect(summary.sources).toHaveLength(2);
@@ -321,6 +333,60 @@ describe("saying what the comparison was working from", () => {
     );
     expect(summary.incomplete).toBe(false);
     expect(summary.sources[0]!.pagesRead).toBeNull();
+  });
+
+  it("lists a flyer that contributed nothing, instead of omitting it", () => {
+    // The bug this pins cost a whole store. Sources were built from the
+    // offers, so a flyer with none was not shown as having none — it was not
+    // shown at all, and read exactly like a store nobody had loaded.
+    const offers = [
+      offer({ id: "a", retailerId: "maxi", advertisedText: "Lait", price: 599 }),
+    ];
+    const summary = summariseComparison(offers, [], [
+      {
+        retailerId: "maxi",
+        validFrom: "2026-08-13",
+        validTo: "2026-08-19",
+        pagesRead: 17,
+        pageCount: 17,
+      },
+      {
+        retailerId: "walmart",
+        validFrom: "2026-08-13",
+        validTo: "2026-08-19",
+        pagesRead: 0,
+        pageCount: 9,
+      },
+    ]);
+
+    const walmart = summary.sources.find((s) => s.retailerId === "walmart");
+    expect(walmart).toBeDefined();
+    expect(walmart!.offers).toBe(0);
+    expect(walmart!.validTo).toBe("2026-08-19");
+    // Nine pages held and none read is an incomplete comparison, and saying so
+    // is the difference between "no gaps at Walmart" and "Walmart not read".
+    expect(summary.incomplete).toBe(true);
+  });
+
+  it("keeps an offer whose flyer record was not supplied", () => {
+    // A summary must never quietly drop what it was handed. Callers that pass
+    // no flyers at all depend on this too.
+    const summary = summariseComparison(
+      [offer({ id: "a", retailerId: "iga", advertisedText: "Pain", price: 399 })],
+      [],
+      [
+        {
+          retailerId: "maxi",
+          validFrom: "2026-08-13",
+          validTo: "2026-08-19",
+          pagesRead: 17,
+          pageCount: 17,
+        },
+      ],
+    );
+    expect(summary.sources.map((s) => s.retailerId).sort()).toEqual(["iga", "maxi"]);
+    expect(summary.sources.find((s) => s.retailerId === "iga")!.offers).toBe(1);
+    expect(summary.sources.find((s) => s.retailerId === "maxi")!.offers).toBe(0);
   });
 
   it("counts conditional offers by whether they could ever be compared", () => {
