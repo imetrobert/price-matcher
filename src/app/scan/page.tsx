@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ProofSheet } from "@/components/ProofSheet";
 import { AuthGuard } from "@/components/AuthGuard";
+import { FlyerPageProof } from "@/components/FlyerPageProof";
 import { MockBanner, Money, Notice, PageHeader, Spinner } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
 import { formatCents, tryParsePriceToCents } from "@/lib/money";
@@ -29,11 +30,7 @@ import {
   type CartComparison,
   type CartLine,
 } from "@/services/flyers/cartMatch";
-import {
-  flyerPageUrl,
-  loadCurrentOffers,
-  type StoredOffer,
-} from "@/services/flyers/storage";
+import { loadCurrentOffers } from "@/services/flyers/storage";
 import { citationLine } from "@/services/flyers/citation";
 import { conditionLabel, describeBasis } from "@/types/flyer";
 import type { DetectedProduct, RetailerId, UserPreferences } from "@/types";
@@ -853,61 +850,14 @@ function CheaperCard({ line, here }: { line: CartLine; here: string }) {
             </p>
           ) : null}
 
-          <FlyerPage offer={best} />
+          <FlyerPageProof
+            flyerId={best.flyerId}
+            page={best.flyerPage}
+            box={best.box}
+          />
         </div>
       ) : null}
     </section>
-  );
-}
-
-/**
- * The page itself, fetched only when somebody opens the card.
- *
- * A citation a cashier cannot see is an assertion. This is the picture the
- * shopper holds up, so it is worth a request — but only for the row they
- * actually opened.
- */
-function FlyerPage({ offer }: { offer: StoredOffer }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
-
-  useEffect(() => {
-    let live = true;
-    flyerPageUrl(offer.flyerId, offer.flyerPage)
-      .then((found) => {
-        if (!live) return;
-        setUrl(found);
-        setState(found ? "ready" : "missing");
-      })
-      .catch(() => live && setState("missing"));
-    return () => {
-      live = false;
-    };
-  }, [offer.flyerId, offer.flyerPage]);
-
-  if (state === "loading") {
-    return <p className="mt-3 text-xs text-muted">Loading the page…</p>;
-  }
-  if (state === "missing" || !url) {
-    return (
-      <p className="mt-3 text-xs text-muted">
-        The page image was not kept for this flyer. The citation above still
-        names the page, so it can be checked in the paper copy.
-      </p>
-    );
-  }
-  return (
-    <a href={url} target="_blank" rel="noreferrer" className="mt-3 block">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={url}
-        alt={`Flyer page ${offer.flyerPage}`}
-        className="w-full rounded-xl border border-line"
-      />
-      <span className="mt-1 block text-xs text-muted">
-        Tap to open full size.
-      </span>
-    </a>
   );
 }
 

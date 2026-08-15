@@ -25,6 +25,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
+import { FlyerPageProof } from "@/components/FlyerPageProof";
 import { Notice, PageHeader, Spinner } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
 import { formatCents } from "@/lib/money";
@@ -355,6 +356,25 @@ function GapCard({ gap }: { gap: PriceGap }) {
           hasPageImage: true,
         })}
       </p>
+
+      {/*
+        The page itself, on demand.
+
+        A citation names the page; this shows it, with the tile marked when the
+        reading recorded where it was. Behind a toggle because a deals list can
+        be twenty cards long and each picture is a signed request — the page a
+        person actually intends to use is the one worth fetching.
+      */}
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs font-semibold text-brand">
+          Show the flyer page
+        </summary>
+        <FlyerPageProof
+          flyerId={cheapest.flyerId}
+          page={cheapest.flyerPage}
+          box={cheapest.box}
+        />
+      </details>
 
       {gap.hasConditional ? (
         <p className="mt-2 rounded-md bg-warn/10 p-2 text-xs text-warn">

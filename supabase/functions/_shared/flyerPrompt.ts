@@ -108,6 +108,12 @@ export const FLYER_PROMPT =
   "with its own size printed. If you are unsure, return one entry — a single " +
   "correct offer is worth more than two uncertain ones.\n\n" +
 
+  "- box: where the offer's tile sits on the page, as four whole numbers " +
+  "[ymin, xmin, ymax, xmax] on a 0-1000 scale with 0,0 at the TOP-LEFT " +
+  "corner. Give the box around the whole tile — the picture, the product " +
+  "wording and the price together — not just the price. Omit box entirely " +
+  "if you are not confident where the tile is; a missing box costs nothing " +
+  "and a wrong one points somebody at the wrong product.\n\n" +
   "Report only what is printed on this page. If you cannot read a price " +
   "clearly, omit that offer entirely rather than guessing at it. Do not infer a " +
   "price from a similar product elsewhere on the page.";
@@ -151,6 +157,11 @@ export const FLYER_SCHEMA = {
             ],
           },
           conditionText: { type: "string", nullable: true },
+          box: {
+            type: "array",
+            nullable: true,
+            items: { type: "integer" },
+          },
         },
         required: [
           "advertisedText",

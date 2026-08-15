@@ -195,6 +195,25 @@ create policy "cartmatch_flyers delete (cartmatch)"
 alter table public.cartmatch_flyer_offers
   add column if not exists rejected_at timestamptz;
 
+-- ---------------------------------------------------------------------------
+-- Where the offer sits on its page
+-- ---------------------------------------------------------------------------
+-- Four whole numbers, [ymin, xmin, ymax, xmax], on a 0-1000 scale with the
+-- origin at the top left. Null whenever the model declined to say or said
+-- something that did not survive checking.
+--
+-- "IGA, page 7" is a citation somebody can check, and a page of a grocery
+-- flyer carries twenty to thirty tiles. Finding the right one on a phone, at a
+-- till, with somebody waiting behind, is the distance between a citation and a
+-- proof. This is what lets the screen draw a rectangle round the right tile.
+--
+-- Decoration in the strict sense: no price, comparison or citation depends on
+-- it. That is why it is nullable and never repaired into something plausible —
+-- a rectangle in the wrong place points somebody confidently at a product that
+-- is not theirs, which is worse than no rectangle.
+alter table public.cartmatch_flyer_offers
+  add column if not exists box_2d smallint[];
+
 drop policy if exists "cartmatch_flyer_offers select (cartmatch)" on public.cartmatch_flyer_offers;
 create policy "cartmatch_flyer_offers select (cartmatch)"
   on public.cartmatch_flyer_offers

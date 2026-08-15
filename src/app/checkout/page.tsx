@@ -36,11 +36,11 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { FlyerPageProof } from "@/components/FlyerPageProof";
 import { MockBanner, Money, Notice } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
 import { loadLastResult } from "@/lib/prefs";
 import { citationLine } from "@/services/flyers/citation";
-import { flyerPageUrl } from "@/services/flyers/storage";
 import { itemLabel, type CartComparison, type CartLine } from "@/services/flyers/cartMatch";
 import type { RetailerId } from "@/types";
 
@@ -199,7 +199,11 @@ function CheckoutCard({ line, here }: { line: CartLine; here: RetailerId }) {
         </p>
       )}
 
-      <CheckoutPageImage flyerId={best.flyerId} page={best.flyerPage} />
+      <FlyerPageProof
+        flyerId={best.flyerId}
+        page={best.flyerPage}
+        box={best.box}
+      />
 
       {/*
         On every card, because it is the one thing this app cannot know and the
@@ -211,50 +215,5 @@ function CheckoutCard({ line, here }: { line: CartLine; here: RetailerId }) {
         advertised where; whether it is honoured is between you and the shop.
       </p>
     </section>
-  );
-}
-
-/** The page itself, which is the whole reason for standing here. */
-function CheckoutPageImage({ flyerId, page }: { flyerId: string; page: number }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
-
-  useEffect(() => {
-    let live = true;
-    flyerPageUrl(flyerId, page)
-      .then((found) => {
-        if (!live) return;
-        setUrl(found);
-        setState(found ? "ready" : "missing");
-      })
-      .catch(() => live && setState("missing"));
-    return () => {
-      live = false;
-    };
-  }, [flyerId, page]);
-
-  if (state === "loading") {
-    return <p className="mt-3 text-sm text-muted">Loading the flyer page…</p>;
-  }
-  if (state === "missing" || !url) {
-    return (
-      <p className="mt-3 text-sm text-muted">
-        No page image was kept for this flyer. The citation above still names
-        the page, so it can be checked against a paper copy.
-      </p>
-    );
-  }
-  return (
-    <a href={url} target="_blank" rel="noreferrer" className="mt-3 block">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={url}
-        alt={`Flyer page ${page}`}
-        className="w-full rounded-xl border border-line"
-      />
-      <span className="mt-1 block text-center text-xs text-muted">
-        Tap to open full size.
-      </span>
-    </a>
   );
 }

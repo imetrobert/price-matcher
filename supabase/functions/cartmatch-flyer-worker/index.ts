@@ -52,7 +52,7 @@ import { FLYER_PROMPT, FLYER_SCHEMA } from "../_shared/flyerPrompt.ts";
 
 /** Which build answered. Same reason as the other functions: a silent stale
  *  deploy is indistinguishable from a working one until you check. */
-const FUNCTION_BUILD = "2026-08-15-worker-15";
+const FUNCTION_BUILD = "2026-08-15-worker-16";
 
 /**
  * Pages per tick.
@@ -509,6 +509,7 @@ async function readBatch(
           condition: offer.condition,
           condition_text: offer.conditionText,
           flyer_page: pageNumber,
+          box_2d: offer.box,
           confirmed_at: null,
         }));
         const { error: insertError } = await supabase
@@ -706,6 +707,7 @@ async function readOnePage(
         condition: offer.condition,
         condition_text: offer.conditionText,
         flyer_page: pageNumber,
+        box_2d: offer.box,
         confirmed_at: null,
       }));
 

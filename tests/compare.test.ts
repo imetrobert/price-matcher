@@ -29,6 +29,7 @@ function offer(patch: Partial<StoredOffer> = {}): StoredOffer {
     conditionText: null,
     flyerPage: 3,
     confirmedAt: null,
+    box: null,
     rejectedAt: null,
     validFrom: "2026-08-13",
     validTo: "2026-08-19",

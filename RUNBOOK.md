@@ -120,6 +120,27 @@ They share one model chain but different code. The scan is
 one's logs specifically — a difference between them has been the cause more
 than once.
 
+### A flyer page does not appear when checking a price
+
+The page picture was not stored. Three reasons, and the screen now names the
+PDF to open instead of leaving you to guess which file it was.
+
+- **Pictures were turned off** for that import ("Keep a picture of each page").
+- **The upload failed.** It used to fail silently; it is now counted and
+  reported at the end of an import, so you will see it happen rather than
+  discover it a week later.
+- **The flyer expired** and its pictures were purged three days after.
+
+The offers and the page numbers are unaffected either way — a citation still
+names the flyer, the page and the dates. To get pictures back for a current
+flyer, re-import it.
+
+```sql
+select f.retailer_id, f.page_count, f.source_filename
+from public.cartmatch_flyers f
+where f.valid_to >= current_date order by f.retailer_id;
+```
+
 ### An offer's price is wrong
 
 Open **`/confirm`** from the deals screen. It queues the offers a comparison
@@ -174,6 +195,12 @@ Written down so it is not mistaken for proven:
   never actually held anything back.
 - **Unbranded produce matching.** New, and unit-tested, but no real cart has
   been scanned against it.
+- **The highlight box.** Offers read from now on may record where their tile
+  sits on the page, and the screens draw a rectangle round it. No import has
+  run under that instruction, so no stored offer has a box yet — every page
+  will simply appear without a highlight until the next import. If a box is
+  ever drawn in the wrong place, the reading is what is wrong, not the
+  drawing: mark that offer wrong on `/confirm`.
 
 If a Thursday import goes wrong in a way this runbook does not cover, the
 fastest recovery is to clear `CARTMATCH_PAGES_PER_REQUEST` (the default of 1

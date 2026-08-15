@@ -94,7 +94,10 @@ export async function queueFlyerForReading(input: {
   pages: { pageNumber: number; extractionDataUrl: string; proofDataUrl: string }[];
   keepProofPages: boolean;
   onProgress?: (uploaded: number, total: number) => void;
-}): Promise<{ ok: true; queued: number } | { ok: false; error: string }> {
+}): Promise<
+  | { ok: true; queued: number; proofsFailed: number }
+  | { ok: false; error: string }
+> {
   const supabase = client();
   if (!supabase) return { ok: false, error: "Supabase is not configured." };
 
@@ -126,6 +129,7 @@ export async function queueFlyerForReading(input: {
   await supabase.from("cartmatch_flyer_pages").delete().eq("flyer_id", input.flyer.id);
 
   let queued = 0;
+  let proofsFailed = 0;
   for (const page of input.pages) {
     const readPath = extractionPath(userId, input.flyer.id, page.pageNumber);
 
@@ -140,15 +144,30 @@ export async function queueFlyerForReading(input: {
       });
     if (upErr) return { ok: false, error: `Uploading page ${page.pageNumber}: ${upErr.message}` };
 
+    // The proof page, and its failures are not silent.
+    //
+    // This upload used to discard its result while the extraction upload above
+    // checked its own. So a proof image that failed to store left no trace —
+    // and the page number was recorded anyway, which means the citation went
+    // on promising a picture that was not there. Somebody checking a price
+    // against "IGA page 7" got a blank space and had to open their own PDF.
+    //
+    // A failure here does not abandon the import: the offers are the point and
+    // a citation still names the flyer, the page and the dates without a
+    // picture. But it is counted and returned, so the screen can say how many
+    // pages will have no image rather than letting each one be a surprise.
     if (input.keepProofPages) {
       const proof = dataUrlToBlob(page.proofDataUrl);
       if (proof) {
-        await supabase.storage
+        const { error: proofErr } = await supabase.storage
           .from(FLYER_BUCKET)
           .upload(pagePath(userId, input.flyer.id, page.pageNumber), proof, {
             contentType: "image/jpeg",
             upsert: true,
           });
+        if (proofErr) proofsFailed += 1;
+      } else {
+        proofsFailed += 1;
       }
     }
 
@@ -165,7 +184,7 @@ export async function queueFlyerForReading(input: {
     input.onProgress?.(queued, input.pages.length);
   }
 
-  return { ok: true, queued };
+  return { ok: true, queued, proofsFailed };
 }
 
 /** How a queued flyer is progressing, for the screen that queued it. */
@@ -654,6 +673,12 @@ export interface StoredOffer {
   flyerPage: number;
   confirmedAt: string | null;
   /**
+   * Where this offer sits on its page: [ymin, xmin, ymax, xmax] on a 0-1000
+   * scale, origin top-left. Null when the model did not say, which is most
+   * offers read before this existed.
+   */
+  box: [number, number, number, number] | null;
+  /**
    * When a person looked at the page and said this reading is wrong.
    *
    * Recorded rather than deleted. A wrong reading deleted is one the next
@@ -712,11 +737,29 @@ export async function loadCurrentOffers(
       conditionText: row.condition_text ? String(row.condition_text) : null,
       flyerPage: Number(row.flyer_page),
       confirmedAt: row.confirmed_at ? String(row.confirmed_at) : null,
+      box: readStoredBox(row.box_2d),
       rejectedAt: row.rejected_at ? String(row.rejected_at) : null,
       validFrom: String(flyer.valid_from),
       validTo: String(flyer.valid_to),
     };
   });
+}
+
+/**
+ * A stored box, or null.
+ *
+ * The same checking the parser applies, repeated here rather than assumed,
+ * because a row can be older than the column or written by something else.
+ * Anything short of four whole numbers in range with the corners the right way
+ * round is discarded whole: a rectangle in the wrong place is worse than none.
+ */
+function readStoredBox(value: unknown): [number, number, number, number] | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const nums = value.map((v) => Number(v));
+  if (!nums.every((n) => Number.isInteger(n) && n >= 0 && n <= 1000)) return null;
+  const [ymin, xmin, ymax, xmax] = nums as [number, number, number, number];
+  if (ymax <= ymin || xmax <= xmin) return null;
+  return [ymin, xmin, ymax, xmax];
 }
 
 /** Every flyer held, current or not — for the management screen. */

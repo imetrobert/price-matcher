@@ -30,6 +30,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
+import { FlyerPageProof } from "@/components/FlyerPageProof";
 import { Notice, PageHeader, Spinner } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
 import { formatCents, tryParsePriceToCents } from "@/lib/money";
@@ -38,7 +39,7 @@ import { findPriceGaps } from "@/services/flyers/compare";
 import {
   confirmOffer,
   correctOfferPrice,
-  flyerPageUrl,
+  loadAllFlyers,
   loadCurrentOffers,
   rejectOffer,
   type StoredOffer,
@@ -58,10 +59,19 @@ function ConfirmQueue() {
   const [queue, setQueue] = useState<StoredOffer[]>([]);
   const [index, setIndex] = useState(0);
   const [done, setDone] = useState(0);
+  // So a page with no stored picture can name the PDF to open instead of
+  // leaving somebody to guess which of five files it was.
+  const [filenames, setFilenames] = useState<Record<string, string | null>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
-    const offers = await loadCurrentOffers();
+    const [offers, flyers] = await Promise.all([
+      loadCurrentOffers(),
+      loadAllFlyers(),
+    ]);
+    setFilenames(
+      Object.fromEntries(flyers.map((f) => [f.id, f.sourceFilename])),
+    );
     const gaps = findPriceGaps(offers, loadPrefs().minSavingsCents ?? DEFAULT_PREFS.minSavingsCents);
 
     // Both sides of every gap, biggest first, unchecked only. Both sides
@@ -118,7 +128,11 @@ function ConfirmQueue() {
             {index + 1} of {queue.length} worth checking
             {done > 0 ? ` · ${done} done` : ""}
           </p>
-          <OfferCheck offer={current} onDone={advance} />
+          <OfferCheck
+            offer={current}
+            sourceFilename={filenames[current.flyerId] ?? null}
+            onDone={advance}
+          />
         </>
       ) : (
         <Notice
@@ -152,32 +166,18 @@ function ConfirmQueue() {
  */
 function OfferCheck({
   offer,
+  sourceFilename,
   onDone,
 }: {
   offer: StoredOffer;
+  sourceFilename: string | null;
   onDone: () => void;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [imageState, setImageState] = useState<"loading" | "ready" | "missing">("loading");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fixing, setFixing] = useState(false);
   const [typed, setTyped] = useState("");
 
-  useEffect(() => {
-    let live = true;
-    setImageState("loading");
-    flyerPageUrl(offer.flyerId, offer.flyerPage)
-      .then((found) => {
-        if (!live) return;
-        setUrl(found);
-        setImageState(found ? "ready" : "missing");
-      })
-      .catch(() => live && setImageState("missing"));
-    return () => {
-      live = false;
-    };
-  }, [offer.flyerId, offer.flyerPage]);
 
   const act = async (fn: () => Promise<{ ok: true } | { ok: false; error: string }>) => {
     setBusy(true);
@@ -209,27 +209,12 @@ function OfferCheck({
         <p className="mt-1 text-sm text-warn">{offer.conditionText}</p>
       ) : null}
 
-      {imageState === "loading" ? (
-        <p className="mt-3 text-sm text-muted">Loading the page…</p>
-      ) : imageState === "missing" || !url ? (
-        <p className="mt-3 rounded-md bg-warn/10 p-2 text-sm text-warn">
-          No page image was kept for this flyer, so there is nothing here to
-          check against. Compare it with your own copy of page {offer.flyerPage}{" "}
-          before confirming.
-        </p>
-      ) : (
-        <a href={url} target="_blank" rel="noreferrer" className="mt-3 block">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={url}
-            alt={`Flyer page ${offer.flyerPage}`}
-            className="w-full rounded-xl border border-line"
-          />
-          <span className="mt-1 block text-center text-xs text-muted">
-            Tap to open full size and pinch to zoom.
-          </span>
-        </a>
-      )}
+      <FlyerPageProof
+        flyerId={offer.flyerId}
+        page={offer.flyerPage}
+        box={offer.box}
+        sourceFilename={sourceFilename}
+      />
 
       {error ? (
         <p className="mt-3 rounded-md bg-bad/10 p-2 text-sm text-bad">{error}</p>

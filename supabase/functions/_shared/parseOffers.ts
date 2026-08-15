@@ -63,6 +63,19 @@ export interface ExtractedOffer {
   condition: OfferCondition;
   conditionText: string | null;
   pageNumber: number;
+  /**
+   * Where the tile sits on the page: [ymin, xmin, ymax, xmax] on a 0-1000
+   * scale, origin top-left. Null whenever the model declined or gave something
+   * that did not survive checking.
+   *
+   * A page carries twenty to thirty tiles, so "page 7" alone still leaves
+   * somebody pinching around artwork at a till. This is what lets the screen
+   * draw a rectangle round the right one. It is decoration in the strict
+   * sense — no price, no comparison and no citation depends on it — which is
+   * exactly why it is allowed to be null and never repaired into something
+   * plausible.
+   */
+  box: [number, number, number, number] | null;
 }
 
 const BASES: readonly PriceBasis[] = [
@@ -182,6 +195,29 @@ export function parseFlyerExtraction(
   };
 }
 
+/**
+ * Four numbers that describe a rectangle, or nothing.
+ *
+ * Checked rather than trusted, and every failure returns null rather than a
+ * corrected box. A rectangle drawn in the wrong place points somebody
+ * confidently at a product that is not theirs, which is worse than drawing
+ * nothing — so anything short of four whole numbers in range, with the
+ * corners the right way round, is discarded whole.
+ *
+ * Not a rejection of the offer. The price is the offer; this is a convenience
+ * for finding it on the page.
+ */
+function readBox(value: unknown): [number, number, number, number] | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const nums = value.map((v) => (typeof v === "number" ? v : Number.NaN));
+  if (!nums.every((n) => Number.isInteger(n) && n >= 0 && n <= 1000)) return null;
+  const [ymin, xmin, ymax, xmax] = nums as [number, number, number, number];
+  // A box with no area, or one whose corners are inverted, was not a reading
+  // of anything.
+  if (ymax <= ymin || xmax <= xmin) return null;
+  return [ymin, xmin, ymax, xmax];
+}
+
 type OneResult = { offer: ExtractedOffer } | { error: string };
 
 function parseOne(item: unknown, pageNumber: number): OneResult {
@@ -248,6 +284,7 @@ function parseOne(item: unknown, pageNumber: number): OneResult {
       condition,
       conditionText: readString(row.conditionText),
       pageNumber,
+      box: readBox(row.box),
     },
   };
 }
