@@ -70,6 +70,7 @@ function FlyerImport() {
   const [finishedAt, setFinishedAt] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [keepPages, setKeepPages] = useState(DEFAULT_PREFS.keepFlyerPages);
+  const [replaceExisting, setReplaceExisting] = useState(false);
   const [usage, setUsage] = useState<StorageUsage | null>(null);
   const [held, setHeld] = useState<StoredFlyer[] | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -122,6 +123,7 @@ function FlyerImport() {
     const done = await runBatch(counted, {
       signal: controller.signal,
       keepPages,
+      replaceExisting,
       onUpdate: (updated) =>
         setItems((prev) =>
           prev.map((it) => (it.id === updated.id ? updated : it)),
@@ -185,6 +187,34 @@ function FlyerImport() {
           Select all of them together. The files stay on this device — only the
           rendered pages are sent, one at a time, to be read.
         </p>
+
+        {/*
+          Handing over the same file twice is usually not noticing it was
+          already done, and doing it anyway spends the day's allowance to
+          arrive back where you started. So a store and week already held in
+          full is skipped, and this is how somebody says they mean it.
+
+          It has to exist: re-importing is how a bad reading gets fixed. A
+          flyer read from the wrong PDF, or read badly, is corrected by handing
+          over the right file and ticking this.
+        */}
+        <label className="mt-3 flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={replaceExisting}
+            disabled={running}
+            onChange={(e) => setReplaceExisting(e.target.checked)}
+          />
+          <span>
+            <span className="font-semibold">Read again if already loaded</span>
+            <span className="block text-xs text-muted">
+              Off by default: a store and week already read in full is skipped
+              rather than read twice. Tick this to replace one — correcting a
+              flyer that was read from the wrong PDF, for instance.
+            </span>
+          </span>
+        </label>
 
         {/*
           The one setting in this app that costs money if it is wrong, so it is
@@ -484,6 +514,16 @@ function FlyerRow({
       : item.stage === "DONE"
         ? "border-good/40"
         : "border-line";
+  // Skipped is neither success nor failure: nothing went wrong and nothing was
+  // done. A tick would claim work that did not happen.
+  const mark =
+    item.stage === "DONE"
+      ? "✓ "
+      : item.stage === "FAILED"
+        ? "✕ "
+        : item.stage === "SKIPPED"
+          ? "— "
+          : "";
 
   return (
     <div className={`card border ${border}`}>
@@ -491,13 +531,7 @@ function FlyerRow({
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold">{item.file.name}</p>
           <p className="mt-1 text-xs text-muted">
-            {busy
-              ? "… "
-              : item.stage === "DONE"
-                ? "✓ "
-                : item.stage === "FAILED"
-                  ? "✕ "
-                  : ""}
+            {busy ? "… " : mark}
             {item.detail}
           </p>
         </div>

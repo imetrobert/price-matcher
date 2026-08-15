@@ -124,7 +124,24 @@ export async function queueFlyerForReading(input: {
   );
   if (flyerError) return { ok: false, error: flyerError.message };
 
-  // A re-import replaces the previous reading of this flyer entirely.
+  // A re-import replaces the previous reading of this flyer entirely — the
+  // rows AND the pictures.
+  //
+  // The pictures matter because the paths are page-numbered. Replacing a
+  // seventeen-page flyer with a seven-page one overwrites p01 to p07 and
+  // leaves p08 to p17 behind, and the weekly purge then walks pageCount —
+  // now seven — and never reaches them. Files nothing can name, taking space
+  // forever. Clearing first is the only way that stays true whatever the two
+  // page counts are.
+  const { data: existing } = await supabase.storage
+    .from(FLYER_BUCKET)
+    .list(`${userId}/${input.flyer.id}`, { limit: 500 });
+  if (existing && existing.length > 0) {
+    await supabase.storage
+      .from(FLYER_BUCKET)
+      .remove(existing.map((f) => `${userId}/${input.flyer.id}/${f.name}`));
+  }
+
   await supabase.from("cartmatch_flyer_offers").delete().eq("flyer_id", input.flyer.id);
   await supabase.from("cartmatch_flyer_pages").delete().eq("flyer_id", input.flyer.id);
 

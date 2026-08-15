@@ -45,13 +45,27 @@ import {
 } from "./pdf/renderPages";
 import { readFlyerPages, type ReadFlyerResult } from "./pdf/readPage";
 import { validityFromPages } from "./pdf/validityFromText";
-import { flyerId, queueFlyerForReading, saveFlyer } from "./storage";
+import {
+  flyerId,
+  loadAllFlyers,
+  queueFlyerForReading,
+  saveFlyer,
+} from "./storage";
 
 export type BatchStage =
   | "WAITING"
   | "RENDERING"
   | "READING"
   | "DONE"
+  /**
+   * This flyer is already held, complete, for the same store and the same
+   * week — so nothing was uploaded and nothing will be re-read.
+   *
+   * Its own stage rather than DONE, because "we read seventeen pages" and "we
+   * read none because you already had them" are different outcomes and only
+   * one of them spent an allowance.
+   */
+  | "SKIPPED"
   | "FAILED";
 
 export interface BatchItem {
@@ -186,6 +200,19 @@ export interface BatchOptions {
    * page numbers and nothing else, which is the zero-storage option.
    */
   keepPages?: boolean;
+  /**
+   * Read a flyer again even though the same store and week is already held
+   * complete.
+   *
+   * Off by default, because the usual reason to hand over the same file twice
+   * is not noticing it was already done — and doing it anyway costs the day's
+   * allowance to arrive back where you started.
+   *
+   * On when somebody means it. Re-importing is how a bad reading gets fixed,
+   * so this must never be impossible: a flyer read from the wrong PDF, or read
+   * badly, is corrected by handing over the right file and saying yes.
+   */
+  replaceExisting?: boolean;
 }
 
 /**
@@ -306,6 +333,21 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
       saveError = "Not queued: the store could not be identified. Set it and try again.";
     } else if (!validFrom || !validTo) {
       saveError = "Not queued: no run dates were found, and an offer with no end date cannot be shown at a till.";
+    } else if (
+      options.replaceExisting !== true &&
+      (await alreadyHeldComplete(flyerId(retailerId, validFrom)))
+    ) {
+      // Checked here, and not earlier, because this is the first moment the
+      // flyer's identity is known: the store comes from the logo on page one
+      // and the dates from the cover or the filename. Everything expensive is
+      // still ahead — uploading every page, and a worker read for each — so
+      // stopping now saves nearly all of it.
+      return {
+        ...current,
+        stage: "SKIPPED",
+        detail:
+          "Already loaded for this week, and read in full. Nothing was uploaded or re-read.",
+      };
     } else {
       current = { ...current, detail: "Uploading pages…" };
       options.onUpdate(current);
@@ -456,6 +498,19 @@ export async function countBatchPages(
     }
   }
   return counted;
+}
+
+/**
+ * Is this store's flyer for this week already here, and finished?
+ *
+ * Complete is the condition, not merely present. A half-read flyer is exactly
+ * the one worth handing over again — the pages that failed get another go —
+ * and refusing that would turn a recovery path into a dead end.
+ */
+async function alreadyHeldComplete(id: string): Promise<boolean> {
+  const held = await loadAllFlyers();
+  const match = held.find((f) => f.id === id);
+  return Boolean(match && match.pageCount > 0 && match.pagesRead >= match.pageCount);
 }
 
 export async function runBatch(

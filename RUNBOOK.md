@@ -156,6 +156,18 @@ and removes the offers, the queued pages and the pictures together.
 A tell that a flyer is the wrong document: a page count far from the others.
 A weekly circular runs sixteen or seventeen pages; seven is usually a booklet.
 
+### A flyer says "already loaded" and was not read
+
+Expected. A store and week already held and read in full is skipped rather
+than read twice — handing over the same file again is usually not noticing it
+was already done, and doing it anyway spends the day's allowance to arrive
+back where you started.
+
+To read it again anyway — correcting a flyer that was read from the wrong PDF,
+or read badly — tick **"Read again if already loaded"** on the import screen
+before starting. A half-read flyer is never skipped: those are exactly the
+ones worth handing over again.
+
 ### An offer's price is wrong
 
 Open **`/confirm`** from the deals screen. It queues the offers a comparison
