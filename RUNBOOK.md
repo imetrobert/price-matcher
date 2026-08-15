@@ -279,6 +279,26 @@ If the build fails, the revert procedure below undoes it.
 
 ---
 
+## Where the flyers come from, and changing that
+
+The import screen links to **raddar.ca/en/flyers/all-flyers**, with an "i"
+explaining that you open a flyer and press its PDF button. That link is one
+line in `src/components/WhereToGetFlyers.tsx` (`RADDAR_URL`) — change it there
+if a better source turns up.
+
+The picture in that panel is a **drawing** of raddar's button bar, not a
+screenshot, so it cannot break by being edited and carries none of their
+artwork. To use a real screenshot instead: commit an image at
+**`public/raddar-pdf.png`**. It is picked up automatically and the drawing
+becomes the fallback for when the file is absent — no code change at all.
+
+raddar is somebody else's site. Nothing in this app fetches from it; a person
+downloads the PDFs and hands them over. If it disappears, the app still works —
+every retailer's own site still publishes a flyer, just not as a convenient
+PDF, and any PDF from anywhere imports the same way.
+
+---
+
 ## Undoing a change that broke something
 
 You do not need a computer, a terminal or a checkout. Everything deploys from

@@ -32,6 +32,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { Notice, PageHeader } from "@/components/ui";
+import { WhereToGetFlyers } from "@/components/WhereToGetFlyers";
 import { RETAILERS } from "@/config/retailers";
 import { formatCents } from "@/lib/money";
 import {
@@ -444,6 +445,12 @@ function FlyerImport() {
           void measureStoredPages().then(setUsage).catch(() => undefined);
         }}
       />
+
+      {/*
+        The step before the file picker, and the one nothing on this screen
+        used to explain: where six PDFs come from in the first place.
+      */}
+      <WhereToGetFlyers />
 
       <section className="card mb-4">
         <label className="mb-1 block text-sm font-semibold" htmlFor="pdfs">
