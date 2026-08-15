@@ -11,7 +11,9 @@ import { formatCents } from "@/lib/money";
 import { DEFAULT_PREFS, loadPrefs, prefsAreComplete } from "@/lib/prefs";
 import {
   loadAllFlyers,
+  loadAllFlyersResult,
   queueSummary,
+  queueSummaryResult,
   retryFailedPages,
 } from "@/services/flyers/storage";
 import { flyerStatus, type FlyerStatus } from "@/services/flyers/status";
@@ -29,6 +31,13 @@ function Home() {
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFS);
   const [flyers, setFlyers] = useState<FlyerStatus | null>(null);
   const [retrying, setRetrying] = useState(false);
+  // Why the week could not be checked, when it could not.
+  //
+  // This card used to render nothing at all if either query failed, and
+  // "nothing on screen" is the same picture as "nothing to report". Worse, a
+  // failed queue read looked like a finished one: green, ready, go shopping.
+  // An unanswerable question has to look different from a good answer.
+  const [checkFailed, setCheckFailed] = useState<string | null>(null);
   // The debug link is hidden from ordinary members. Cosmetic on its own — the
   // screen itself checks the same thing, and every row it can reach is
   // governed by RLS regardless — but a link nobody should follow is a link
@@ -74,9 +83,25 @@ function Home() {
     // Derived from what is stored rather than from a run in progress: a run
     // lives in one browser tab, and the question "do I have this week's
     // prices" has to be answerable from anywhere, including tomorrow.
-    Promise.all([loadAllFlyers(), queueSummary()])
-      .then(([all, queue]) => setFlyers(flyerStatus(all, new Date(), queue)))
-      .catch(() => setFlyers(null));
+    Promise.all([loadAllFlyersResult(), queueSummaryResult()])
+      .then(([flyerResult, queueResult]) => {
+        if (!flyerResult.ok || !queueResult.ok) {
+          setFlyers(null);
+          setCheckFailed(
+            flyerResult.ok
+              ? (queueResult as { error: string }).error
+              : flyerResult.error,
+          );
+          return;
+        }
+        setCheckFailed(null);
+        setFlyers(flyerStatus(flyerResult.flyers, new Date(), queueResult.queue));
+      })
+      .catch((err) =>
+        setCheckFailed(
+          err instanceof Error ? err.message : "The check did not answer.",
+        ),
+      );
     void checkAppAccess()
       .then((access) =>
         setIsAdmin(access.status === "granted" && access.role === "app_admin"),
@@ -302,6 +327,27 @@ function Home() {
               </Link>
             </div>
           )}
+        </section>
+      ) : checkFailed ? (
+        /*
+          The card that used to be nothing.
+
+          Silence here is indistinguishable from a quiet week, and this is the
+          screen somebody reads before deciding whether to leave the house. It
+          must not imply the answer is "no flyers" when the answer is "I could
+          not ask" — and it must not offer to import, which is the action that
+          answer would wrongly suggest.
+        */
+        <section className="card mb-4 border border-warn/40">
+          <p className="font-bold text-warn">
+            Could not check this week&rsquo;s flyers
+          </p>
+          <p className="mt-2 text-sm text-muted">{checkFailed}</p>
+          <p className="mt-2 text-sm text-muted">
+            This does not mean your flyers are gone — it means this screen could
+            not reach them. Reload the page. If it keeps happening, check that
+            you are still signed in before importing anything again.
+          </p>
         </section>
       ) : null}
 

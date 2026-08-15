@@ -348,9 +348,20 @@ export type QueueByFlyer = Record<string, FlyerQueueCounts>;
  */
 const REASON_FRESH_MS = 15 * 60_000;
 
-export async function queueSummary(now: Date = new Date()): Promise<QueueByFlyer> {
+/**
+ * The queue, with the reason when it cannot be read.
+ *
+ * An empty object means "no pages are waiting", which the home card renders as
+ * a finished week in green. A failed query returned the same empty object, so
+ * a broken connection looked exactly like a completed read — wrong in the one
+ * direction that matters, since it says "you have this week's prices" to
+ * somebody about to leave the house.
+ */
+export async function queueSummaryResult(
+  now: Date = new Date(),
+): Promise<{ ok: true; queue: QueueByFlyer } | { ok: false; error: string }> {
   const supabase = client();
-  if (!supabase) return {};
+  if (!supabase) return { ok: false, error: "Storage is not configured." };
 
   // One query for every page this user owns; RLS scopes it. A week of five
   // flyers is under a hundred rows, so counting them in the browser is
@@ -366,7 +377,7 @@ export async function queueSummary(now: Date = new Date()): Promise<QueueByFlyer
       .order("id")
       .range(from, to),
   );
-  if (!fetched.ok) return {};
+  if (!fetched.ok) return fetched;
   const data = fetched.rows;
 
   const byFlyer: Record<string, QueueRow[]> = {};
@@ -395,7 +406,13 @@ export async function queueSummary(now: Date = new Date()): Promise<QueueByFlyer
     out[flyer]!.waitingReason = pickWaitingReason(rows, now);
   }
 
-  return out;
+  return { ok: true, queue: out };
+}
+
+/** The queue, or an empty one, for callers with nothing to say about failure. */
+export async function queueSummary(now: Date = new Date()): Promise<QueueByFlyer> {
+  const result = await queueSummaryResult(now);
+  return result.ok ? result.queue : {};
 }
 
 /** One page row, as far as the waiting reason is concerned. */
@@ -960,6 +977,32 @@ export async function deleteFlyer(
     .eq("id", flyerId);
 
   return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+/**
+ * Every flyer held, with the reason when it cannot be read.
+ *
+ * Same distinction the offers loader makes, for the same reason: "you hold no
+ * flyers" and "I could not find out what you hold" lead to opposite actions.
+ * The first says import; the second says do not, because importing six PDFs
+ * that are already stored spends a day's model allowance to arrive back where
+ * you started.
+ */
+export async function loadAllFlyersResult(): Promise<
+  { ok: true; flyers: StoredFlyer[] } | { ok: false; error: string }
+> {
+  const supabase = client();
+  if (!supabase) return { ok: false, error: "Storage is not configured." };
+  const fetched = await fetchAllRows((from, to) =>
+    supabase.from("cartmatch_flyers").select("*").order("id").range(from, to),
+  );
+  if (!fetched.ok) return fetched;
+  return {
+    ok: true,
+    flyers: fetched.rows
+      .map(rowToFlyer)
+      .sort((a, b) => b.validFrom.localeCompare(a.validFrom)),
+  };
 }
 
 /** Every flyer held, current or not — for the management screen. */

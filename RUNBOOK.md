@@ -245,6 +245,18 @@ fixed (`fetchAllRows` in `src/services/flyers/storage.ts` slices every growing
 query), but the arithmetic is worth remembering: **if a total ever lands on a
 round 1000, suspect truncation before you suspect the data.**
 
+### A screen says it "could not check" something
+
+Three screens now say this rather than showing nothing: the home card, the
+flyers list on `/flyers`, and the deals screen. All three used to render an
+empty state when a query failed, which reads as "you have no flyers" — the one
+message that invites re-importing six PDFs you already hold and spending a
+day's model allowance to arrive back where you started.
+
+**Do not re-import on the strength of one of these messages.** Reload first.
+If it persists, check you are still signed in. Your flyers are in Postgres and
+do not disappear because a screen could not reach them.
+
 ### An offer's price is wrong
 
 Open **`/confirm`** from the deals screen. It queues the offers a comparison

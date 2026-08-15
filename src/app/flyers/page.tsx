@@ -47,6 +47,7 @@ import {
   deleteFlyer,
   flyerContents,
   loadAllFlyers,
+  loadAllFlyersResult,
   type StoredFlyer,
   measureStoredPages,
   purgeExpiredPages,
@@ -75,6 +76,9 @@ function FlyerImport() {
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [usage, setUsage] = useState<StorageUsage | null>(null);
   const [held, setHeld] = useState<StoredFlyer[] | null>(null);
+  // Why the held list could not be read, when it could not. Distinct from an
+  // empty list, which invites the opposite action.
+  const [heldError, setHeldError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   /**
@@ -93,7 +97,18 @@ function FlyerImport() {
       .then(() => measureStoredPages())
       .then(setUsage)
       .catch(() => setUsage(null));
-    void loadAllFlyers().then(setHeld).catch(() => setHeld(null));
+    // The result form, because the wrong reading of a failure here is
+    // expensive: "you hold nothing" invites re-importing six PDFs that are
+    // already stored, and that spends a day's model allowance to arrive back
+    // where you started.
+    void loadAllFlyersResult()
+      .then((r) => {
+        setHeld(r.ok ? r.flyers : null);
+        setHeldError(r.ok ? null : r.error);
+      })
+      .catch((err) =>
+        setHeldError(err instanceof Error ? err.message : "Could not be read."),
+      );
   }, []);
 
   const onFiles = useCallback((files: FileList) => {
@@ -435,6 +450,15 @@ function FlyerImport() {
               Hide this and keep working
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {heldError ? (
+        <div className="mb-4">
+          <Notice tone="warn" title="Could not read the flyers you hold">
+            {heldError} This is not the same as holding none — do not re-import
+            on the strength of it. Reload the page first.
+          </Notice>
         </div>
       ) : null}
 
