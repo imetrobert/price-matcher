@@ -94,6 +94,8 @@ function ScanFlow() {
   const [visionNote, setVisionNote] = useState<string | null>(null);
   const [coverage, setCoverage] = useState<CoverageReport>({ obscured: 0, note: null });
   const fileRef = useRef<HTMLInputElement>(null);
+  /** The library picker. See the note beside the inputs for why it is separate. */
+  const libraryRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const p = loadPrefs();
@@ -419,7 +421,7 @@ function ScanFlow() {
           <div className="card mb-4">
             <p className="text-sm text-muted">
               {keptItems.length === 0
-                ? `One clear photo is usually enough. Up to ${PHOTOS_PER_ROUND} at a time — you can come back for more angles.`
+                ? `One clear photo is usually enough. Up to ${PHOTOS_PER_ROUND} at a time — you can come back for more angles, or use a picture already on this device.`
                 : `Photograph what the last round missed. Up to ${PHOTOS_PER_ROUND} at a time.`}
             </p>
             <input
@@ -427,6 +429,20 @@ function ScanFlow() {
               type="file"
               accept="image/*"
               capture="environment"
+              multiple
+              className="hidden"
+              onChange={(e) => onFiles(e.target.files)}
+            />
+            {/*
+              The same input without `capture`, and that one attribute is the
+              entire difference: with it, a phone opens the camera and gives
+              you no way back to the library; without it, it opens the library.
+              One input cannot be both, which is why there are two.
+            */}
+            <input
+              ref={libraryRef}
+              type="file"
+              accept="image/*"
               multiple
               className="hidden"
               onChange={(e) => onFiles(e.target.files)}
@@ -444,6 +460,23 @@ function ScanFlow() {
                 : images.length >= PHOTOS_PER_ROUND
                   ? `${PHOTOS_PER_ROUND} photos ready — read them`
                   : "Add one more photo"}
+            </button>
+
+            {/*
+              Secondary, and deliberately so. Photographing the trolley you are
+              pushing is the thing this screen is for; choosing an existing
+              picture is for the person who already has one — a photo taken in
+              the aisle before opening the app, a shelf snapped last night, a
+              screenshot of a list. Same pipeline either way: both inputs land
+              in onFiles, get shrunk, and count against the same two per round.
+            */}
+            <button
+              type="button"
+              className="btn-secondary mt-2"
+              disabled={images.length >= PHOTOS_PER_ROUND}
+              onClick={() => libraryRef.current?.click()}
+            >
+              Upload a photo from this device
             </button>
           </div>
 
