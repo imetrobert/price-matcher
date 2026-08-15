@@ -234,9 +234,28 @@ function Home() {
                 updates every ten seconds, and again whenever you come back to
                 this tab.
               </p>
-              <Link href="/flyers" className="btn-secondary mt-3">
-                Add more flyers
-              </Link>
+              {/*
+                The same two actions the loaded card offers, in the same place.
+                Scanning is worth offering mid-read: the offers already stored
+                are real, and the detail above says plainly that a page still
+                unread is missing its offers rather than free of them.
+              */}
+              <div className="mt-3 space-y-2">
+                <Link
+                  href="/scan"
+                  className={
+                    ready
+                      ? "btn-primary"
+                      : "btn-primary pointer-events-none opacity-40"
+                  }
+                  aria-disabled={!ready}
+                >
+                  Scan your cart
+                </Link>
+                <Link href="/flyers" className="btn-secondary">
+                  Add more flyers
+                </Link>
+              </div>
             </>
           ) : flyers.readiness === "NONE" ? (
             <Link href="/flyers" className="btn-primary mt-3">
@@ -288,33 +307,20 @@ function Home() {
       </section>
 
       {/*
-        Once the flyers are in, scanning and importing have moved up into the
-        card that announces them, and repeating them here would be two buttons
-        for one action. What is left is the planning question — what is cheaper
-        where, across every flyer held — which has no place in the card about
-        loading them.
+        The card above owns everything to do with loading flyers, in all three
+        states, so nothing down here repeats it. Two buttons for one
+        destination is how "Add more flyers" and "Import this week's flyers"
+        ended up on the same screen.
+
+        What is left is the planning question — what is cheaper where, across
+        every flyer held — which belongs nowhere near the card about loading
+        them. With nothing loaded it can only report that, so it waits.
       */}
-      {flyers?.readiness === "LOADED" ? (
+      {flyers && flyers.readiness !== "NONE" ? (
         <Link href="/deals" className="btn-secondary">
           Compare flyer savings
         </Link>
-      ) : (
-        <div className="space-y-3">
-          <Link
-            href="/scan"
-            className={ready ? "btn-primary" : "btn-primary pointer-events-none opacity-40"}
-            aria-disabled={!ready}
-          >
-            Scan cart
-          </Link>
-          <Link href="/deals" className="btn-secondary">
-            Compare flyer savings
-          </Link>
-          <Link href="/flyers" className="btn-secondary">
-            Import this week&rsquo;s flyers
-          </Link>
-        </div>
-      )}
+      ) : null}
 
       {!ready ? (
         <div className="mt-4">
