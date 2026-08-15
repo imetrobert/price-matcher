@@ -136,18 +136,72 @@ describe("cheaper somewhere else", () => {
     expect(cart.totalSavingCents).toBe(200);
   });
 
-  it("quotes no saving when your own shop did not advertise it", () => {
+  it("files an unknown shelf price under ON SALE, not under CHEAPER", () => {
     // The shelf price of an unadvertised product is not in this app, and a
     // competitor's sale price is no basis for guessing it. Still worth
-    // showing; not worth a number.
+    // showing; not worth a number — and not worth the word "cheaper", which
+    // is a claim nobody has checked. The competitor may be dearer.
     const cart = compareCartToFlyers(
       [item()],
       [offer({ retailerId: "maxi" as RetailerId, price: 399 })],
       "iga" as RetailerId,
     );
-    expect(cart.cheaperElsewhere).toHaveLength(1);
-    expect(cart.cheaperElsewhere[0]!.savingCents).toBeNull();
+    expect(cart.cheaperElsewhere).toHaveLength(0);
+    expect(cart.onSaleElsewhere).toHaveLength(1);
+    expect(cart.onSaleElsewhere[0]!.savingCents).toBeNull();
+    expect(cart.onSaleElsewhere[0]!.yourPriceCents).toBeNull();
+    expect(cart.onSaleElsewhere[0]!.yourPriceSource).toBeNull();
+    expect(cart.onSaleElsewhere[0]!.bestElsewhere!.price).toBe(399);
     expect(cart.totalSavingCents).toBe(0);
+  });
+
+  it("becomes arithmetic the moment somebody types the shelf price", () => {
+    // The whole point of the entry box: one number turns a suggestion into a
+    // subtraction. $5.49 here against $3.99 at Maxi is $1.50, computed in
+    // integer cents and never by a model.
+    const cart = compareCartToFlyers(
+      [item()],
+      [offer({ retailerId: "maxi" as RetailerId, price: 399 })],
+      "iga" as RetailerId,
+      { enteredPrices: { i1: 549 } },
+    );
+    expect(cart.onSaleElsewhere).toHaveLength(0);
+    expect(cart.cheaperElsewhere).toHaveLength(1);
+    expect(cart.cheaperElsewhere[0]!.savingCents).toBe(150);
+    expect(cart.cheaperElsewhere[0]!.yourPriceSource).toBe("ENTERED");
+    expect(cart.totalSavingCents).toBe(150);
+  });
+
+  it("says you already have the best price when the typed price wins", () => {
+    // A typed price that beats every flyer is a real answer, not silence.
+    const cart = compareCartToFlyers(
+      [item()],
+      [offer({ retailerId: "maxi" as RetailerId, price: 399 })],
+      "iga" as RetailerId,
+      { enteredPrices: { i1: 349 } },
+    );
+    expect(cart.bestHere).toHaveLength(1);
+    expect(cart.cheaperElsewhere).toHaveLength(0);
+    expect(cart.onSaleElsewhere).toHaveLength(0);
+    expect(cart.bestHere[0]!.savingCents).toBeNull();
+  });
+
+  it("believes the person over the flyer when both are known", () => {
+    // The flyer says $5.99 here; the shelf tag says $4.29 because the sale
+    // ended or the model misread the tile. The person is standing in front of
+    // it. Their number is the one the subtraction uses.
+    const cart = compareCartToFlyers(
+      [item()],
+      [
+        offer({ id: "a", retailerId: "iga" as RetailerId, price: 599 }),
+        offer({ id: "b", retailerId: "maxi" as RetailerId, price: 429 }),
+      ],
+      "iga" as RetailerId,
+      { enteredPrices: { i1: 449 } },
+    );
+    expect(cart.cheaperElsewhere[0]!.yourPriceSource).toBe("ENTERED");
+    expect(cart.cheaperElsewhere[0]!.yourPriceCents).toBe(449);
+    expect(cart.cheaperElsewhere[0]!.savingCents).toBe(20);
   });
 
   it("picks the cheapest competitor, not the first", () => {
@@ -187,9 +241,31 @@ describe("units are never subtracted from each other", () => {
       [offer({ retailerId: "maxi" as RetailerId, price: 362, basis: "PER_KG" })],
       "iga" as RetailerId,
     );
-    // Nothing per-item to compare, so no action — but the reading is kept.
-    expect(cart.notInFlyers).toHaveLength(1);
+    // Somebody else advertised it, so it belongs in the group that says so —
+    // this used to be filed as "nobody advertised it", which was false. No
+    // arithmetic happens in that group, so the unit mismatch cannot produce a
+    // wrong number as long as the basis is printed beside it.
+    expect(cart.onSaleElsewhere).toHaveLength(1);
+    expect(cart.notInFlyers).toHaveLength(0);
     expect(cart.lines[0]!.measuredMatches).toHaveLength(1);
+    expect(cart.lines[0]!.measuredElsewhere).toHaveLength(1);
+    // No per-item offer, so nothing to name as the best price. The line must
+    // survive that: the screen shows the weight price instead.
+    expect(cart.lines[0]!.bestElsewhere).toBeNull();
+    expect(cart.lines[0]!.savingCents).toBeNull();
+  });
+
+  it("never turns a weight price into a saving, even with a typed price", () => {
+    // $4.49 each against $3.62/kg is not an 87-cent saving. A typed price
+    // makes the per-item comparison possible; it does not make this one.
+    const cart = compareCartToFlyers(
+      [item()],
+      [offer({ retailerId: "maxi" as RetailerId, price: 362, basis: "PER_KG" })],
+      "iga" as RetailerId,
+      { enteredPrices: { i1: 449 } },
+    );
+    expect(cart.cheaperElsewhere).toHaveLength(0);
+    expect(cart.lines[0]!.savingCents).toBeNull();
   });
 });
 
@@ -288,11 +364,27 @@ describe("what may be shown to a cashier", () => {
 
   it("refuses one where your own shop never advertised the product", () => {
     // Nothing to subtract from. The results screen still shows it; a till is
-    // not the place to explain that the gap is unknown.
+    // not the place to explain that the gap is unknown. It is now structural
+    // as well as gated: such a line is not in cheaperElsewhere at all.
     const cart = compareCartToFlyers(
       [item()],
       [offer({ retailerId: "maxi" as RetailerId, price: 399 })],
       "iga" as RetailerId,
+    );
+    expect(cart.cheaperElsewhere).toHaveLength(0);
+    expect(cart.onSaleElsewhere).toHaveLength(1);
+    expect(gate(cart.onSaleElsewhere[0]!)).toBe(false);
+  });
+
+  it("still refuses a typed price, which no document backs", () => {
+    // A shelf price somebody read out is enough for the results screen and not
+    // enough for a cashier: there is no page to show for "what I pay here".
+    // The competitor's flyer proves its half and nothing proves this half.
+    const cart = compareCartToFlyers(
+      [item()],
+      [offer({ retailerId: "maxi" as RetailerId, price: 399 })],
+      "iga" as RetailerId,
+      { enteredPrices: { i1: 549 } },
     );
     expect(cart.cheaperElsewhere).toHaveLength(1);
     expect(gate(cart.cheaperElsewhere[0]!)).toBe(false);

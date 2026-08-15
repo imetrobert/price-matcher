@@ -30,10 +30,10 @@ import {
   type CartComparison,
   type CartLine,
 } from "@/services/flyers/cartMatch";
-import { loadCurrentOffers } from "@/services/flyers/storage";
+import { loadCurrentOffers, type StoredOffer } from "@/services/flyers/storage";
 import { citationLine } from "@/services/flyers/citation";
 import { conditionLabel, describeBasis } from "@/types/flyer";
-import type { DetectedProduct, RetailerId, UserPreferences } from "@/types";
+import type { Cents, DetectedProduct, RetailerId, UserPreferences } from "@/types";
 
 type Step = "capture" | "confirm" | "results";
 
@@ -58,6 +58,10 @@ function ScanFlow() {
   const [items, setItems] = useState<EditableItem[]>([]);
   const [cart, setCart] = useState<CartComparison | null>(null);
   const [offerCount, setOfferCount] = useState<number | null>(null);
+  // The offers themselves, not just how many. Typing a shelf price has to
+  // recompute the comparison on the spot, and refetching the week's flyers on
+  // every keystroke is not a thing to do to somebody's phone in a shop.
+  const [offers, setOffers] = useState<StoredOffer[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [visionNote, setVisionNote] = useState<string | null>(null);
@@ -143,20 +147,9 @@ function ScanFlow() {
       // Every price behind these results was printed in a document they hold
       // and can show at a till, which is the only kind a price-match desk
       // accepts.
-      const offers = await loadCurrentOffers();
-      setOfferCount(offers.length);
-      const comparison = compareCartToFlyers(
-        chosen,
-        offers,
-        prefs.currentRetailerId!,
-      );
-      setCart(comparison);
-      // Kept for Checkout Mode, which shows one match at a time at a till.
-      saveLastResult({
-        comparison,
-        currentRetailer: prefs.currentRetailerId!,
-        at: new Date().toISOString(),
-      });
+      const loaded = await loadCurrentOffers();
+      setOffers(loaded);
+      setOfferCount(loaded.length);
       setStep("results");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Comparison failed.");
@@ -164,6 +157,58 @@ function ScanFlow() {
       setBusy(null);
     }
   }
+
+  /**
+   * The comparison, recomputed whenever the cart or a typed price changes.
+   *
+   * It used to be computed once and frozen into state. That was fine while
+   * nothing on the results screen could change an input — but a shelf price
+   * typed in IS an input, and the whole value of typing one is watching the
+   * line turn from "may be cheaper" into a number. So it is derived.
+   *
+   * The flyers are fetched once, into `offers`, and never refetched here.
+   */
+  useEffect(() => {
+    if (step !== "results" || !prefs.currentRetailerId) return;
+    const chosen = items.filter((i) => i.include);
+    if (chosen.length === 0) return;
+
+    const enteredPrices: Record<string, Cents | null> = {};
+    for (const it of chosen) {
+      // A price is only a price once it parses. Half-typed "4." is not a
+      // number and must not briefly compare as one.
+      enteredPrices[it.id] = it.manualPrice.trim()
+        ? tryParsePriceToCents(it.manualPrice)
+        : null;
+    }
+
+    const comparison = compareCartToFlyers(
+      chosen,
+      offers,
+      prefs.currentRetailerId,
+      { enteredPrices },
+    );
+    setCart(comparison);
+    // Kept for Checkout Mode, which shows one match at a time at a till.
+    saveLastResult({
+      comparison,
+      currentRetailer: prefs.currentRetailerId,
+      at: new Date().toISOString(),
+    });
+  }, [step, items, offers, prefs.currentRetailerId]);
+
+  /**
+   * Set a shelf price without claiming the identity was confirmed.
+   *
+   * Deliberately not patchItem: that marks userConfirmed, because editing a
+   * product card IS confirming it. Typing what something costs says nothing
+   * about whether the camera read the right product, and conflating the two
+   * would quietly clear a "please look at this" warning.
+   */
+  const setPrice = (id: string, manualPrice: string) =>
+    setItems((prev) =>
+      prev.map((it) => (it.id === id ? { ...it, manualPrice } : it)),
+    );
 
   // The shelf price is no longer asked for as a precondition. This screen
   // compares flyer against flyer; what the current store charges only enters
@@ -391,6 +436,8 @@ function ScanFlow() {
           currentRetailer={prefs.currentRetailerId!}
           offerCount={offerCount ?? 0}
           coverage={coverage}
+          priceOf={(id) => items.find((i) => i.id === id)?.manualPrice ?? ""}
+          setPrice={setPrice}
           onRescan={() => {
             setStep("capture");
             setCart(null);
@@ -471,13 +518,6 @@ function ConfirmCard({
             }
             inputMode="numeric"
           />
-          <Field
-            label="Shelf price here"
-            value={item.manualPrice}
-            onChange={(v) => onChange({ manualPrice: v })}
-            placeholder="7.49"
-            inputMode="decimal"
-          />
         </div>
       ) : null}
     </div>
@@ -529,9 +569,14 @@ function CartResults({
   currentRetailer,
   offerCount,
   coverage,
+  priceOf,
+  setPrice,
   onRescan,
   onAddMore,
 }: {
+  /** The text currently typed for an item's shelf price, if any. */
+  priceOf: (id: string) => string;
+  setPrice: (id: string, value: string) => void;
   cart: CartComparison;
   currentRetailer: RetailerId;
   offerCount: number;
@@ -544,10 +589,20 @@ function CartResults({
   return (
     <section>
       <div className="card mb-4">
+        {/*
+          The headline counts BOTH answers, because a trolley where nothing has
+          a computed saving but four things are on sale elsewhere is not a
+          trolley with nothing to report — and that is precisely what the old
+          headline said.
+        */}
         <p className="text-2xl font-extrabold">
-          {cart.cheaperElsewhere.length === 0
-            ? "Nothing is cheaper elsewhere"
-            : `${cart.cheaperElsewhere.length} item${cart.cheaperElsewhere.length === 1 ? " is" : "s are"} cheaper elsewhere`}
+          {cart.cheaperElsewhere.length + cart.onSaleElsewhere.length === 0
+            ? "Nothing in your cart is on sale elsewhere"
+            : `${cart.cheaperElsewhere.length + cart.onSaleElsewhere.length} item${
+                cart.cheaperElsewhere.length + cart.onSaleElsewhere.length === 1
+                  ? " is"
+                  : "s are"
+              } on sale at another store`}
         </p>
         {cart.totalSavingCents > 0 ? (
           <p className="text-lg font-bold text-good">
@@ -569,17 +624,54 @@ function CartResults({
       </div>
 
       {/*
-        First and biggest, because it is the only section with anything to do.
+        First, because it is the only section with a number somebody can act on
+        without doing any more work. It is also the smaller of the two: a
+        computed saving needs both sides known.
       */}
       {cart.cheaperElsewhere.length > 0 ? (
         <div className="mb-5">
           <SectionHeading
             title="Cheaper at another store"
-            note="Open one to see the price, the flyer page and the dates it runs — what a price-match desk asks for."
+            note="Both prices are known, so the gap is arithmetic. Open one to see the flyer page and the dates it runs — what a price-match desk asks for."
           />
           <div className="space-y-3">
             {cart.cheaperElsewhere.map((line) => (
-              <CheaperCard key={line.item.id} line={line} here={here} />
+              <CheaperCard
+                key={line.item.id}
+                line={line}
+                here={here}
+                priceText={priceOf(line.item.id)}
+                onPrice={(v) => setPrice(line.item.id, v)}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/*
+        The section this screen exists for.
+
+        Somebody else advertised it and nobody knows what you pay here, so
+        there is no number and none is invented. The heading says MAY BE
+        cheaper because that is the whole truth: the competitor's sale price
+        might still be above your shelf tag. Typing that tag in is one field
+        away, and doing so moves the line up into the section above.
+      */}
+      {cart.onSaleElsewhere.length > 0 ? (
+        <div className="mb-5">
+          <SectionHeading
+            title="On sale elsewhere — may be cheaper than your price"
+            note={`Advertised at another store this week. ${here} did not advertise these, so there is no saving to quote — type what the shelf says and it becomes a real number.`}
+          />
+          <div className="space-y-3">
+            {cart.onSaleElsewhere.map((line) => (
+              <OnSaleCard
+                key={line.item.id}
+                line={line}
+                here={here}
+                priceText={priceOf(line.item.id)}
+                onPrice={(v) => setPrice(line.item.id, v)}
+              />
             ))}
           </div>
         </div>
@@ -597,16 +689,24 @@ function CartResults({
                 key={line.item.id}
                 label={itemLabel(line.item)}
                 right={
-                  line.hereOffer ? (
+                  line.yourPriceCents !== null ? (
                     <span className="font-semibold text-good">
-                      {formatCents(line.hereOffer.price)}
+                      {formatCents(line.yourPriceCents)}
                     </span>
                   ) : null
                 }
                 sub={
-                  line.hereOffer
-                    ? `${here} flyer, page ${line.hereOffer.flyerPage}`
-                    : undefined
+                  /*
+                    Which price won, and where it came from. A line can land
+                    here because a typed shelf price beat every flyer, and
+                    saying "flyer, page 7" about a number somebody read off a
+                    tag would be a citation for a document that does not say it.
+                  */
+                  line.yourPriceSource === "ENTERED"
+                    ? "the price you entered — nothing advertised beats it"
+                    : line.hereOffer
+                      ? `${here} flyer, page ${line.hereOffer.flyerPage}`
+                      : undefined
                 }
               />
             ))}
@@ -628,8 +728,17 @@ function CartResults({
         </div>
       ) : null}
 
+      {/*
+        The same test Checkout Mode applies, repeated here so the button does
+        not offer a screen that turns out to be empty. It includes hereOffer
+        because a till needs a document for BOTH halves, and a shelf price
+        somebody typed has none.
+      */}
       {cart.cheaperElsewhere.some(
-        (l) => l.savingCents !== null && l.bestElsewhere?.condition === "UNIT_PRICE",
+        (l) =>
+          l.savingCents !== null &&
+          l.hereOffer !== null &&
+          l.bestElsewhere?.condition === "UNIT_PRICE",
       ) ? (
         <Link href="/checkout" className="btn-primary mt-2">
           Checkout mode — one at a time, large
@@ -738,8 +847,151 @@ function QuietRow({
  * for every page of every result would be a dozen requests for a screen where
  * most rows are never touched.
  */
-function CheaperCard({ line, here }: { line: CartLine; here: string }) {
+/**
+ * "What does it cost here?" — the one field that turns a suggestion into a sum.
+ *
+ * Placed in the results rather than back on the item list, because that is the
+ * order the real thing happens in: you learn Maxi has it for $3.99, you look at
+ * the shelf in front of you, and only then do you have a number worth typing.
+ * Asking for it up front asked for it before anybody knew which items mattered.
+ *
+ * Nothing is required. A blank field is a perfectly good answer and leaves the
+ * line saying what it honestly can.
+ */
+function ShelfPriceField({
+  here,
+  value,
+  onChange,
+  known,
+}: {
+  here: string;
+  value: string;
+  onChange: (value: string) => void;
+  /** What the app already believes, when it believes anything. */
+  known: string | null;
+}) {
+  const parsed = value.trim() ? tryParsePriceToCents(value) : null;
+  const bad = value.trim() !== "" && parsed === null;
+
+  return (
+    <label className="mt-3 block">
+      <span className="text-xs font-semibold">
+        What does it cost at {here}?
+      </span>
+      <span className="mt-1 flex items-center gap-2">
+        <input
+          type="text"
+          inputMode="decimal"
+          className="field w-28"
+          placeholder={known ?? "$0.00"}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label={`Shelf price at ${here}`}
+        />
+        <span className="text-xs text-muted">
+          {bad
+            ? "Not a price."
+            : parsed !== null
+              ? "Compared against the flyers below."
+              : "Optional — type the shelf tag to get a real number."}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+/**
+ * An item somebody else advertised, where nobody knows what you pay.
+ *
+ * The card that this whole screen was missing. It states two facts — the
+ * product, and what another shop advertised it for — and stops. There is no
+ * saving, no "cheaper", and no arrow pointing at a number, because the shelf
+ * price of a product your shop did not advertise is not in this app and cannot
+ * be guessed from a competitor's sale price.
+ *
+ * It may have no per-item offer at all: a competitor advertising chicken at
+ * $3.62/lb is real information about an item in your trolley, and it is shown
+ * with its unit rather than dropped or silently compared.
+ */
+function OnSaleCard({
+  line,
+  here,
+  priceText,
+  onPrice,
+}: {
+  line: CartLine;
+  here: string;
+  priceText: string;
+  onPrice: (value: string) => void;
+}) {
   const [open, setOpen] = useState(false);
+  // Per-item first; a weight price only when that is all there is.
+  const lead = line.bestElsewhere ?? line.measuredElsewhere[0] ?? null;
+  if (lead === null) return null;
+  const store = RETAILERS[lead.retailerId]?.displayName ?? lead.retailerId;
+  const byWeight = line.bestElsewhere === null;
+
+  return (
+    <section className="card border border-warn/30">
+      <button
+        type="button"
+        className="flex w-full items-start justify-between gap-3 text-left"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <div className="min-w-0">
+          <p className="font-bold leading-tight">{itemLabel(line.item)}</p>
+          <p className="text-xs text-muted">
+            On sale at {store} · {formatCents(lead.price)}
+            {byWeight ? ` ${describeBasis(lead.basis)}` : ""} · not advertised
+            at {here}
+          </p>
+        </div>
+        <div className="shrink-0 text-right">
+          {/*
+            Where a saving would go, and deliberately not a number. "May be
+            cheaper" is the entire claim the data supports.
+          */}
+          <span className="block text-sm font-bold text-warn">may be</span>
+          <span className="text-xs text-muted">cheaper</span>
+        </div>
+      </button>
+
+      <ShelfPriceField
+        here={here}
+        value={priceText}
+        onChange={onPrice}
+        known={null}
+      />
+
+      {open ? (
+        <div className="mt-3 border-t border-line pt-3">
+          <p className="mb-3 rounded-md bg-warn/10 p-2 text-xs text-warn">
+            {here} did not advertise this, so nobody knows what you would pay
+            here — {store} may still be dearer than the shelf in front of you.
+            Compare it yourself, or type the shelf price above.
+          </p>
+          <OfferEvidence line={line} best={line.bestElsewhere} />
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function CheaperCard({
+  line,
+  here,
+  priceText,
+  onPrice,
+}: {
+  line: CartLine;
+  here: string;
+  priceText: string;
+  onPrice: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  // Guaranteed by the outcome: CHEAPER_ELSEWHERE requires a per-item offer at
+  // another chain to have beaten a known price here.
   const best = line.bestElsewhere!;
   const store = RETAILERS[best.retailerId]?.displayName ?? best.retailerId;
 
@@ -755,109 +1007,144 @@ function CheaperCard({ line, here }: { line: CartLine; here: string }) {
           <p className="font-bold leading-tight">{itemLabel(line.item)}</p>
           <p className="text-xs text-muted">
             {store} · {formatCents(best.price)}
-            {line.hereOffer
-              ? ` · ${here} ${formatCents(line.hereOffer.price)}`
-              : ` · not advertised at ${here}`}
+            {/*
+              Where the price being compared against came from. A shopper has
+              to be able to tell "your flyer says $5.99" from "you typed
+              $5.49" — they are different kinds of fact and only one of them
+              has a document behind it.
+            */}
+            {line.yourPriceSource === "ENTERED"
+              ? ` · you said ${formatCents(line.yourPriceCents!)}`
+              : ` · ${here} ${formatCents(line.yourPriceCents!)}`}
           </p>
         </div>
         <div className="shrink-0 text-right">
-          {line.savingCents !== null ? (
-            <>
-              <span className="block text-lg font-extrabold text-good">
-                {formatCents(line.savingCents)}
-              </span>
-              <span className="text-xs text-muted">cheaper</span>
-            </>
-          ) : (
-            // No number, because there is no honest number: the shelf price of
-            // a product your shop did not advertise is not in this app.
-            <span className="text-xs text-muted">
-              on sale
-              <br />
-              elsewhere
-            </span>
-          )}
+          <span className="block text-lg font-extrabold text-good">
+            {formatCents(line.savingCents!)}
+          </span>
+          <span className="text-xs text-muted">cheaper</span>
         </div>
       </button>
 
+      {/*
+        Still offered here, so a flyer price can be corrected by somebody
+        standing in front of the shelf. The sale may have ended, or the tile may
+        have been read wrongly, and the person looking at it is right.
+      */}
+      <ShelfPriceField
+        here={here}
+        value={priceText}
+        onChange={onPrice}
+        known={
+          line.hereOffer ? `flyer: ${formatCents(line.hereOffer.price)}` : null
+        }
+      />
+
       {open ? (
         <div className="mt-3 border-t border-line pt-3">
-          {line.savingCents === null ? (
-            <p className="mb-3 rounded-md bg-warn/10 p-2 text-xs text-warn">
-              {here} did not advertise this, so there is no saving to quote —
-              only that {store} has it on sale. Compare it against the shelf
-              tag yourself.
-            </p>
-          ) : null}
-
-          <div className="space-y-1 text-sm">
-            {line.matches.map((offer, i) => (
-              <p
-                key={offer.id}
-                className={`flex justify-between gap-3 ${
-                  i === 0 ? "font-bold text-good" : "text-muted"
-                }`}
-              >
-                <span>
-                  {RETAILERS[offer.retailerId]?.displayName ?? offer.retailerId}
-                </span>
-                <span>
-                  {formatCents(offer.price)} · p.{offer.flyerPage}
-                </span>
-              </p>
-            ))}
-          </div>
-
-          {best.condition !== "UNIT_PRICE" ? (
-            <p className="mt-2 text-xs text-warn">
-              {best.conditionText ?? conditionLabel(best.condition)}
-            </p>
-          ) : null}
-
-          {/*
-            Advertised per pound or per kilo. Shown because it is real
-            information a shopper can act on, and kept out of the arithmetic
-            because a weight price and a package price are not two prices for
-            the same thing.
-          */}
-          {line.measuredMatches.length > 0 ? (
-            <div className="mt-3 rounded-md bg-surface p-2 text-xs">
-              <p className="font-semibold">Also advertised by weight</p>
-              {line.measuredMatches.map((offer) => (
-                <p key={offer.id} className="text-muted">
-                  {RETAILERS[offer.retailerId]?.displayName ?? offer.retailerId}:{" "}
-                  {formatCents(offer.price)} {describeBasis(offer.basis)} — not
-                  compared against a package price.
-                </p>
-              ))}
-            </div>
-          ) : null}
-
-          <p className="mt-3 rounded-lg bg-surface px-2 py-1 text-xs">
-            {citationLine({
-              retailerId: best.retailerId,
-              flyerPage: best.flyerPage,
-              validFrom: best.validFrom,
-              validTo: best.validTo,
-              hasPageImage: true,
-            })}
-          </p>
-
-          {best.confirmedAt === null ? (
-            <p className="mt-1 text-xs text-warn">
-              Not yet confirmed against the page — check it before showing
-              anyone.
-            </p>
-          ) : null}
-
-          <FlyerPageProof
-            flyerId={best.flyerId}
-            page={best.flyerPage}
-            box={best.box}
-          />
+          <OfferEvidence line={line} best={best} />
         </div>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * The paperwork behind a line: every matched offer, the conditions, the weight
+ * prices that were deliberately not compared, and the flyer page itself.
+ *
+ * Shared by both cards. It was written once inside the "cheaper" card, which
+ * meant the new section either duplicated it or went without the evidence —
+ * and evidence is the thing this whole app is for.
+ */
+function OfferEvidence({
+  line,
+  best,
+}: {
+  line: CartLine;
+  best: StoredOffer | null;
+}) {
+  return (
+    <>
+      {line.matches.length > 0 ? (
+        <div className="space-y-1 text-sm">
+          {line.matches.map((offer, i) => (
+            <p
+              key={offer.id}
+              className={`flex justify-between gap-3 ${
+                i === 0 ? "font-bold text-good" : "text-muted"
+              }`}
+            >
+              <span>
+                {RETAILERS[offer.retailerId]?.displayName ?? offer.retailerId}
+              </span>
+              <span>
+                {formatCents(offer.price)} · p.{offer.flyerPage}
+              </span>
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      {best && best.condition !== "UNIT_PRICE" ? (
+        <p className="mt-2 text-xs text-warn">
+          {best.conditionText ?? conditionLabel(best.condition)}
+        </p>
+      ) : null}
+
+      {/*
+        Advertised per pound or per kilo. Shown because it is real information
+        a shopper can act on, and kept out of the arithmetic because a weight
+        price and a package price are not two prices for the same thing.
+      */}
+      {line.measuredMatches.length > 0 ? (
+        <div className="mt-3 rounded-md bg-surface p-2 text-xs">
+          <p className="font-semibold">Advertised by weight</p>
+          {line.measuredMatches.map((offer) => (
+            <p key={offer.id} className="text-muted">
+              {RETAILERS[offer.retailerId]?.displayName ?? offer.retailerId}:{" "}
+              {formatCents(offer.price)} {describeBasis(offer.basis)} — not
+              compared against a package price.
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      {/*
+        The proof. Falls back to the cheapest weight-priced offer when there is
+        no per-item one, because a page number is still a page number.
+      */}
+      {(() => {
+        const cited = best ?? line.measuredElsewhere[0] ?? null;
+        if (cited === null) return null;
+        return (
+          <>
+            <p className="mt-3 rounded-lg bg-surface px-2 py-1 text-xs">
+              {citationLine({
+                retailerId: cited.retailerId,
+                flyerPage: cited.flyerPage,
+                validFrom: cited.validFrom,
+                validTo: cited.validTo,
+                hasPageImage: true,
+              })}
+            </p>
+
+            {cited.confirmedAt === null ? (
+              <p className="mt-1 text-xs text-warn">
+                Not yet confirmed against the page — check it before showing
+                anyone.
+              </p>
+            ) : null}
+
+            <FlyerPageProof
+              flyerId={cited.flyerId}
+              page={cited.flyerPage}
+              box={cited.box}
+            />
+          </>
+        );
+      })()}
+    </>
   );
 }
 
