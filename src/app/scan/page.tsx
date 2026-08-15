@@ -21,6 +21,13 @@ import { RETAILERS } from "@/config/retailers";
 import { formatCents, tryParsePriceToCents } from "@/lib/money";
 import { DEFAULT_PREFS, loadPrefs, saveLastResult } from "@/lib/prefs";
 import { analyzeCartPhotos } from "@/services/vision";
+import {
+  describeBytes,
+  shrinkForVision,
+  RETRY_MAX_EDGE,
+  RETRY_QUALITY,
+  type ShrunkImage,
+} from "@/services/vision/downscale";
 import type { CoverageReport } from "@/services/vision/schema";
 import {
   compareCartToFlyers,
@@ -36,6 +43,17 @@ import { conditionLabel, describeBasis } from "@/types/flyer";
 import type { Cents, DetectedProduct, RetailerId, UserPreferences } from "@/types";
 
 type Step = "capture" | "confirm" | "results";
+
+/**
+ * Photographs per round, not per cart.
+ *
+ * Four at once was the shape that timed out, and it was also the wrong
+ * interaction: it asked somebody to guess up front how many angles a trolley
+ * needs. Two is a round. A round comes back quickly, says what it found and
+ * what it could not see, and invites another — as many as it takes, each one
+ * small enough to survive a shop's signal.
+ */
+const PHOTOS_PER_ROUND = 2;
 
 interface EditableItem extends DetectedProduct {
   include: boolean;
@@ -54,7 +72,7 @@ function ScanFlow() {
   const router = useRouter();
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFS);
   const [step, setStep] = useState<Step>("capture");
-  const [images, setImages] = useState<{ base64: string; mimeType: string; preview: string }[]>([]);
+  const [images, setImages] = useState<ShrunkImage[]>([]);
   const [items, setItems] = useState<EditableItem[]>([]);
   const [cart, setCart] = useState<CartComparison | null>(null);
   const [offerCount, setOfferCount] = useState<number | null>(null);
@@ -77,16 +95,14 @@ function ScanFlow() {
   const onFiles = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setError(null);
-    const next: { base64: string; mimeType: string; preview: string }[] = [];
-    for (const file of Array.from(files).slice(0, 4)) {
-      const base64 = await fileToBase64(file);
-      next.push({
-        base64,
-        mimeType: file.type || "image/jpeg",
-        preview: URL.createObjectURL(file),
-      });
+    // Shrunk here, before anything else touches them. A camera photo is 3–4 MB
+    // and four of those was twenty megabytes going up a shop's mobile signal
+    // inside a 45-second budget — which is what the timeouts actually were.
+    const next: ShrunkImage[] = [];
+    for (const file of Array.from(files).slice(0, PHOTOS_PER_ROUND)) {
+      next.push(await shrinkForVision(file));
     }
-    setImages((prev) => [...prev, ...next].slice(0, 4));
+    setImages((prev) => [...prev, ...next].slice(0, PHOTOS_PER_ROUND));
   }, []);
 
   async function recognize() {
@@ -97,15 +113,55 @@ function ScanFlow() {
     setBusy("Reading your cart…");
     setError(null);
     try {
-      const outcome = await analyzeCartPhotos(
+      // What earlier rounds already found, so this one is asked the small
+      // question — "what is here that we have not got yet" — instead of being
+      // made to re-describe the whole trolley.
+      const known = items
+        .filter((i) => i.include)
+        .map((i) => ({
+          brand: i.brand,
+          productName: i.productName,
+          size: i.size,
+        }));
+
+      let outcome = await analyzeCartPhotos(
         images.map((i) => ({ base64: i.base64, mimeType: i.mimeType })),
+        { known },
       );
+
+      // One retry, smaller, and only for a timeout. A worse photo that arrives
+      // beats a better one that does not — and anything else that failed will
+      // fail again the same way, so retrying it would just spend the day's
+      // allowance twice.
+      if (!outcome.ok && /timed out/i.test(outcome.error) && images.length > 0) {
+        setBusy("That timed out — trying once more with a smaller photo…");
+        const first = images[0]?.source;
+        if (first) {
+          const smaller = await shrinkForVision(first, RETRY_MAX_EDGE, RETRY_QUALITY);
+          outcome = await analyzeCartPhotos(
+            [{ base64: smaller.base64, mimeType: smaller.mimeType }],
+            { known },
+          );
+        }
+      }
       if (!outcome.ok) {
         setError(outcome.error);
         return;
       }
       const detected = outcome.products;
       if (detected.length === 0) {
+        // Empty means two different things now, and they must not share a
+        // message. With nothing known yet it is a failed reading. With items
+        // already in the cart the model was asked for NEW products only, and
+        // "none" is a correct answer — the photo showed what you already had.
+        if (known.length > 0) {
+          setVisionNote(
+            "Nothing new in that photo — everything it could see is already in your cart.",
+          );
+          setImages([]);
+          setStep("confirm");
+          return;
+        }
         setError("No products detected. Try a closer or better-lit photo.");
         return;
       }
@@ -214,6 +270,9 @@ function ScanFlow() {
   // compares flyer against flyer; what the current store charges only enters
   // when that store advertised the item, and then it comes from its own flyer
   // rather than from somebody squinting at a tag.
+  /** Everything earlier rounds kept — what the capture step must not hide. */
+  const keptItems = items.filter((i) => i.include);
+
   const unsure = items.filter((i) => i.include && needsConfirming(i));
   const clear = items.filter((i) => i.include && !needsConfirming(i));
 
@@ -267,10 +326,71 @@ function ScanFlow() {
       {/* ---------------------------------------------------------------- */}
       {step === "capture" ? (
         <section>
+          {/*
+            What the cart already holds, said before another photo is taken.
+
+            Going back for a second angle used to look exactly like starting
+            over: the item list was off-screen, nothing on this step mentioned
+            it, and the only way to find out that work had been kept was to
+            finish another round and see. It was kept — that was never the bug.
+            Not saying so was.
+          */}
+          {keptItems.length > 0 ? (
+            <div className="card mb-4 border border-good/40">
+              <p className="font-bold text-good">
+                {keptItems.length} item{keptItems.length === 1 ? "" : "s"} already
+                in this cart
+              </p>
+              <p className="mt-1 text-sm text-muted">
+                Another photo ADDS to them. Nothing you have confirmed is lost,
+                and the next round is told what is already accounted for so it
+                only looks for what is missing.
+              </p>
+              {coverage.obscured > 0 ? (
+                <p className="mt-2 rounded-md bg-warn/10 p-2 text-xs text-warn">
+                  {/*
+                    Across every round, not the last one — the count is kept as
+                    the highest any round reported, so attributing it to "last
+                    round" would be a false claim about which photo said it.
+                  */}
+                  The camera has seen {coverage.obscured} item
+                  {coverage.obscured === 1 ? "" : "s"} it could not identify
+                  {coverage.note ? `: ${coverage.note}` : ""}. That is what
+                  another angle is for.
+                </p>
+              ) : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setStep("confirm")}
+                >
+                  Done — review {keptItems.length} item
+                  {keptItems.length === 1 ? "" : "s"}
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    // Explicit, because the whole complaint was not knowing
+                    // which of the two was happening.
+                    setItems([]);
+                    setImages([]);
+                    setCart(null);
+                    setCoverage({ obscured: 0, note: null });
+                  }}
+                >
+                  Start a new cart
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <div className="card mb-4">
             <p className="text-sm text-muted">
-              One clear photo is usually enough. A second angle helps when items
-              are stacked.
+              {keptItems.length === 0
+                ? `One clear photo is usually enough. Up to ${PHOTOS_PER_ROUND} at a time — you can come back for more angles.`
+                : `Photograph what the last round missed. Up to ${PHOTOS_PER_ROUND} at a time.`}
             </p>
             <input
               ref={fileRef}
@@ -284,9 +404,16 @@ function ScanFlow() {
             <button
               type="button"
               className="btn-primary mt-3"
+              disabled={images.length >= PHOTOS_PER_ROUND}
               onClick={() => fileRef.current?.click()}
             >
-              {images.length === 0 ? "Take a photo of your cart" : "Add another photo"}
+              {images.length === 0
+                ? keptItems.length === 0
+                  ? "Take a photo of your cart"
+                  : "Photograph another angle"
+                : images.length >= PHOTOS_PER_ROUND
+                  ? `${PHOTOS_PER_ROUND} photos ready — read them`
+                  : "Add one more photo"}
             </button>
           </div>
 
@@ -294,12 +421,17 @@ function ScanFlow() {
             <div className="mb-4 grid grid-cols-2 gap-2">
               {images.map((img, i) => (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={i}
-                  src={img.preview}
-                  alt={`Cart photo ${i + 1}`}
-                  className="h-32 w-full rounded-xl border border-line object-cover"
-                />
+                <figure key={i}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={img.preview}
+                    alt={`Cart photo ${i + 1}`}
+                    className="h-32 w-full rounded-xl border border-line object-cover"
+                  />
+                  <figcaption className="mt-1 text-center text-xs text-muted">
+                    {describeBytes(img.bytes)} to send
+                  </figcaption>
+                </figure>
               ))}
             </div>
           ) : null}
@@ -1148,14 +1280,3 @@ function OfferEvidence({
   );
 }
 
-/** A File as base64 without the data: prefix, which is what the API wants. */
-async function fileToBase64(file: File): Promise<string> {
-  const buffer = await file.arrayBuffer();
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(binary);
-}

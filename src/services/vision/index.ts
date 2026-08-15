@@ -50,8 +50,25 @@ export type VisionOutcome =
     }
   | { ok: false; error: string; code: VisionErrorCode };
 
+/** A product already found, as the model needs to be told about it. */
+export interface KnownItem {
+  brand: string | null;
+  productName: string | null;
+  size: string | null;
+}
+
 export async function analyzeCartPhotos(
   images: VisionImage[],
+  options: {
+    /**
+     * What earlier photos already produced.
+     *
+     * Sent so the model reports only what is NEW. Without it, a second angle
+     * re-describes the whole trolley: the answer takes as long as the first
+     * one, and every item already confirmed comes back as a duplicate row.
+     */
+    known?: KnownItem[];
+  } = {},
 ): Promise<VisionOutcome> {
   if (images.length === 0) {
     return { ok: false, code: "NO_IMAGES", error: "No images supplied." };
@@ -100,7 +117,16 @@ export async function analyzeCartPhotos(
         Authorization: `Bearer ${token}`,
         apikey: env.supabaseAnonKey,
       },
-      body: JSON.stringify({ images }),
+      body: JSON.stringify({
+        images,
+        // Names only. The model needs to know what has been accounted for, not
+        // the app's internal ids or confidences.
+        known: (options.known ?? [])
+          .map((k) =>
+            [k.brand, k.productName, k.size].filter(Boolean).join(" ").trim(),
+          )
+          .filter((s) => s !== ""),
+      }),
     });
 
     const data = await res.json().catch(() => null);

@@ -433,7 +433,32 @@ Deno.serve(async (req: Request) => {
     payload !== null &&
     (payload as { mode?: unknown }).mode === "flyer";
 
-  const parts: unknown[] = [{ text: flyerMode ? FLYER_PROMPT : VISION_PROMPT }];
+  /**
+   * Products earlier photos already accounted for.
+   *
+   * The second angle used to be a full re-scan: same duration, same tokens,
+   * and every already-confirmed item returned again as a duplicate. Naming
+   * what is done turns each extra photo into the small question it actually
+   * is — "what is in this picture that we have not got yet".
+   */
+  const known = extractKnown(payload);
+
+  const prompt = flyerMode
+    ? FLYER_PROMPT
+    : known.length === 0
+      ? VISION_PROMPT
+      : `${VISION_PROMPT}
+
+ALREADY IDENTIFIED — DO NOT REPEAT THESE:
+${known.map((k) => `- ${k}`).join("\n")}
+
+The shopper has already recorded the items above from earlier photographs of
+this same cart. Report ONLY products you can see that are NOT in that list. If
+every product you can see is already listed, return an empty "products" array —
+that is a correct and useful answer, not a failure. Count anything you cannot
+identify in "obscured_count" as usual.`;
+
+  const parts: unknown[] = [{ text: prompt }];
   for (const img of images.slice(0, MAX_IMAGES)) {
     parts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } });
   }
@@ -809,6 +834,26 @@ function supportsThinking(model: string): boolean {
   // Widen this only for a family measured to accept it. Assuming forward
   // compatibility is what produced the bug.
   return model.toLowerCase().includes("2.5");
+}
+
+/**
+ * The already-identified list, defensively.
+ *
+ * Anything that is not a short string is dropped rather than trusted: this
+ * text is interpolated into a prompt, and a caller who can put arbitrary
+ * content there can steer the model. Newlines go, length is capped, and so is
+ * the number of entries — a trolley does not hold sixty distinct products, and
+ * a caller claiming it does is not describing a trolley.
+ */
+function extractKnown(payload: unknown): string[] {
+  if (typeof payload !== "object" || payload === null) return [];
+  const raw = (payload as { known?: unknown }).known;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((v): v is string => typeof v === "string")
+    .map((v) => v.replace(/[\r\n]+/g, " ").trim().slice(0, 120))
+    .filter((v) => v !== "")
+    .slice(0, 60);
 }
 
 function extractImages(payload: unknown): IncomingImage[] {
