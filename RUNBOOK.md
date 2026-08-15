@@ -199,6 +199,62 @@ comparison permanently without deleting the record.
 
 ---
 
+## Undoing a change that broke something
+
+You do not need a computer, a terminal or a checkout. Everything deploys from
+`main` on GitHub, so reverting a commit there redeploys the previous state
+within about two minutes.
+
+1. **github.com/imetrobert/price-matcher/commits/main**
+2. Open the commit that broke it.
+3. **Revert** (top right of the commit page).
+4. GitHub opens a pull request undoing it. **Merge** it.
+
+That is the whole procedure. The Edge Functions redeploy if the commit touched
+`supabase/functions/**`; the site rebuilds either way.
+
+**Which commit?** The build marker says. Every worker reply carries one — the
+`"build"` field in `net._http_response` — and the commit that set it is the
+suspect. Reverting the newest commit that touched `supabase/functions/` is the
+safe first move.
+
+**What a revert cannot undo:** anything already written to the database. Code
+goes back; offers, flyers and confirmations stay as they are. That is the right
+way round, but it means a revert fixes broken behaviour and not broken data.
+Wrong data is removed with the × on a flyer, or the reject button on `/confirm`.
+
+---
+
+## Everything that is configured, and where
+
+If a setting is ever lost, this is the list. Nothing here can be recovered from
+the code — it is all outside the repository on purpose.
+
+**Supabase → Edge Functions → Secrets**
+
+| Name | Purpose | If missing |
+|---|---|---|
+| `CARTMATCH_GEMINI_API_KEY` | Reads flyers and cart photos | Nothing is read; the worker answers 503 |
+| `CARTMATCH_WORKER_KEY` | The only thing between the internet and a service-role connection. Must match the cron job exactly | Worker refuses everything (503 or 401) |
+| `CARTMATCH_GEMINI_MODEL` | **Deliberately unset.** Unset means the seven-model default in `_shared/models.ts` | Setting it to one model removes six fallbacks |
+| `CARTMATCH_PAGES_PER_REQUEST` | **Deliberately unset.** Unset means 1 — one page per request, the proven path | `3` turns on batching, which has never run against real pages |
+
+`SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are
+provided to Edge Functions by Supabase. You do not set them.
+
+**GitHub → Settings → Secrets and variables → Actions**
+
+`SUPABASE_ACCESS_TOKEN` and `SUPABASE_PROJECT_REF` deploy the Edge Functions.
+The `NEXT_PUBLIC_*` build variables are listed in `DEPLOY.md` section 3.
+
+**Postgres** — the cron job, whose command holds a copy of the worker key.
+`select command from cron.job;` shows it.
+
+**Google AI Studio** — the API key itself, in the "Price checker" project. Its
+per-model daily allowances are at https://ai.dev/rate-limit.
+
+---
+
 ## Turning risky things off
 
 All of these are Edge Function secrets. Changing one takes effect on the next

@@ -45,8 +45,21 @@ In the Supabase SQL Editor, run these files from this repo, in order:
    account to a new device instead of being typed again. The only table here
    with an UPDATE policy, because settings are current state rather than an
    append-only record.
+4. `supabase/flyers.sql` — the flyers and their offers, the private bucket that
+   holds page pictures, and the storage policies. This is where the week's
+   prices live; without it there is nothing to compare.
+5. `supabase/worker.sql` — the page queue the scheduled reader works through,
+   so a flyer finishes after the browser tab has closed. **Then schedule the
+   job** — the `cron.schedule` block is in that file's comments, and the
+   `timeout_milliseconds` argument in it is not optional. Without it pg_net
+   stops waiting after five seconds, records a null response, and every failure
+   afterwards is invisible.
+6. `supabase/budget.sql` — counts the Gemini requests this app sends so the
+   scheduled reader can hold some back for a scan. Optional: without it the
+   reader behaves exactly as it did before the budget existed, because the
+   counter lookup fails soft.
 
-All three are safe to re-run, but read the header of `policies.sql` first if this
+All six are safe to re-run, but read the header of `policies.sql` first if this
 project was set up by someone else. Postgres OR-s permissive policies together,
 so a policy file whose `drop policy` names do not match what is actually
 deployed *adds* a second, wider grant instead of replacing the first.
@@ -80,6 +93,16 @@ from pg_policies
 where schemaname = 'public' and tablename like 'cartmatch%'
 order by tablename, policyname;
 ```
+
+### The whole schema is in those files
+
+Every column added after the first deployment — `errored_at`, `rejected_at`,
+`box_2d` — lives in one of them as an `add column if not exists`. So running
+the six files against an empty project reproduces what is deployed today. No
+change was left as a command typed once into the SQL editor and forgotten,
+which is the failure that makes a database impossible to rebuild.
+
+---
 
 ## 2. Edge Functions (once)
 
