@@ -376,6 +376,32 @@ describe("what may be shown to a cashier", () => {
     expect(gate(cart.onSaleElsewhere[0]!)).toBe(false);
   });
 
+  it("refuses an expired flyer, whatever the gap says", () => {
+    // Checkout Mode holds the last scan in local storage, so it can be opened
+    // days later. An advertisement whose week has ended is not a price, and
+    // this screen is held up in front of a cashier.
+    const expired = (validTo: string) =>
+      compareCartToFlyers(
+        [item()],
+        [
+          offer({ id: "a", retailerId: "iga" as RetailerId, price: 599 }),
+          offer({
+            id: "b",
+            retailerId: "maxi" as RetailerId,
+            price: 399,
+            validTo,
+          }),
+        ],
+        "iga" as RetailerId,
+      ).cheaperElsewhere[0]!;
+
+    const current = (line: CartLine) =>
+      line.bestElsewhere!.validTo >= new Date().toISOString().slice(0, 10);
+
+    expect(current(expired("2020-01-05"))).toBe(false);
+    expect(current(expired("2999-12-31"))).toBe(true);
+  });
+
   it("still refuses a typed price, which no document backs", () => {
     // A shelf price somebody read out is enough for the results screen and not
     // enough for a cashier: there is no page to show for "what I pay here".

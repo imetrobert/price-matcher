@@ -19,7 +19,7 @@ import { FlyerPageProof } from "@/components/FlyerPageProof";
 import { MockBanner, Money, Notice, PageHeader, Spinner } from "@/components/ui";
 import { RETAILERS } from "@/config/retailers";
 import { formatCents, tryParsePriceToCents } from "@/lib/money";
-import { DEFAULT_PREFS, loadPrefs, saveLastResult } from "@/lib/prefs";
+import { DEFAULT_PREFS, clearLastResult, loadPrefs, saveLastResult } from "@/lib/prefs";
 import { analyzeCartPhotos } from "@/services/vision";
 import {
   describeBytes,
@@ -273,6 +273,32 @@ function ScanFlow() {
   /** Everything earlier rounds kept — what the capture step must not hide. */
   const keptItems = items.filter((i) => i.include);
 
+  /**
+   * Throw the cart away — all of it, everywhere it lives.
+   *
+   * The important part is `clearLastResult`. A comparison is written to local
+   * storage for Checkout Mode, which shows one match at a time in large type
+   * at a till. Resetting the screen without clearing that left the previous
+   * trolley's comparison sitting there, ready to be shown to a cashier by
+   * somebody who believed they had started over. The screen said empty and
+   * the till screen said $2.40 off a jar of coffee that is not in the cart.
+   *
+   * So this is deliberately one function rather than four screens each
+   * remembering to clear four things.
+   */
+  const startNewCart = useCallback(() => {
+    setItems([]);
+    setImages([]);
+    setCart(null);
+    setOffers([]);
+    setOfferCount(null);
+    setCoverage({ obscured: 0, note: null });
+    setVisionNote(null);
+    setError(null);
+    clearLastResult();
+    setStep("capture");
+  }, []);
+
   const unsure = items.filter((i) => i.include && needsConfirming(i));
   const clear = items.filter((i) => i.include && !needsConfirming(i));
 
@@ -368,20 +394,7 @@ function ScanFlow() {
                   Done — review {keptItems.length} item
                   {keptItems.length === 1 ? "" : "s"}
                 </button>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => {
-                    // Explicit, because the whole complaint was not knowing
-                    // which of the two was happening.
-                    setItems([]);
-                    setImages([]);
-                    setCart(null);
-                    setCoverage({ obscured: 0, note: null });
-                  }}
-                >
-                  Start a new cart
-                </button>
+                <StartOver count={keptItems.length} onConfirm={startNewCart} />
               </div>
             </div>
           ) : null}
@@ -558,6 +571,13 @@ function ScanFlow() {
           >
             Back to photos
           </button>
+          {/*
+            Also here, because this is the screen where somebody realises the
+            photo caught the wrong trolley or the list is beyond fixing.
+          */}
+          <div className="mt-2">
+            <StartOver count={keptItems.length} onConfirm={startNewCart} />
+          </div>
         </section>
       ) : null}
 
@@ -570,12 +590,7 @@ function ScanFlow() {
           coverage={coverage}
           priceOf={(id) => items.find((i) => i.id === id)?.manualPrice ?? ""}
           setPrice={setPrice}
-          onRescan={() => {
-            setStep("capture");
-            setCart(null);
-            setItems([]);
-            setCoverage({ obscured: 0, note: null });
-          }}
+          onRescan={startNewCart}
           onAddMore={() => setStep("capture")}
         />
       ) : null}
@@ -880,9 +895,9 @@ function CartResults({
       <button type="button" className="btn-secondary mt-2" onClick={onAddMore}>
         Photograph something it missed
       </button>
-      <button type="button" className="btn-ghost mt-2" onClick={onRescan}>
-        Start a new cart
-      </button>
+      <div className="mt-2">
+        <StartOver count={cart.lines.length} onConfirm={onRescan} />
+      </div>
     </section>
   );
 }
@@ -1280,3 +1295,54 @@ function OfferEvidence({
   );
 }
 
+/**
+ * "Start a new cart", with one tap between a full trolley and an empty one.
+ *
+ * A cart is twenty minutes of photographing, correcting names and typing shelf
+ * prices. A single mis-tap on a phone in a shop should not end that, and a
+ * browser confirm() dialog is both ugly and easy to dismiss without reading.
+ * So the button asks in place, says how much is about to go, and defaults to
+ * keeping it — the destructive option is the one you have to reach for twice.
+ */
+function StartOver({ count, onConfirm }: { count: number; onConfirm: () => void }) {
+  const [asking, setAsking] = useState(false);
+
+  if (!asking) {
+    return (
+      <button type="button" className="btn-ghost" onClick={() => setAsking(true)}>
+        Start a new cart
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-bad/40 p-3">
+      <p className="text-sm font-semibold">
+        Discard {count} item{count === 1 ? "" : "s"} and start again?
+      </p>
+      <p className="mt-1 text-xs text-muted">
+        The photos, the products and any prices you typed all go. Your flyers
+        are not touched.
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={() => setAsking(false)}
+        >
+          Keep this cart
+        </button>
+        <button
+          type="button"
+          className="btn-ghost text-bad"
+          onClick={() => {
+            setAsking(false);
+            onConfirm();
+          }}
+        >
+          Yes, discard it
+        </button>
+      </div>
+    </div>
+  );
+}

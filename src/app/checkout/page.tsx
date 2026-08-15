@@ -62,6 +62,7 @@ export default function CheckoutPage() {
 
   const ready = (cart?.comparison?.cheaperElsewhere ?? []).filter(showable);
   const current = ready[index];
+  const age = cart ? scanAge(cart.at) : null;
 
   if (!loaded) return null;
 
@@ -98,6 +99,18 @@ export default function CheckoutPage() {
           {index + 1} of {ready.length}
         </span>
       </div>
+
+      {/*
+        Said above the price, not below it. A cashier reading this screen is
+        being asked to accept a number; if that number came out of a scan from
+        two days ago, that is part of what they are accepting.
+      */}
+      {age !== null ? (
+        <div className="mb-2 rounded-md bg-warn/10 p-2 text-center text-sm font-semibold text-warn">
+          This cart was scanned {age}. Prices may have changed — scan again to
+          be sure.
+        </div>
+      ) : null}
 
       {current ? (
         <CheckoutCard line={current} here={cart!.currentRetailer} />
@@ -137,8 +150,37 @@ function showable(line: CartLine): boolean {
     line.savingCents !== null &&
     line.bestElsewhere !== null &&
     line.hereOffer !== null &&
-    line.bestElsewhere.condition === "UNIT_PRICE"
+    line.bestElsewhere.condition === "UNIT_PRICE" &&
+    // The flyer must still be running. An expired advertisement is not a
+    // price, and this screen exists to be held up in front of a cashier.
+    isCurrent(line.bestElsewhere.validTo)
   );
+}
+
+/** Is that flyer still running today? Dates are ISO days, compared as text. */
+function isCurrent(validTo: string): boolean {
+  return validTo >= new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * How old the scan is, in words, or null when it was taken today.
+ *
+ * `at` was recorded from the beginning and never read. A cart from three days
+ * ago rendered exactly like one from three minutes ago — at a till, in large
+ * type, with a saving on it. The project's own rule is that a cached result is
+ * never presented as current without identifying its age, and this screen was
+ * the one place breaking it.
+ */
+function scanAge(at: string): string | null {
+  const then = new Date(at);
+  if (Number.isNaN(then.getTime())) return "at an unknown time";
+  const days = Math.floor((Date.now() - then.getTime()) / 86_400_000);
+  if (days <= 0) {
+    return then.toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10)
+      ? null
+      : "yesterday";
+  }
+  return days === 1 ? "yesterday" : `${days} days ago`;
 }
 
 function CheckoutCard({ line, here }: { line: CartLine; here: RetailerId }) {
