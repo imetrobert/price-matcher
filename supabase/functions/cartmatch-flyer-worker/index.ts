@@ -52,7 +52,7 @@ import { FLYER_PROMPT, FLYER_SCHEMA } from "../_shared/flyerPrompt.ts";
 
 /** Which build answered. Same reason as the other functions: a silent stale
  *  deploy is indistinguishable from a working one until you check. */
-const FUNCTION_BUILD = "2026-08-15-worker-12";
+const FUNCTION_BUILD = "2026-08-15-worker-13";
 
 /**
  * Pages per tick.
@@ -877,6 +877,47 @@ function batchSchema() {
     },
     required: ["pages"],
   };
+}
+
+// ---------------------------------------------------------------------------
+// SMALL HELPERS
+// ---------------------------------------------------------------------------
+//
+// These were deleted by accident when the prompt moved to _shared, and the
+// consequence was invisible in exactly the worst way: `json` is what the
+// top-level catch uses to report a failure, so the error handler threw while
+// handling the error and the platform answered a bare "Internal Server Error"
+// with no body. Every scheduled tick failed for hours saying nothing.
+//
+// The file still parsed, still deployed, still had balanced braces and no
+// duplicate names. Nothing but running it could have found this.
+
+function json(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+  });
+}
+
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+/** Concrete flash first, newest first; then lite, then aliases, then pro. */
+function rankModel(name: string): number {
+  const version = Number(/gemini-(\d+(?:\.\d+)?)/.exec(name)?.[1] ?? "0");
+  if (/flash/.test(name) && !/lite|latest|image|preview/.test(name)) {
+    return 100 - version;
+  }
+  if (/flash/.test(name) && !/latest/.test(name)) return 200 - version;
+  if (/flash/.test(name)) return 300;
+  if (/pro/.test(name)) return 400;
+  return 500;
 }
 
 // ---------------------------------------------------------------------------
