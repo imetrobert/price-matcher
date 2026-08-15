@@ -228,6 +228,13 @@ order by f.valid_from desc, f.retailer_id;
 A flyer whose `valid_to` is in the past is excluded on purpose — an expired
 flyer is not a stale price, it is not a price.
 
+**Can it come back?** Not this instance, and the class is now guarded.
+`tests/noSilentTruncation.test.ts` fails the build if anyone adds a read of a
+growing table that does not either slice, count on the server, or carry a
+written `// bounded:` reason. The deploy workflow runs the tests before it
+builds, so a query like that cannot reach the site. If that test ever fails,
+its own header says what to do.
+
 **The history behind this.** Until August 2026 the sources list was built from
 the offers, so a flyer with none was not shown as having none: it was not shown
 at all, and read exactly like a store nobody had loaded. At the same time every

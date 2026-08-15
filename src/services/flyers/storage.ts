@@ -276,6 +276,8 @@ export async function queueProgress(flyerId: string): Promise<QueueProgress> {
   const supabase = client();
   if (!supabase) return empty;
 
+  // bounded: one flyer's pages. The largest circular yet imported was 26, the
+  // PDF renderer refuses anything over 120, and the cap is 1000.
   const { data } = await supabase
     .from("cartmatch_flyer_pages")
     .select("status, offers_found")
@@ -450,6 +452,10 @@ export async function retryFailedPages(): Promise<
   const supabase = client();
   if (!supabase) return { ok: false, error: "Storage is not configured." };
 
+  // bounded: the UPDATE itself is never capped — every failed page is requeued
+  // whatever the count. Only the list of ids it hands back can be truncated,
+  // and that is used for one number in a message. If more than 1000 pages ever
+  // fail at once, the retry is complete and the sentence undercounts it.
   const { data, error } = await supabase
     .from("cartmatch_flyer_pages")
     .update({
@@ -728,6 +734,8 @@ export async function loadCurrentFlyers(
   if (!supabase) return [];
   const today = isoDay(on);
 
+  // bounded: one row per store per week, and only weeks covering today. Six in
+  // practice; a thousand would mean a thousand banners.
   const { data, error } = await supabase
     .from("cartmatch_flyers")
     .select("*")
