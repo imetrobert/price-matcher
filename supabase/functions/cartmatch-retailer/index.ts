@@ -190,6 +190,21 @@ const ALLOWED_HOSTS = new Set([
   // Being here permits a fetch of a URL a person supplies. It is not a licence
   // to enumerate the bucket, and nothing in this file lists or walks it.
   "stgraddaradfprod.blob.core.windows.net",
+  // raddar, which is TC Transcontinental's flyer platform and — going by the
+  // storage account name serving the Maxi and IGA PDFs, stgRADDARadfprod —
+  // already the source those files come from. It is on this list to answer one
+  // question: whether its own pages publish a stable index of the per-retailer
+  // PDF URLs, which would replace guessing a version suffix with reading one.
+  //
+  // MEASUREMENT ONLY, and the distinction is sharper here than for a retailer.
+  // raddar is an aggregator, and an aggregator's terms are more likely to
+  // restrict automated collection than a grocer's own published circular.
+  // Those terms — raddar.ca/en/terms — are UNREAD at the time of writing, and
+  // being on this list permits one honest request with a truthful User-Agent
+  // so somebody can see what is there and then decide. It is not a licence to
+  // collect weekly, and nothing here schedules anything.
+  "raddar.ca",
+  "www.raddar.ca",
   // Metro Inc's own blob storage, serving the Super C and Metro flyer PDFs.
   // A second, differently shaped source: an opaque publication id and a version
   // hash, so its URLs cannot be derived — they have to be found on the page
@@ -209,7 +224,7 @@ const ALLOWED_HOSTS = new Set([
  * So every response now says which build produced it. Bump this string
  * whenever the file changes in a way a caller could notice.
  */
-const FUNCTION_BUILD = "2026-08-14-find-pdfs";
+const FUNCTION_BUILD = "2026-08-15-raddar-probe";
 
 const MAX_REDIRECTS = 3;
 const TIMEOUT_MS = 20_000;

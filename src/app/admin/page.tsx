@@ -386,6 +386,17 @@ function RetailerProbe() {
     { label: "IGA flyer", url: "https://www.iga.ca/flyer" },
     { label: "Walmart flyer", url: "https://www.walmart.ca/en/flyer" },
     { label: "Super C flyer", url: "https://www.superc.ca/en/flyer" },
+    // The two that answer whether the weekly import can be found rather than
+    // guessed. raddar is TC Transcontinental's platform and, going by the
+    // storage account serving the Maxi and IGA files, already the source they
+    // come from — so its own pages are the likeliest place a stable index of
+    // those PDF URLs exists. Super C is here because its site, unlike Maxi's
+    // and IGA's, answers a server request at all.
+    {
+      label: "raddar Montréal grocery",
+      url: "https://raddar.ca/en/flyers/grocery/montréal-qc",
+    },
+    { label: "raddar PDF regions", url: "https://raddar.ca/en/flyers/regions/" },
   ];
 
   const [busy, setBusy] = useState<string | null>(null);
