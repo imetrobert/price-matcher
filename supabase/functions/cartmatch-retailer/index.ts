@@ -152,6 +152,36 @@ async function authenticate(req: Request): Promise<AuthOutcome> {
       error: "Your account does not have access to CartMatch.",
     };
   }
+
+  // Admin only, and enforced HERE rather than in the browser.
+  //
+  // This function fetches arbitrary URLs from an allow-list on the server's
+  // behalf. Everything else in this app reads or writes the caller's own rows
+  // under Row Level Security, so a member who forces past a client-side check
+  // sees their own data through an untidy screen. This one is different: it
+  // makes outbound requests, and the debug screen that drives it can point it
+  // at any allowed host. A hidden link is not a control for that.
+  //
+  // A failed check refuses. An entitlement question that cannot be answered is
+  // not an entitlement.
+  const { data: role, error: roleError } = await supabase.rpc("app_role", {
+    app_name: "cartmatch",
+  });
+  if (roleError) {
+    console.error(`[cartmatch] app_role failed: ${roleError.message}`);
+    return { ok: false, status: 503, error: "Could not verify your role." };
+  }
+  if (role !== "app_admin") {
+    return {
+      ok: false,
+      status: 403,
+      error:
+        "This function is limited to accounts holding app_admin on cartmatch. Yours holds: " +
+        (typeof role === "string" ? role : "no role") +
+        ".",
+    };
+  }
+
   return { ok: true };
 }
 
@@ -224,7 +254,7 @@ const ALLOWED_HOSTS = new Set([
  * So every response now says which build produced it. Bump this string
  * whenever the file changes in a way a caller could notice.
  */
-const FUNCTION_BUILD = "2026-08-15-raddar-probe";
+const FUNCTION_BUILD = "2026-08-15-admin-only";
 
 const MAX_REDIRECTS = 3;
 const TIMEOUT_MS = 20_000;

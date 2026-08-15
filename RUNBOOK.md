@@ -180,11 +180,15 @@ UPDATE for it.
 select * from public.app_access;
 ```
 
-Worth knowing what the gate is and is not: it stops an ordinary member
-wandering in. It does not stop somebody who knows the URL and can open a
-developer console. The real boundary is Row Level Security on every row and
-`has_app_access('cartmatch')` inside every Edge Function, both of which apply
-whether or not this screen is reachable.
+The screen check is a door, not a wall — somebody who knows the URL and can
+open a developer console gets past it, and reaches their own data through a
+screen with technical labels on it.
+
+The **retailer probe** is the exception and is walled properly: the Edge
+Function itself refuses anybody without `app_admin`, because that one makes
+outbound requests on the server's behalf rather than reading the caller's own
+rows. If a probe returns 403 naming your role, that is this check and not a
+network problem.
 
 ### An offer's price is wrong
 
