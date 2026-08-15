@@ -71,6 +71,7 @@ function FlyerImport() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [keepPages, setKeepPages] = useState(DEFAULT_PREFS.keepFlyerPages);
   const [replaceExisting, setReplaceExisting] = useState(false);
+  const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [usage, setUsage] = useState<StorageUsage | null>(null);
   const [held, setHeld] = useState<StoredFlyer[] | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -99,6 +100,7 @@ function FlyerImport() {
     setItems([...files].map((file, i) => newBatchItem(file, i)));
     setFinishedAt(null);
     setStartedAt(null);
+    setOverlayDismissed(false);
   }, []);
 
   const start = useCallback(async () => {
@@ -138,6 +140,38 @@ function FlyerImport() {
 
   const totals = useMemo(() => batchTotals(items), [items]);
 
+  /** The file being worked on, for the overlay. */
+  const current = useMemo(() => {
+    const busy = items.find(
+      (i) => i.stage === "RENDERING" || i.stage === "READING",
+    );
+    return busy ? `${busy.file.name} — ${busy.detail}` : null;
+  }, [items]);
+
+  /**
+   * The browser's own "leave site?" prompt, while the browser half is running.
+   *
+   * This is the only thing that can actually stop a tab from closing — a
+   * dialog drawn by the page cannot. And this half genuinely cannot be
+   * resumed: the PDF is being read on this device and has never been uploaded,
+   * so a tab closed here loses the render and the flyer has to be handed over
+   * again from the file picker.
+   *
+   * It is removed the moment the uploads finish, because after that closing
+   * the tab is not merely safe but the intended thing to do — the reading
+   * carries on server-side without anybody watching.
+   */
+  useEffect(() => {
+    if (!running) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Browsers show their own wording; assigning returnValue is what asks.
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [running]);
+
   // Re-rendered on every item update, which is every few seconds while a page
   // is read — often enough for a clock without a timer of its own.
   const remaining = useMemo(() => {
@@ -159,6 +193,84 @@ function FlyerImport() {
         subtitle="Drop them all in. Uploading takes a couple of minutes, then you can close the tab — the reading finishes on its own."
         backHref="/"
       />
+
+      {/*
+        Held over the screen while the browser half runs.
+
+        Not decoration and not a lock — a page cannot prevent a tab closing,
+        which is what the beforeunload handler above is for. This is the
+        explanation that handler cannot give: what is happening, how far along
+        it is, and the one sentence somebody actually needs, which is that this
+        wait ends and then the tab is free.
+
+        Dismissable on purpose. Somebody who wants to look at the list of
+        flyers underneath while it runs should be able to, and blocking that
+        would be the page insisting on its own importance.
+      */}
+      {running && !overlayDismissed ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="card w-full max-w-[420px]">
+            <div className="flex items-center gap-3">
+              <span
+                aria-hidden
+                className="h-6 w-6 shrink-0 animate-spin rounded-full border-[3px] border-line border-t-brand"
+              />
+              <p className="text-lg font-extrabold">Rendering and uploading…</p>
+            </div>
+
+            <p className="mt-2 text-sm text-muted">
+              Please keep this tab open until the uploads finish. The PDFs are
+              being read on this device and have not been sent yet, so closing
+              now loses the work and the files would need handing over again.
+            </p>
+
+            <div className="mt-3 flex items-baseline justify-between gap-3">
+              <p className="font-bold">
+                {totals.percent}% — page {totals.pagesRead} of{" "}
+                {totals.pagesTotal || "…"}
+              </p>
+              <p className="text-sm text-muted">
+                {remaining === null
+                  ? "estimating…"
+                  : remaining <= 1
+                    ? "under a minute"
+                    : `about ${remaining} min`}
+              </p>
+            </div>
+
+            <div
+              className="mt-1 h-3 overflow-hidden rounded-full bg-line"
+              role="progressbar"
+              aria-valuenow={totals.percent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <div
+                className="h-full rounded-full bg-brand transition-[width] duration-500"
+                style={{ width: `${totals.percent}%` }}
+              />
+            </div>
+
+            {/* Which file, so a long wait is legible rather than anonymous. */}
+            {current ? (
+              <p className="mt-2 truncate text-xs text-muted">{current}</p>
+            ) : null}
+
+            <p className="mt-3 rounded-md bg-good/10 p-2 text-xs text-good">
+              When this finishes you can close the tab. The reading carries on
+              server-side, and the home screen shows how far it has got.
+            </p>
+
+            <button
+              type="button"
+              className="btn-ghost mt-3"
+              onClick={() => setOverlayDismissed(true)}
+            >
+              Hide this and keep working
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <HeldFlyers
         flyers={held}

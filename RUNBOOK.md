@@ -197,11 +197,15 @@ To start it again: the `cron.schedule` block above.
 
 1. Thursday, new flyers land. Download each store's PDF.
 2. Open the app → **Import additional flyers** → select them all at once.
-3. Uploading takes a couple of minutes. Then close the tab — reading continues
-   on the server.
-4. The home card shows progress and says when it is done, with the dates the
+3. **Keep the tab open for the first couple of minutes.** An overlay says so,
+   with a progress bar. The PDFs are being read on this device and have not
+   been sent yet, so closing during that loses the render and the files need
+   handing over again. The browser will also ask before you leave.
+4. Once the uploads finish the overlay goes and the tab is free — reading
+   carries on server-side whether or not anything is watching.
+5. The home card shows progress and says when it is done, with the dates the
    flyers cover and how many days are left.
-5. Before shopping: **Compare flyer savings**, or scan the cart in the shop.
+6. Before shopping: **Compare flyer savings**, or scan the cart in the shop.
 
 Storage looks after itself: page pictures are deleted three days after a flyer
 expires, and the purge runs whenever the import screen is opened.
