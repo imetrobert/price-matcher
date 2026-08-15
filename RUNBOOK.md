@@ -207,6 +207,29 @@ outbound requests on the server's behalf rather than reading the caller's own
 rows. If a probe returns 403 naming your role, that is this check and not a
 network problem.
 
+### The Edge Functions deploy failed but the site deployed fine
+
+Look at which step failed. If it is **Install Supabase CLI**, with:
+
+```
+Failed to resolve latest Supabase CLI release: rate limit exceeded
+```
+
+then nothing is wrong with your code. The install action was asking GitHub
+which CLI release is newest, from a runner IP shared with strangers, and that
+call is rate-limited. The version is now pinned in
+`.github/workflows/functions.yml` so the call is not made at all.
+
+**This failure shape is the dangerous one**: the Pages deploy is a separate
+workflow and succeeds, so the site updates while the Edge Functions do not.
+The app then runs new code against an old function. If you ever see one
+workflow green and the other red, assume that, and re-run the red one from the
+Actions tab ("Re-run failed jobs").
+
+To move the pinned CLI version on, pick one from
+https://www.npmjs.com/package/supabase and change **both** lines that name it
+in `functions.yml` — the first attempt and the retry.
+
 ### A store is missing from the deals screen
 
 First check whether the deals screen lists it at all. Every flyer running today

@@ -60,33 +60,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Two attempts, both authenticated.
+      # Pinned, and pinned for a reason.
       #
-      # This step failed once with "Failed to resolve latest Supabase CLI
-      # release: rate limit exceeded". The action asks GitHub which release is
-      # newest, and an unauthenticated API call from a shared runner IP is
-      # rate-limited by whoever else is on that IP. Passing the workflow's own
-      # token raises the limit from sixty requests an hour to five thousand.
+      # `version: latest` makes the action ask GitHub's API which release is
+      # newest, and that call is unauthenticated from a shared runner IP. It
+      # failed with "Failed to resolve latest Supabase CLI release: rate limit
+      # exceeded" — nothing to do with this repository, and it took the whole
+      # deploy with it while the site's own build went out fine, which is the
+      # worst shape a failure can have: half-shipped.
       #
-      # The retry covers the rest: a deploy that fails for a reason unrelated
-      # to the code is a deploy that will be assumed to have worked, and that
-      # assumption has already cost this project two debugging sessions.
+      # A fixed version resolves from npm instead, so the rate-limited call is
+      # not made at all. The action accepts only a `version` input — there is
+      # no token to pass, which is why the previous attempt to authenticate the
+      # call did nothing.
+      #
+      # To move it on: pick a version from https://www.npmjs.com/package/supabase
+      # and change the two lines below. Both must match.
       - name: Install Supabase CLI
         id: cli
         uses: supabase/setup-cli@v1
         continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
         with:
-          version: latest
+          version: 2.114.0
+
+      # One retry, after a pause.
+      #
+      # The previous retry fired 0.3 seconds after the first attempt, which is
+      # useless against a per-hour rate limit and not much better against a
+      # network blip. Thirty seconds covers a transient npm or CDN failure; a
+      # rate limit is no longer reachable from here anyway.
+      - name: Wait before retrying
+        if: steps.cli.outcome == 'failure'
+        run: sleep 30
 
       - name: Install Supabase CLI (retry)
         if: steps.cli.outcome == 'failure'
         uses: supabase/setup-cli@v1
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
         with:
-          version: latest
+          version: 2.114.0
+
+      # Whichever attempt won, prove there is a CLI before going further. A
+      # deploy that runs without one fails with a message about a missing
+      # command, several steps from the thing that actually went wrong.
+      - name: Confirm the CLI is installed
+        run: supabase --version
 
       # Fail loudly and early. A missing secret otherwise surfaces as a CLI
       # error several steps later that reads like a network problem, and the
