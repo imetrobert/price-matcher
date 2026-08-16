@@ -1167,6 +1167,8 @@ function OnSaleCard({
         </div>
       </button>
 
+      <SizeUnverifiedNote line={line} />
+
       <ShelfPriceField
         here={here}
         value={priceText}
@@ -1235,6 +1237,8 @@ function CheaperCard({
           <span className="text-xs text-muted">cheaper</span>
         </div>
       </button>
+
+      <SizeUnverifiedNote line={line} />
 
       {/*
         Still offered here, so a flyer price can be corrected by somebody
@@ -1492,4 +1496,28 @@ function describeSizeBasis(basis: string | null): string | null {
   if (basis.includes("dimensions")) parts.push("judged from the package size in the photo");
   if (basis.includes("typical")) parts.push("the size this product is usually sold in");
   return parts.length > 0 ? parts.join(", ") : null;
+}
+
+/**
+ * The caution that pays for matching without a size.
+ *
+ * Brand, name and variant agreed, and a size known on both sides and different
+ * is a hard blocker that never reaches here — so this is the same product as
+ * far as anything readable goes. What is missing is the check, and the whole
+ * case for allowing the match is that this note gets shown instead.
+ *
+ * It says what to do, not merely that something is uncertain. "Unverified" on
+ * its own is noise; "look at the tub before you quote this" is an instruction.
+ */
+function SizeUnverifiedNote({ line }: { line: CartLine }) {
+  if (!line.sizeUnverified) return null;
+
+  return (
+    <p className="mt-2 rounded-md bg-warn/10 p-2 text-xs text-warn">
+      <span className="font-semibold">Check the size before you quote this.</span>{" "}
+      The brand and product match, but the size could not be read on one side —
+      so this may be a different pack. Checkout Mode will not show it until the
+      size is confirmed.
+    </p>
+  );
 }

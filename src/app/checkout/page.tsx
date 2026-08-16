@@ -151,6 +151,10 @@ function showable(line: CartLine): boolean {
     line.bestElsewhere !== null &&
     line.hereOffer !== null &&
     line.bestElsewhere.condition === "UNIT_PRICE" &&
+    // A size nobody read is a size nobody checked. The results screen shows
+    // these with a warning so somebody can go and look at the tub; a till is
+    // not the place to discover that the pack sizes differ.
+    !line.sizeUnverified &&
     // The flyer must still be running. An expired advertisement is not a
     // price, and this screen exists to be held up in front of a cashier.
     isCurrent(line.bestElsewhere.validTo)

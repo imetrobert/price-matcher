@@ -112,6 +112,16 @@ export interface CartLine {
   measuredMatches: StoredOffer[];
   /** The same, restricted to other chains: what this trolley could be told about. */
   measuredElsewhere: StoredOffer[];
+  /**
+   * True when the offer this line leads with was matched without a confirmed
+   * size — one side or the other printed nothing readable.
+   *
+   * The product is still the product: brand, name and variant all agreed, and
+   * a size KNOWN on both sides and different is a hard blocker that never gets
+   * here. What is missing is the check, so every screen showing one of these
+   * has to ask for it, and Checkout Mode refuses them entirely.
+   */
+  sizeUnverified: boolean;
 }
 
 export interface CartComparison {
@@ -222,9 +232,22 @@ function line(
 ): CartLine {
   const canonical = toCanonical(item);
 
-  const matched = offers.filter(
-    (offer) => scoreMatch(canonical, offerCanonical(offer)).score >= SAME_PRODUCT_SCORE,
-  );
+  /**
+   * Which offers are this product, and which of those were matched without a
+   * confirmed size.
+   *
+   * The set is the compensating control for allowing the match at all. An
+   * unread size no longer blocks a comparison — it travels with it, so the
+   * screen can say "check the size before you quote this" and the till can
+   * refuse it outright.
+   */
+  const unverified = new Set<string>();
+  const matched = offers.filter((offer) => {
+    const result = scoreMatch(canonical, offerCanonical(offer));
+    if (result.score < SAME_PRODUCT_SCORE) return false;
+    if (result.level === "L3_NO_SIZE") unverified.add(offer.id);
+    return true;
+  });
 
   // Split before anything is compared. A per-pound price and a package price
   // are not two prices for one thing, and the moment they share a sorted list
@@ -255,6 +278,9 @@ function line(
   const yourPriceSource: YourPriceSource | null =
     enteredPrice !== null ? "ENTERED" : hereOffer ? "FLYER_HERE" : null;
 
+  // The offer this line leads with, which is what the caution is about.
+  const lead = perItemElsewhere[0] ?? hereOffer ?? measuredElsewhere[0] ?? null;
+
   const base = {
     item,
     hereOffer,
@@ -263,6 +289,7 @@ function line(
     matches: perItem,
     measuredMatches,
     measuredElsewhere,
+    sizeUnverified: lead !== null && unverified.has(lead.id),
   };
 
   // Nobody else advertised it, in any unit. Nothing to send anybody across

@@ -517,11 +517,15 @@ export function meaningfulTokens(input: string): string[] {
 const MASS_UNITS: Record<string, number> = {
   g: 1,
   gr: 1,
+  gm: 1,
+  gms: 1,
   gram: 1,
   grams: 1,
   grammes: 1,
   kg: 1000,
   kgs: 1000,
+  kilo: 1000,
+  kilos: 1000,
   kilogram: 1000,
   kilograms: 1000,
   lb: 453.59237,
@@ -581,7 +585,18 @@ export interface ParsedSize {
 export function parseSize(raw: string | null | undefined): ParsedSize {
   if (!raw) return { size: null, packageCount: 1 };
 
-  const text = normalizeText(raw).replace(/×/g, "x");
+  // Both substitutions happen BEFORE normalizeText, and that order is the
+  // whole point. normalizeText keeps only [a-z0-9%.\s-], so a decimal comma
+  // and a multiplication sign are both replaced by a space — which does not
+  // fail to parse, it parses WRONGLY and says nothing:
+  //
+  //   "0,4 kg"    -> "0 4 kg"    -> 4 kg,    ten times too large
+  //   "4 × 100 g" -> "4 100 g"   -> 100 g,   a quarter of the pack
+  //
+  // Quebec writes "1,5 L" as a matter of course, so this was not an edge case.
+  const text = normalizeText(
+    raw.replace(/[×✕✖]/g, "x").replace(/(\d),(\d)/g, "$1.$2"),
+  );
   if (text === "") return { size: null, packageCount: 1 };
 
   // Multi-pack: "<count> x <value><unit>"

@@ -109,12 +109,23 @@ describe("why a missing size matters at all", () => {
       identitySource: "USER_ENTERED",
     });
 
-  it("cannot reach a match without a size on both sides", () => {
-    // 90 is the bar `SAME_PRODUCT_SCORE` sets. Fuzzy is capped at 70, so this
-    // is not "a weaker match" — it is no match, and the item vanishes from
-    // every comparison without comment.
+  it("matches without a size, but never as proof", () => {
+    /*
+      This reverses a rule that was in force earlier the same day, and the
+      reversal was deliberate. Requiring a size to match meant a trolley of
+      tubs photographed at an angle produced no results at all and gave no
+      reason — the strictness was invisible, which made it useless as a
+      safeguard and expensive as a feature.
+
+      Now it matches, and the caution is carried on the result instead: the
+      match cannot back a claim at a till, and the screens say the size is
+      unconfirmed. A person can act on that; a silently dropped item is not
+      something anybody can act on.
+    */
     const result = scoreMatch(oikos(null), oikos("650 g"));
-    expect(result.score).toBeLessThan(90);
+    expect(result.score).toBeGreaterThanOrEqual(90);
+    expect(result.level).toBe("L3_NO_SIZE");
+    expect(result.eligibleForCheckoutProof).toBe(false);
   });
 
   it("reaches one once the size is supplied", () => {

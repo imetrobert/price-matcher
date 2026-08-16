@@ -47,6 +47,21 @@ export const SCORE = {
   retailerIdExact: 98,
   fullAttribute: 95,
   strongAttribute: 90,
+  /*
+    Brand and name agree, size unknown.
+
+    Deliberately at the same number as a full attribute match rather than just
+    below it, because the two are the same claim about identity: this is that
+    product. What differs is not confidence in WHICH product — it is that one
+    field was never read, and the honest response to that is a warning on the
+    screen, not a score that quietly excludes the item from every comparison.
+
+    Before this rung existed, an unread size dropped the item to the fuzzy
+    ceiling of 70 against a bar of 90, so it matched nothing at all and said
+    nothing about why. A trolley of unreadable tubs came back empty and looked
+    like a week with no savings in it.
+  */
+  unverifiedSize: 90,
   fuzzyStrong: 70,
   fuzzyWeak: 40,
 } as const;
@@ -240,6 +255,29 @@ export function scoreMatch(
     return finalize("L3_ATTRIBUTES", SCORE.strongAttribute, reasons, blockers);
   }
 
+  /*
+    Same product, unverified size.
+
+    Only reachable when the sizes do not DISAGREE: a size known on both sides
+    and different is a hard blocker several branches above, and returns
+    NO_MATCH. So this rung means one side simply had nothing to read — a tub
+    photographed at an angle, a flyer tile that printed no weight.
+
+    Brand and variant have already agreed to get here, which is what makes it
+    defensible. It is never checkout-eligible, and `finalize` enforces that
+    rather than trusting a caller to remember.
+  */
+  if (namesMatch && !bothSizesKnown) {
+    reasons.push(`Brand match ("${a.brand}")`);
+    reasons.push("Product name match");
+    reasons.push(
+      a.size || b.size
+        ? `Size read on one side only (${(a.size ?? b.size)!.raw}) — not confirmed`
+        : "Size not read on either side — not confirmed",
+    );
+    return finalize("L3_NO_SIZE", SCORE.unverifiedSize, reasons, blockers);
+  }
+
   // -- Level 4: fuzzy -----------------------------------------------------
   const overlap = tokenOverlap(a.normalizedTokens, b.normalizedTokens);
   const missingSize = !bothSizesKnown;
@@ -269,9 +307,15 @@ function finalize(
     tier,
     reasons,
     blockers,
-    // Level 4 is never automatically checkout-ready, whatever it scored.
+    // Level 4 is never automatically checkout-ready, whatever it scored, and
+    // neither is a match whose size nobody confirmed. Enforced here rather
+    // than at each call site: a rule every caller has to remember is a rule
+    // one of them will forget, and the cost of forgetting is a wrong price
+    // shown to a cashier.
     eligibleForCheckoutProof:
-      CHECKOUT_ELIGIBLE_TIERS.includes(tier) && level !== "L4_FUZZY",
+      CHECKOUT_ELIGIBLE_TIERS.includes(tier) &&
+      level !== "L4_FUZZY" &&
+      level !== "L3_NO_SIZE",
   };
 }
 

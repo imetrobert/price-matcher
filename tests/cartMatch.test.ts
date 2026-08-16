@@ -350,7 +350,8 @@ describe("what may be shown to a cashier", () => {
     line.savingCents !== null &&
     line.bestElsewhere !== null &&
     line.hereOffer !== null &&
-    line.bestElsewhere.condition === "UNIT_PRICE";
+    line.bestElsewhere.condition === "UNIT_PRICE" &&
+    !line.sizeUnverified;
 
   it("admits a gap between two advertised prices", () => {
     const cart = compareCartToFlyers(
@@ -402,6 +403,25 @@ describe("what may be shown to a cashier", () => {
 
     expect(current(expired("2020-01-05"))).toBe(false);
     expect(current(expired("2999-12-31"))).toBe(true);
+  });
+
+  it("refuses a match whose size nobody confirmed", () => {
+    // The compensating control for matching without a size. The results screen
+    // shows these with "check the size before you quote this"; a till is not
+    // the place to discover that the packs differ.
+    const cart = compareCartToFlyers(
+      [item({ size: null })],
+      [
+        offer({ id: "a", retailerId: "iga" as RetailerId, price: 599 }),
+        offer({ id: "b", retailerId: "maxi" as RetailerId, price: 399 }),
+      ],
+      "iga" as RetailerId,
+    );
+    const line = cart.cheaperElsewhere[0];
+    expect(line).toBeDefined();
+    // It matched — that is the change — and it is flagged.
+    expect(line!.sizeUnverified).toBe(true);
+    expect(gate(line!)).toBe(false);
   });
 
   it("still refuses a typed price, which no document backs", () => {

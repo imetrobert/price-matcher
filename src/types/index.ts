@@ -159,6 +159,14 @@ export type MatchLevel =
   | "L1_GTIN"
   | "L2_RETAILER_ID"
   | "L3_ATTRIBUTES"
+  /**
+   * Brand, name and variant agree; the size is unknown on one or both sides.
+   *
+   * Treated as the same product so the comparison can happen at all, and never
+   * as proof: a size nobody read is a size nobody checked, and the screens
+   * that show one of these must say so before anybody quotes a price.
+   */
+  | "L3_NO_SIZE"
   | "L4_FUZZY"
   | "NO_MATCH";
 

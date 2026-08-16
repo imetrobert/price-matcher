@@ -216,7 +216,7 @@ describe("critical match cases", () => {
       brand: "Ritz",
       name: "Crackers",
       variant: "Original",
-      size: null, // size unknown -> cannot reach level 3
+      size: null, // size unknown on one side
       identitySource: "ATTRIBUTE_SEARCH",
     });
     const b = buildCanonicalProduct({
@@ -227,7 +227,37 @@ describe("critical match cases", () => {
       identitySource: "RETAILER_PRODUCT_DATA",
     });
     const m = scoreMatch(a, b);
-    expect(m.level).toBe("L4_FUZZY");
+    /*
+      This used to fall to fuzzy and therefore match nothing at all, which was
+      a decision taken by a score rather than by anybody: the item silently
+      left every comparison. It is now treated as the same product — brand,
+      name and variant all agree and the sizes do not disagree, one is simply
+      unread — and the caution moves to where it can be acted on.
+
+      The half that has not changed, and must not: it can never back a claim
+      at a till.
+    */
+    expect(m.level).toBe("L3_NO_SIZE");
+    expect(m.eligibleForCheckoutProof).toBe(false);
+    expect(m.reasons.join(" ")).toMatch(/not confirmed/i);
+  });
+
+  it("a genuinely fuzzy result is never checkout-eligible either", () => {
+    // Names that only partly overlap, which is a different situation from an
+    // unread size and still must not reach a cashier.
+    const a = buildCanonicalProduct({
+      brand: "Ritz",
+      name: "Crackers Original",
+      size: "200 g",
+      identitySource: "ATTRIBUTE_SEARCH",
+    });
+    const b = buildCanonicalProduct({
+      brand: "Ritz",
+      name: "Crackers Whole Wheat Family",
+      size: "200 g",
+      identitySource: "RETAILER_PRODUCT_DATA",
+    });
+    const m = scoreMatch(a, b);
     expect(m.eligibleForCheckoutProof).toBe(false);
   });
 
