@@ -21,6 +21,13 @@ import { RETAILERS } from "@/config/retailers";
 import { formatCents, tryParsePriceToCents } from "@/lib/money";
 import { DEFAULT_PREFS, clearLastResult, loadPrefs, saveLastResult } from "@/lib/prefs";
 import { deleteCart, saveCart } from "@/services/carts/history";
+import {
+  applyCorrection,
+  fingerprintOf,
+  loadCorrections,
+  pickCorrection,
+  saveCorrection,
+} from "@/services/products/corrections";
 import { analyzeCartPhotos } from "@/services/vision";
 import {
   describeBytes,
@@ -59,6 +66,17 @@ const PHOTOS_PER_ROUND = 2;
 interface EditableItem extends DetectedProduct {
   include: boolean;
   manualPrice: string;
+  /**
+   * Fields filled from a correction somebody typed before, and the reading
+   * that correction was keyed to.
+   *
+   * Both travel with the item: the first so the card can say where a value
+   * came from, the second so a further correction updates the same row instead
+   * of keying itself to the corrected reading — which would never be produced
+   * by a camera again, and so would never be found.
+   */
+  correctedFields: string[];
+  fingerprint: string | null;
 }
 
 export default function ScanPage() {
@@ -188,9 +206,38 @@ function ScanFlow() {
       // Appended, not replaced. Photographing a missed item is the second half
       // of "what did the camera catch" — a shopper who spots a gap in the list
       // must be able to fill it without losing everything already confirmed.
+      /*
+        Apply what anybody has already fixed about these exact readings.
+
+        One query for the whole batch, before the list is shown, so a product
+        somebody corrected last week arrives correct rather than arriving wrong
+        and being corrected again. A failure here is silent by design: the
+        corrections are an improvement, and a trolley must still compare
+        without them.
+      */
+      const prints = detected.map((d) => fingerprintOf(d));
+      const fixes = await loadCorrections(
+        prints.filter((p): p is string => p !== null),
+      ).catch(() => new Map<string, never[]>());
+
       setItems((prev) => [
         ...prev,
-        ...detected.map((d) => ({ ...d, include: true, manualPrice: "" })),
+        ...detected.map((d, i) => {
+          const fingerprint = prints[i] ?? null;
+          const rows = fingerprint ? (fixes.get(fingerprint) ?? []) : [];
+          const correction = pickCorrection(rows);
+          const { correctedFields, ...patch } = correction
+            ? applyCorrection(d, correction)
+            : { correctedFields: [] as string[] };
+          return {
+            ...d,
+            ...patch,
+            include: true,
+            manualPrice: "",
+            correctedFields,
+            fingerprint,
+          };
+        }),
       ]);
       setImages([]);
       setStep("confirm");
@@ -326,9 +373,41 @@ function ScanFlow() {
   // second action for a decision they already made.
   const patchItem = (id: string, patch: Partial<EditableItem>) =>
     setItems((prev) =>
-      prev.map((it) =>
-        it.id === id ? { ...it, ...patch, userConfirmed: true } : it,
-      ),
+      prev.map((it) => {
+        if (it.id !== id) return it;
+        const next = { ...it, ...patch, userConfirmed: true };
+
+        /*
+          Remember it, keyed to the reading it corrected.
+
+          `it.fingerprint` rather than one computed from `next`: the key has to
+          be what the CAMERA produced, because that is what the camera will
+          produce again next week. Keying to the corrected values would store a
+          fix under a reading no photograph ever generates, and it would never
+          be found.
+
+          Fire and forget. Somebody standing in a shop correcting a name is not
+          waiting on a round trip, and a failed save costs the improvement, not
+          the scan.
+        */
+        if (it.fingerprint) {
+          const touchesIdentity =
+            "brand" in patch ||
+            "productName" in patch ||
+            "variant" in patch ||
+            "size" in patch;
+          if (touchesIdentity) {
+            void saveCorrection(it.fingerprint, {
+              brand: next.brand,
+              productName: next.productName,
+              variant: next.variant,
+              size: next.size,
+            }).catch(() => undefined);
+          }
+        }
+
+        return next;
+      }),
     );
 
   return (
@@ -712,6 +791,7 @@ function ConfirmCard({
               placeholder="type what the label says"
             />
             <SizeHelp item={item} onUse={(size) => onChange({ size })} />
+            <CorrectedNote item={item} />
           </div>
           <Field
             label="Qty in cart"
@@ -1518,6 +1598,39 @@ function SizeUnverifiedNote({ line }: { line: CartLine }) {
       The brand and product match, but the size could not be read on one side —
       so this may be a different pack. Checkout Mode will not show it until the
       size is confirmed.
+    </p>
+  );
+}
+
+/**
+ * Where a value came from, when it did not come from the photograph.
+ *
+ * A correction applied silently is indistinguishable from a reading, and the
+ * difference matters: a reading is what the camera saw this time, a correction
+ * is what somebody typed about this reading before — possibly weeks ago,
+ * possibly somebody else, possibly about a pack that has since changed size.
+ *
+ * So it is named, and it is editable like anything else. The value is applied
+ * rather than merely suggested because a person typed it about this exact
+ * reading, which is a stronger claim than a model's recollection of a typical
+ * size — but "stronger" is not "beyond question", and the card says so.
+ */
+function CorrectedNote({ item }: { item: EditableItem }) {
+  if (item.correctedFields.length === 0) return null;
+
+  const names: Record<string, string> = {
+    brand: "brand",
+    productName: "product",
+    variant: "variant",
+    size: "size",
+  };
+  const fixed = item.correctedFields.map((f) => names[f] ?? f).join(", ");
+
+  return (
+    <p className="mt-1 rounded-md bg-brand/10 p-2 text-xs">
+      <span className="font-semibold">Filled from an earlier correction</span> —
+      the {fixed} came from a fix somebody typed for this same reading, not from
+      this photo. Change it if the pack is different now.
     </p>
   );
 }

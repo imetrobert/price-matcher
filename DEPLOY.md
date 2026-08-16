@@ -59,7 +59,14 @@ In the Supabase SQL Editor, run these files from this repo, in order:
    reader behaves exactly as it did before the budget existed, because the
    counter lookup fails soft.
 
-All six are safe to re-run, but read the header of `policies.sql` first if this
+7. `supabase/corrections.sql` — remembers what people fix about a product
+   reading, so the same misreading is corrected once rather than every week.
+   Optional: without it every scan starts from what the camera sees, exactly as
+   before, because the lookup fails soft. Read its header before running it —
+   it is the one table every member can read, deliberately, and the reason is
+   written there.
+
+All seven are safe to re-run, but read the header of `policies.sql` first if this
 project was set up by someone else. Postgres OR-s permissive policies together,
 so a policy file whose `drop policy` names do not match what is actually
 deployed *adds* a second, wider grant instead of replacing the first.

@@ -268,6 +268,38 @@ fixed (`fetchAllRows` in `src/services/flyers/storage.ts` slices every growing
 query), but the arithmetic is worth remembering: **if a total ever lands on a
 round 1000, suspect truncation before you suspect the data.**
 
+### The app learning from corrections
+
+When somebody fixes a brand, product, variant or size on the confirm screen,
+the fix is stored against **what the camera said**, not against the product.
+Next time a photo produces that same reading, the fix is applied before anybody
+is asked, and the card says "filled from an earlier correction" so an applied
+fix never looks like something the camera read.
+
+**Needs `supabase/corrections.sql`.** Without it nothing breaks — every scan
+just starts from what the camera sees, because the lookup fails soft.
+
+**Corrections are shared between everybody with access.** That is the point:
+the second person to photograph a tub benefits from the first person's typing.
+The table holds brands, product names, variants and sizes — statements about
+groceries, not about people. No prices, carts, photographs, times or places.
+
+**If a bad correction gets in**, delete its row. Each person holds one row per
+reading, keyed `<fingerprint>::<user_id>`, and you hold app_admin so you can
+delete anyone's:
+
+```sql
+select id, fingerprint, brand, product_name, variant, size, updated_at
+from public.cartmatch_product_corrections
+order by updated_at desc limit 50;
+
+delete from public.cartmatch_product_corrections where id = '<the id>';
+```
+
+Nobody can edit anybody else's row — RLS restricts updates to your own. When
+two people disagree, the app prefers your own correction, then the value the
+most people wrote, then the most recent.
+
 ### Saved carts
 
 `/carts` lists every trolley scanned this flyer week — date, store, how many
