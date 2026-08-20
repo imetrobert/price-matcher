@@ -45,7 +45,11 @@ import {
   type CartComparison,
   type CartLine,
 } from "@/services/flyers/cartMatch";
-import { loadCurrentOffers, type StoredOffer } from "@/services/flyers/storage";
+import {
+  loadCurrentOffers,
+  loadCurrentFlippOffers,
+  type StoredOffer,
+} from "@/services/flyers/storage";
 import { citationLine } from "@/services/flyers/citation";
 import { conditionLabel, describeBasis } from "@/types/flyer";
 import type { Cents, DetectedProduct, RetailerId, UserPreferences } from "@/types";
@@ -257,11 +261,16 @@ function ScanFlow() {
     setBusy("Checking this week's flyers…");
     setError(null);
     try {
-      // Against the flyers this shopper loaded — not against a retailer API.
-      // Every price behind these results was printed in a document they hold
-      // and can show at a till, which is the only kind a price-match desk
-      // accepts.
-      const loaded = await loadCurrentOffers();
+      // Against the flyers this shopper loaded, plus this week's Flipp feed.
+      // Every price behind a personal flyer offer was printed in a document
+      // they hold and can show at a till; Flipp offers carry no such
+      // guarantee and are marked SOURCE_UNCERTAIN so they never get treated
+      // the same way downstream.
+      const [personal, flipp] = await Promise.all([
+        loadCurrentOffers(),
+        loadCurrentFlippOffers(),
+      ]);
+      const loaded = [...personal, ...flipp];
       setOffers(loaded);
       setOfferCount(loaded.length);
       setCartId((id) => id ?? `cart-${Date.now()}`);
