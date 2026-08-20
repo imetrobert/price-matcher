@@ -877,6 +877,55 @@ export async function loadCurrentOffersResult(
 }
 
 /**
+ * This week's Flipp offers — a partner feed, not a photographed flyer.
+ *
+ * Deliberately a separate function rather than a flag on loadCurrentOffers():
+ * every offer here always carries condition SOURCE_UNCERTAIN and can never be
+ * confused with something read off a page. See that condition's definition
+ * in types/flyer.ts for why it never takes part in arithmetic.
+ */
+export async function loadCurrentFlippOffers(
+  on: Date = new Date(),
+): Promise<StoredOffer[]> {
+  const supabase = client();
+  if (!supabase) return [];
+  const today = isoDay(on);
+
+  const fetched = await fetchAllRows((from, to) =>
+    supabase
+      .from("cartmatch_flipp_offers")
+      .select("*")
+      .lte("valid_from", today)
+      .gte("valid_to", today)
+      .order("id")
+      .range(from, to),
+  );
+  if (!fetched.ok) return [];
+
+  return fetched.rows.map((row: Record<string, unknown>) => ({
+    id: String(row.id),
+    flyerId: String(row.flyer_id),
+    retailerId: String(row.retailer_id) as RetailerId,
+    advertisedText: String(row.advertised_text),
+    brand: row.brand ? String(row.brand) : null,
+    size: row.size ? String(row.size) : null,
+    retailerSku: null,
+    price: Number(row.price_cents),
+    basis: String(row.basis) as PriceBasis,
+    regularPrice: null,
+    regularBasis: null,
+    condition: "SOURCE_UNCERTAIN" as OfferCondition,
+    conditionText: "From this week's Flipp flyer, not a photographed one",
+    flyerPage: 0,
+    confirmedAt: null,
+    box: null,
+    rejectedAt: null,
+    validFrom: String(row.valid_from),
+    validTo: String(row.valid_to),
+  }));
+}
+
+/**
  * A stored box, or null.
  *
  * The same checking the parser applies, repeated here rather than assumed,

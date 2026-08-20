@@ -113,6 +113,12 @@ export interface CartLine {
   /** The same, restricted to other chains: what this trolley could be told about. */
   measuredElsewhere: StoredOffer[];
   /**
+   * Per-item matches from a partner feed (Flipp), restricted to other chains.
+   * Shown, never subtracted, for the same reason as measuredElsewhere: the
+   * number is real but this app did not confirm it means "per item".
+   */
+  uncertainElsewhere: StoredOffer[];
+  /**
    * True when the offer this line leads with was matched without a confirmed
    * size — one side or the other printed nothing readable.
    *
@@ -202,7 +208,15 @@ export function compareCartToFlyers(
     enteredPrices?: Record<string, Cents | null>;
   } = {},
 ): CartComparison {
-  const usable = offers.filter((o) => isComparable(o, options.includeConditional ?? false));
+  // SOURCE_UNCERTAIN (Flipp) offers are let through here even though
+  // isComparable() would normally exclude them — line() below is what keeps
+  // them out of every dollar figure. This filter only decides what reaches
+  // the matcher at all, not what gets subtracted.
+  const usable = offers.filter(
+    (o) =>
+      isComparable(o, options.includeConditional ?? false) ||
+      o.condition === "SOURCE_UNCERTAIN",
+  );
 
   const lines = items.map((item) =>
     line(item, usable, currentRetailer, options.enteredPrices?.[item.id] ?? null),
@@ -255,13 +269,28 @@ function line(
   const measuredMatches = matched
     .filter((o) => isMeasuredBasis(o.basis))
     .sort((a, b) => a.price - b.price);
-  const perItem = matched
-    .filter((o) => !isMeasuredBasis(o.basis))
+
+  // Per-item matches split by trust, not just by unit. A SOURCE_UNCERTAIN
+  // (Flipp) offer sits at the same basis as a confirmed one and would
+  // otherwise slot straight into the arithmetic below — this split is the
+  // only thing stopping that.
+  const perItemAll = matched.filter((o) => !isMeasuredBasis(o.basis));
+  const perItem = perItemAll
+    .filter((o) => o.condition !== "SOURCE_UNCERTAIN")
+    .sort((a, b) => a.price - b.price);
+  const uncertain = perItemAll
+    .filter((o) => o.condition === "SOURCE_UNCERTAIN")
     .sort((a, b) => a.price - b.price);
 
+  // "Here" and the CHEAPER_ELSEWHERE arithmetic below both only ever look at
+  // the trustworthy list. A Flipp offer at the shop you're standing in is not
+  // "your price" — the shelf or the photo is.
   const hereOffer = perItem.find((o) => o.retailerId === currentRetailer) ?? null;
   const perItemElsewhere = perItem.filter((o) => o.retailerId !== currentRetailer);
   const measuredElsewhere = measuredMatches.filter(
+    (o) => o.retailerId !== currentRetailer,
+  );
+  const uncertainElsewhere = uncertain.filter(
     (o) => o.retailerId !== currentRetailer,
   );
   const cheapestElsewhere = perItemElsewhere[0] ?? null;
@@ -279,7 +308,8 @@ function line(
     enteredPrice !== null ? "ENTERED" : hereOffer ? "FLYER_HERE" : null;
 
   // The offer this line leads with, which is what the caution is about.
-  const lead = perItemElsewhere[0] ?? hereOffer ?? measuredElsewhere[0] ?? null;
+  const lead =
+    perItemElsewhere[0] ?? hereOffer ?? measuredElsewhere[0] ?? uncertainElsewhere[0] ?? null;
 
   const base = {
     item,
@@ -289,12 +319,18 @@ function line(
     matches: perItem,
     measuredMatches,
     measuredElsewhere,
+    uncertainElsewhere,
     sizeUnverified: lead !== null && unverified.has(lead.id),
   };
 
-  // Nobody else advertised it, in any unit. Nothing to send anybody across
-  // town for — the only question left is whether it was advertised here.
-  if (cheapestElsewhere === null && measuredElsewhere.length === 0) {
+  // Nobody else advertised it, in any unit, trustworthy or Flipp. Nothing to
+  // send anybody across town for — the only question left is whether it was
+  // advertised here.
+  if (
+    cheapestElsewhere === null &&
+    measuredElsewhere.length === 0 &&
+    uncertainElsewhere.length === 0
+  ) {
     return {
       ...base,
       outcome: hereOffer || enteredPrice !== null ? "BEST_HERE" : "NOT_IN_FLYERS",
@@ -332,11 +368,12 @@ function line(
 
   // Advertised elsewhere, and what you would pay here is unknown — your shop
   // did not advertise it and nobody has typed a shelf price. No number exists
-  // and none is offered. This is the group the trolley scan is for.
+  // and none is offered. Lead with a trustworthy offer when there is one;
+  // otherwise the Flipp lead is the whole reason this line exists.
   return {
     ...base,
     outcome: "ON_SALE_ELSEWHERE",
-    bestElsewhere: cheapestElsewhere,
+    bestElsewhere: cheapestElsewhere ?? uncertainElsewhere[0] ?? null,
     savingCents: null,
   };
 }
