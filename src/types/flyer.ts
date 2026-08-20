@@ -88,13 +88,19 @@ export function describeBasis(basis: PriceBasis): string {
  *   LOYALTY_ONLY   requires a card, and sometimes a pre-loaded offer.
  *   LIMIT_APPLIES  capped quantity per customer or per transaction.
  *   WITH_PURCHASE  conditional on buying something else.
+ *   SOURCE_UNCERTAIN  from a partner feed (Flipp), not a photographed flyer.
+ *                  The price is real but this app cannot tell "$4 each" from
+ *                  "2 for $4" the way it can for a flyer page it read itself.
+ *                  Never enters arithmetic, anywhere. Exists to be SHOWN as
+ *                  a lead, not subtracted.
  */
 export type OfferCondition =
   | "UNIT_PRICE"
   | "MULTI_BUY"
   | "LOYALTY_ONLY"
   | "LIMIT_APPLIES"
-  | "WITH_PURCHASE";
+  | "WITH_PURCHASE"
+  | "SOURCE_UNCERTAIN";
 
 /** Where an offer came from, and therefore how much it can be trusted. */
 export type FlyerSource =
@@ -299,6 +305,8 @@ export function conditionLabel(condition: OfferCondition): string {
       return "Quantity limit applies";
     case "WITH_PURCHASE":
       return "Conditional on another purchase";
+    case "SOURCE_UNCERTAIN":
+      return "Advertised elsewhere — check against what's shown here";
   }
 }
 
