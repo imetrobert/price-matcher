@@ -20,7 +20,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-export const FUNCTION_BUILD = "2026-08-19-flipp-import-2";
+export const FUNCTION_BUILD = "2026-08-20-flipp-import-3";
 const BASE = "https://backflipp.wishabi.com/flipp";
 const TIMEOUT_MS = 90_000;
 const USER_AGENT =
@@ -275,22 +275,32 @@ async function handler(req: Request): Promise<Response> {
   const results = await Promise.all(
     banners.map(async (b) => {
       const fetched = await getJson(`${BASE}/flyers/${b.flyerId}`);
-      if (!fetched.ok) return { retailerId: b.retailerId!, error: fetched.error, offers: [] as NormalisedFlippOffer[] };
+      if (!fetched.ok) {
+        return { retailerId: b.retailerId!, flyerId: b.flyerId, error: fetched.error, offers: [] as NormalisedFlippOffer[] };
+      }
       const body = fetched.body as Record<string, unknown>;
       const items = Array.isArray(body.items) ? body.items : [];
       const { offers } = normaliseFlyerItems(items, b.merchantName, b.flyerId);
-      return { retailerId: b.retailerId!, error: null as string | null, offers };
+      return { retailerId: b.retailerId!, flyerId: b.flyerId, error: null as string | null, offers };
     }),
   );
 
   let written = 0;
+  // Keyed by "retailer:flyerId" — a retailer can run several banners at once
+  // (e.g. a general flyer and a liquor-only flyer), and an earlier bug that
+  // deleted by retailer_id alone meant the last banner processed silently
+  // wiped out every other banner's rows for that same retailer.
   const errors: Record<string, string> = {};
   for (const r of results) {
+    const key = `${r.retailerId}:${r.flyerId}`;
     if (r.error) {
-      errors[r.retailerId] = r.error;
+      errors[key] = r.error;
       continue;
     }
-    await supabase.from("cartmatch_flipp_offers").delete().eq("retailer_id", r.retailerId);
+    // Replace only THIS flyer's rows, not the whole retailer's — see the note
+    // above. Stale flyers that stopped appearing in this week's listing are
+    // left for the retention/purge job to clean up, not deleted here.
+    await supabase.from("cartmatch_flipp_offers").delete().eq("flyer_id", r.flyerId);
     if (r.offers.length === 0) continue;
     const rows = r.offers.map((o) => ({
       id: o.id,
@@ -310,7 +320,7 @@ async function handler(req: Request): Promise<Response> {
       valid_to: o.validTo,
     }));
     const { error } = await supabase.from("cartmatch_flipp_offers").insert(rows);
-    if (error) errors[r.retailerId] = error.message;
+    if (error) errors[key] = error.message;
     else written += rows.length;
   }
 
