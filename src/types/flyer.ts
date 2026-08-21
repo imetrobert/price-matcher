@@ -53,7 +53,9 @@ export type PriceBasis =
   | "PER_LB"
   | "PER_KG"
   | "PER_100G"
-  | "PER_100ML";
+  | "PER_100ML"
+  /** From a partner feed that could not determine the unit. Never subtracted, never shown as a confident per-weight price. */
+  | "UNKNOWN";
 
 /** True when the price is for a weight or volume rather than for the item. */
 export function isMeasuredBasis(basis: PriceBasis): boolean {
@@ -73,6 +75,8 @@ export function describeBasis(basis: PriceBasis): string {
       return "per 100 g";
     case "PER_100ML":
       return "per 100 ml";
+    case "UNKNOWN":
+      return "unit not confirmed";
   }
 }
 
