@@ -39,6 +39,12 @@ export interface FlyerPageProofProps {
   box: [number, number, number, number] | null;
   /** The PDF this flyer was imported from, for when no picture was kept. */
   sourceFilename?: string | null;
+  /**
+   * True for a Flipp/partner-feed offer. There is no page, no picture, and
+   * no "your own copy" of a flyer nobody photographed — attempting the usual
+   * lookup here would only ever find nothing and say something false.
+   */
+  isPartnerFeed?: boolean;
 }
 
 export function FlyerPageProof({
@@ -46,12 +52,18 @@ export function FlyerPageProof({
   page,
   box,
   sourceFilename,
+  isPartnerFeed,
 }: FlyerPageProofProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
   const markRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
+    if (isPartnerFeed) {
+      // Nothing to fetch — this offer was never a photographed page.
+      setState("missing");
+      return;
+    }
     let live = true;
     setState("loading");
     flyerPageUrl(flyerId, page)
@@ -64,7 +76,7 @@ export function FlyerPageProof({
     return () => {
       live = false;
     };
-  }, [flyerId, page]);
+  }, [flyerId, page, isPartnerFeed]);
 
   // Bring the marked tile into view once the picture has laid out. A highlight
   // below the fold on a tall flyer page helps nobody.
@@ -75,6 +87,15 @@ export function FlyerPageProof({
     }, 250);
     return () => clearTimeout(timer);
   }, [state, box]);
+
+  if (isPartnerFeed) {
+    return (
+      <div className="mt-3 rounded-md bg-surface p-2 text-sm text-muted">
+        Advertised via Flipp, not a flyer CartMatch photographed — check the
+        price and unit at the store before relying on it.
+      </div>
+    );
+  }
 
   if (state === "loading") {
     return <p className="mt-3 text-sm text-muted">Loading the page…</p>;
