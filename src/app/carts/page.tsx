@@ -45,6 +45,7 @@ import {
   type SavedCart,
 } from "@/services/carts/history";
 import { itemLabel, type CartLine } from "@/services/flyers/cartMatch";
+import { isMeasuredBasis } from "@/types/flyer";
 import { describeBasis } from "@/types/flyer";
 
 export default function CartsPage() {
@@ -306,7 +307,81 @@ function Group({
       <p className="mb-2 text-xs text-muted">{note}</p>
       <div className="space-y-3">
         {lines.map((line) => {
-          // Per-item first; a weight price only when that is all there was.
+          if (!showSaving) {
+            // On sale elsewhere: source is genuinely ambiguous — a product
+            // can be advertised in a flyer you scanned, on Flipp, or both,
+            // at different stores. List everything rather than silently
+            // picking one, so it's visible at a glance which source(s) an
+            // item actually came from.
+            const scanned = [...line.matches, ...line.measuredElsewhere];
+            const flipp = line.uncertainElsewhere;
+            if (scanned.length === 0 && flipp.length === 0) return null;
+
+            return (
+              <section key={line.item.id} className="card">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="font-bold leading-tight">{itemLabel(line.item)}</p>
+                  <span className="shrink-0 text-xs text-warn">may be cheaper</span>
+                </div>
+
+                {scanned.length > 0 ? (
+                  <div className="mt-2 rounded-md bg-surface p-2 text-xs">
+                    <p className="font-semibold">From flyers you scanned</p>
+                    {scanned.map((offer) => (
+                      <div key={offer.id} className="mt-1">
+                        <p className="flex justify-between gap-3 text-muted">
+                          <span>
+                            {RETAILERS[offer.retailerId]?.displayName ??
+                              offer.retailerId}
+                          </span>
+                          <span>
+                            {formatCents(offer.price)}
+                            {isMeasuredBasis(offer.basis)
+                              ? ` ${describeBasis(offer.basis)}`
+                              : ""}{" "}
+                            · p.{offer.flyerPage}
+                          </span>
+                        </p>
+                        <p className="text-[11px]">
+                          {citationLine({
+                            retailerId: offer.retailerId,
+                            flyerPage: offer.flyerPage,
+                            validFrom: offer.validFrom,
+                            validTo: offer.validTo,
+                            hasPageImage: true,
+                          })}
+                        </p>
+                        <FlyerPageProof
+                          flyerId={offer.flyerId}
+                          page={offer.flyerPage}
+                          box={offer.box}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {flipp.length > 0 ? (
+                  <div className="mt-2 rounded-md bg-surface p-2 text-xs">
+                    <p className="font-semibold">Also seen on Flipp (not confirmed)</p>
+                    {flipp.map((offer) => (
+                      <p key={offer.id} className="flex justify-between gap-3 text-muted">
+                        <span>
+                          {RETAILERS[offer.retailerId]?.displayName ??
+                            offer.retailerId}
+                        </span>
+                        <span>{formatCents(offer.price)} · via Flipp</span>
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            );
+          }
+
+          // Cheaper at another store: always one confirmed, trustworthy
+          // offer — this is what the savings figure is citing, so one
+          // citation is the correct amount of evidence, not less or more.
           const lead = line.bestElsewhere ?? line.measuredElsewhere?.[0] ?? null;
           if (lead === null) return null;
           const store = RETAILERS[lead.retailerId]?.displayName ?? lead.retailerId;
@@ -323,13 +398,9 @@ function Group({
                       : ""}
                   </p>
                 </div>
-                {showSaving && line.savingCents !== null ? (
-                  <span className="shrink-0 text-lg font-extrabold text-good">
-                    {formatCents(line.savingCents)}
-                  </span>
-                ) : (
-                  <span className="shrink-0 text-xs text-warn">may be cheaper</span>
-                )}
+                <span className="shrink-0 text-lg font-extrabold text-good">
+                  {line.savingCents !== null ? formatCents(line.savingCents) : null}
+                </span>
               </div>
 
               <p className="mt-2 rounded-lg bg-surface px-2 py-1 text-xs">
