@@ -1229,6 +1229,11 @@ function OnSaleCard({
   if (lead === null) return null;
   const store = RETAILERS[lead.retailerId]?.displayName ?? lead.retailerId;
   const byWeight = line.bestElsewhere === null;
+  // At a glance: is what's shown here from a flyer you scanned (with a real
+  // page number) or from Flipp (never a page)? Both lists render fully
+  // below once expanded — this is just the summary line's short version.
+  const sourceTag =
+    lead.condition === "SOURCE_UNCERTAIN" ? "via Flipp" : `p.${lead.flyerPage}`;
 
   return (
     <section className="card border border-warn/30">
@@ -1242,8 +1247,8 @@ function OnSaleCard({
           <p className="font-bold leading-tight">{itemLabel(line.item)}</p>
           <p className="text-xs text-muted">
             On sale at {store} · {formatCents(lead.price)}
-            {byWeight ? ` ${describeBasis(lead.basis)}` : ""} · not advertised
-            at {here}
+            {byWeight ? ` ${describeBasis(lead.basis)}` : ""} · {sourceTag} ·
+            not advertised at {here}
           </p>
         </div>
         <div className="shrink-0 text-right">
@@ -1396,9 +1401,9 @@ function OfferEvidence({
       ) : null}
 
       {/*
-        Advertised per pound or per kilo. Shown because it is real information
-        a shopper can act on, and kept out of the arithmetic because a weight
-        price and a package price are not two prices for the same thing.
+        Advertised by weight. Shown because it is real information a shopper
+        can act on, and kept out of the arithmetic because a weight price and
+        a package price are not two prices for the same thing.
       */}
       {line.measuredMatches.length > 0 ? (
         <div className="mt-3 rounded-md bg-surface p-2 text-xs">
@@ -1414,12 +1419,33 @@ function OfferEvidence({
       ) : null}
 
       {/*
+        Every Flipp match, always shown in full — not just the one used as
+        the fallback lead when nothing scanned exists. Without this list, a
+        Flipp offer at a store you DID scan a cheaper trustworthy price for
+        would be silently invisible, and there would be no way to tell
+        whether "on sale elsewhere" means your own scan, Flipp, or both.
+      */}
+      {line.uncertainElsewhere.length > 0 ? (
+        <div className="mt-3 rounded-md bg-surface p-2 text-xs">
+          <p className="font-semibold">Also seen on Flipp (not confirmed)</p>
+          {line.uncertainElsewhere.map((offer) => (
+            <p key={offer.id} className="text-muted">
+              {RETAILERS[offer.retailerId]?.displayName ?? offer.retailerId}:{" "}
+              {formatCents(offer.price)} — via Flipp, no page or picture;
+              check the price and unit yourself.
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      {/*
         The proof. Falls back to the cheapest weight-priced offer when there is
         no per-item one, because a page number is still a page number.
       */}
       {(() => {
         const cited = best ?? line.measuredElsewhere[0] ?? null;
         if (cited === null) return null;
+        const isPartnerFeed = cited.condition === "SOURCE_UNCERTAIN";
         return (
           <>
             <p className="mt-3 rounded-lg bg-surface px-2 py-1 text-xs">
@@ -1429,10 +1455,11 @@ function OfferEvidence({
                 validFrom: cited.validFrom,
                 validTo: cited.validTo,
                 hasPageImage: true,
+                isPartnerFeed,
               })}
             </p>
 
-            {cited.confirmedAt === null ? (
+            {!isPartnerFeed && cited.confirmedAt === null ? (
               <p className="mt-1 text-xs text-warn">
                 Not yet confirmed against the page — check it before showing
                 anyone.
@@ -1443,6 +1470,7 @@ function OfferEvidence({
               flyerId={cited.flyerId}
               page={cited.flyerPage}
               box={cited.box}
+              isPartnerFeed={isPartnerFeed}
             />
           </>
         );
