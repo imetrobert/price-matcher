@@ -33,6 +33,12 @@ export interface CitationInput {
   validTo: string;
   /** True when a stored page image can be shown alongside the words. */
   hasPageImage: boolean;
+  /**
+   * True for a Flipp/partner-feed offer. There is no page number and never
+   * was — flyerPage on these is a placeholder, not a citation, and saying
+   * "page 0" or "your own copy" of a flyer nobody photographed is false.
+   */
+  isPartnerFeed?: boolean;
 }
 
 /** A day as a shopper reads it, in the local sense of the date. */
@@ -56,6 +62,9 @@ function day(iso: string): string {
  */
 export function citationLine(input: CitationInput): string {
   const name = RETAILERS[input.retailerId]?.displayName ?? input.retailerId;
+  if (input.isPartnerFeed) {
+    return `${name}, via Flipp — not confirmed by CartMatch, valid ${day(input.validFrom)} to ${day(input.validTo)}`;
+  }
   return `${name} flyer, page ${input.flyerPage}, valid ${day(input.validFrom)} to ${day(input.validTo)}`;
 }
 
@@ -66,6 +75,9 @@ export function citationLine(input: CitationInput): string {
  * at the moment they are planning a shop, not at the till.
  */
 export function citationEvidence(input: CitationInput): string {
+  if (input.isPartnerFeed) {
+    return "From Flipp, not a flyer CartMatch photographed — check the price and unit at the store before relying on it.";
+  }
   return input.hasPageImage
     ? "The page is saved — open it to show the cashier."
     : "No page picture was kept. Open your own copy of the flyer at this page.";

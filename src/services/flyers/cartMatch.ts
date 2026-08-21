@@ -266,20 +266,21 @@ function line(
   // Split before anything is compared. A per-pound price and a package price
   // are not two prices for one thing, and the moment they share a sorted list
   // the cheapest of them is wrong.
-  const measuredMatches = matched
-    .filter((o) => isMeasuredBasis(o.basis))
+  // Pull SOURCE_UNCERTAIN (Flipp) offers out FIRST, regardless of their
+  // nominal basis. A Flipp offer never gets treated as a trustworthy
+  // per-pound price just because its basis field happens to say PER_LB, or
+  // as a trustworthy per-item price if the basis could not be determined at
+  // all — "uncertain" describes the whole offer, not just its unit.
+  const trustworthy = matched.filter((o) => o.condition !== "SOURCE_UNCERTAIN");
+  const uncertain = matched
+    .filter((o) => o.condition === "SOURCE_UNCERTAIN")
     .sort((a, b) => a.price - b.price);
 
-  // Per-item matches split by trust, not just by unit. A SOURCE_UNCERTAIN
-  // (Flipp) offer sits at the same basis as a confirmed one and would
-  // otherwise slot straight into the arithmetic below — this split is the
-  // only thing stopping that.
-  const perItemAll = matched.filter((o) => !isMeasuredBasis(o.basis));
-  const perItem = perItemAll
-    .filter((o) => o.condition !== "SOURCE_UNCERTAIN")
+  const measuredMatches = trustworthy
+    .filter((o) => isMeasuredBasis(o.basis))
     .sort((a, b) => a.price - b.price);
-  const uncertain = perItemAll
-    .filter((o) => o.condition === "SOURCE_UNCERTAIN")
+  const perItem = trustworthy
+    .filter((o) => !isMeasuredBasis(o.basis))
     .sort((a, b) => a.price - b.price);
 
   // "Here" and the CHEAPER_ELSEWHERE arithmetic below both only ever look at
