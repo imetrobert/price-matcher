@@ -788,6 +788,13 @@ export interface StoredOffer {
    */
   box: [number, number, number, number] | null;
   /**
+   * A picture of just this item's ad tile, from a partner feed (Flipp).
+   * Never set for a scanned flyer — those use flyerId + flyerPage + box to
+   * look up a stored page picture instead. Flipp has no page concept at
+   * all, but does crop and host a picture per item, which is what this is.
+   */
+  partnerImageUrl?: string | null;
+  /**
    * When a person looked at the page and said this reading is wrong.
    *
    * Recorded rather than deleted. A wrong reading deleted is one the next
@@ -919,6 +926,7 @@ export async function loadCurrentFlippOffers(
     flyerPage: 0,
     confirmedAt: null,
     box: null,
+    partnerImageUrl: row.image_url ? String(row.image_url) : null,
     rejectedAt: null,
     validFrom: String(row.valid_from),
     validTo: String(row.valid_to),
