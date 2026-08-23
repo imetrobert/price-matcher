@@ -1429,11 +1429,21 @@ function OfferEvidence({
         <div className="mt-3 rounded-md bg-surface p-2 text-xs">
           <p className="font-semibold">Also seen on Flipp (not confirmed)</p>
           {line.uncertainElsewhere.map((offer) => (
-            <p key={offer.id} className="text-muted">
-              {RETAILERS[offer.retailerId]?.displayName ?? offer.retailerId}:{" "}
-              {formatCents(offer.price)} — via Flipp, no page or picture;
-              check the price and unit yourself.
-            </p>
+            <div key={offer.id} className="mt-2 flex items-start gap-2">
+              {offer.partnerImageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={offer.partnerImageUrl}
+                  alt=""
+                  className="h-12 w-12 shrink-0 rounded object-cover"
+                />
+              ) : null}
+              <p className="text-muted">
+                {RETAILERS[offer.retailerId]?.displayName ?? offer.retailerId}:{" "}
+                {formatCents(offer.price)} — via Flipp; check the price and
+                unit yourself.
+              </p>
+            </div>
           ))}
         </div>
       ) : null}
