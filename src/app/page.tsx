@@ -12,13 +12,18 @@ import { DEFAULT_PREFS, loadPrefs, prefsAreComplete } from "@/lib/prefs";
 import {
   loadAllFlyers,
   loadAllFlyersResult,
+  loadFlippRetailersThisWeek,
   queueSummary,
   queueSummaryResult,
   retryFailedPages,
 } from "@/services/flyers/storage";
-import { flyerStatus, type FlyerStatus } from "@/services/flyers/status";
+import {
+  flyerStatus,
+  flyerSourceSummary,
+  type FlyerStatus,
+} from "@/services/flyers/status";
 import { listCarts } from "@/services/carts/history";
-import type { UserPreferences } from "@/types";
+import type { RetailerId, UserPreferences } from "@/types";
 
 export default function HomePage() {
   return (
@@ -47,6 +52,12 @@ function Home() {
   // governed by RLS regardless — but a link nobody should follow is a link
   // worth not showing.
   const [isAdmin, setIsAdmin] = useState(false);
+
+  // Which retailers Flipp already covers this week, independent of anything
+  // scanned. Never blocks the page on failure — a shopper who can already
+  // see their scanned-flyer status should not lose that because a second,
+  // additive query had trouble.
+  const [flippRetailers, setFlippRetailers] = useState<RetailerId[]>([]);
 
   // While pages are still being read, the number on this card changes without
   // anybody touching the screen — a worker is doing the work on a schedule. A
@@ -112,6 +123,9 @@ function Home() {
         setIsAdmin(access.status === "granted" && access.role === "app_admin"),
       )
       .catch(() => setIsAdmin(false));
+    void loadFlippRetailersThisWeek()
+      .then(setFlippRetailers)
+      .catch(() => setFlippRetailers([]));
   }, []);
 
   const requeue = async () => {
@@ -299,9 +313,31 @@ function Home() {
               </div>
             </>
           ) : flyers.readiness === "NONE" ? (
-            <Link href="/flyers" className="btn-primary mt-3">
-              Upload this week&rsquo;s flyers
-            </Link>
+            flippRetailers.length > 0 ? (
+              // Nothing scanned, but Flipp already has real data for at
+              // least one store — scanning is not blocked on uploading
+              // anything, so it should not read as though it were.
+              <div className="mt-3 space-y-2">
+                <Link
+                  href="/scan"
+                  className={
+                    ready
+                      ? "btn-primary"
+                      : "btn-primary pointer-events-none opacity-40"
+                  }
+                  aria-disabled={!ready}
+                >
+                  Scan your cart
+                </Link>
+                <Link href="/flyers" className="btn-secondary">
+                  Upload this week&rsquo;s flyers
+                </Link>
+              </div>
+            ) : (
+              <Link href="/flyers" className="btn-primary mt-3">
+                Upload this week&rsquo;s flyers
+              </Link>
+            )
           ) : (
             /*
               Loaded is the state this screen is in most of the week, so it is
@@ -353,6 +389,47 @@ function Home() {
             not reach them. Reload the page. If it keeps happening, check that
             you are still signed in before importing anything again.
           </p>
+        </section>
+      ) : null}
+
+      {/*
+        Per-retailer coverage, across everything this app tracks — separate
+        from the card above on purpose. That card answers "did the flyers I
+        scanned finish being read"; this answers "which stores have ANY
+        current price data, and from where", which Flipp can answer on its
+        own without anybody scanning anything. Shown whenever the scanned-
+        flyer check succeeded, even if it found nothing, since "nothing
+        scanned, but Flipp has three stores" is exactly the case this exists
+        to surface.
+      */}
+      {flyers ? (
+        <section className="card mb-4">
+          <p className="font-bold">This week&rsquo;s price sources</p>
+          <div className="mt-2 space-y-1">
+            {flyerSourceSummary(flyers.retailers, flippRetailers).map(
+              ({ retailerId, displayName, source }) => (
+                <div
+                  key={retailerId}
+                  className="flex items-center justify-between text-sm"
+                >
+                  <span>{displayName}</span>
+                  <span
+                    className={
+                      source === "NONE" ? "text-warn" : "text-muted"
+                    }
+                  >
+                    {source === "BOTH"
+                      ? "Scanned + Flipp"
+                      : source === "SCAN"
+                        ? "Scanned"
+                        : source === "FLIPP"
+                          ? "Flipp only"
+                          : "Nothing yet"}
+                  </span>
+                </div>
+              ),
+            )}
+          </div>
         </section>
       ) : null}
 
