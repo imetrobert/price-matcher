@@ -884,6 +884,33 @@ export async function loadCurrentOffersResult(
 }
 
 /**
+ * Which retailers Flipp covered for the given day — presence only, no offer
+ * detail. Answers "do I still need to scan a flyer, or does Flipp already
+ * have this store this week" without loading every offer row.
+ */
+export async function loadFlippRetailersThisWeek(
+  on: Date = new Date(),
+): Promise<RetailerId[]> {
+  const supabase = client();
+  if (!supabase) return [];
+  const today = isoDay(on);
+
+  const fetched = await fetchAllRows((from, to) =>
+    supabase
+      .from("cartmatch_flipp_offers")
+      .select("retailer_id")
+      .lte("valid_from", today)
+      .gte("valid_to", today)
+      .range(from, to),
+  );
+  if (!fetched.ok) return [];
+
+  return [
+    ...new Set(fetched.rows.map((row) => String(row.retailer_id) as RetailerId)),
+  ];
+}
+
+/**
  * This week's Flipp offers — a partner feed, not a photographed flyer.
  *
  * Deliberately a separate function rather than a flag on loadCurrentOffers():

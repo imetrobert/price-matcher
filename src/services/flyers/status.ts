@@ -125,6 +125,55 @@ function names(retailers: RetailerId[]): string {
   return `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
 }
 
+export type FlyerSource = "SCAN" | "FLIPP" | "BOTH" | "NONE";
+
+export interface RetailerSourceStatus {
+  retailerId: RetailerId;
+  displayName: string;
+  source: FlyerSource;
+}
+
+/**
+ * Per-retailer picture of where this week's prices are coming from, across
+ * every retailer this app tracks.
+ *
+ * Deliberately separate from flyerStatus() above rather than folded into it.
+ * flyerStatus answers "did the flyers I scanned finish being read" — a
+ * question about progress on work somebody started. This answers "which
+ * stores have ANY current price data at all, and from where" — a question
+ * about coverage, which Flipp can satisfy without anybody scanning
+ * anything. Conflating them would make a store Flipp already covers look
+ * like a gap just because nothing was photographed.
+ */
+export function flyerSourceSummary(
+  scannedRetailers: RetailerId[],
+  flippRetailers: RetailerId[],
+): RetailerSourceStatus[] {
+  const scanned = new Set(scannedRetailers);
+  const flipp = new Set(flippRetailers);
+  const all = (Object.keys(RETAILERS) as RetailerId[]).sort((a, b) =>
+    (RETAILERS[a]?.displayName ?? a).localeCompare(RETAILERS[b]?.displayName ?? b),
+  );
+
+  return all.map((retailerId) => {
+    const hasScan = scanned.has(retailerId);
+    const hasFlipp = flipp.has(retailerId);
+    const source: FlyerSource =
+      hasScan && hasFlipp
+        ? "BOTH"
+        : hasScan
+          ? "SCAN"
+          : hasFlipp
+            ? "FLIPP"
+            : "NONE";
+    return {
+      retailerId,
+      displayName: RETAILERS[retailerId]?.displayName ?? retailerId,
+      source,
+    };
+  });
+}
+
 export function flyerStatus(
   flyers: StoredFlyer[],
   on: Date = new Date(),
