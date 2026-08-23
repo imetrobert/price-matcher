@@ -49,6 +49,7 @@ import {
   flyerContents,
   loadAllFlyers,
   loadAllFlyersResult,
+  loadFlippRetailersThisWeek,
   type StoredFlyer,
   measureStoredPages,
   purgeExpiredPages,
@@ -83,6 +84,10 @@ function FlyerImport() {
   // Why the held list could not be read, when it could not. Distinct from an
   // empty list, which invites the opposite action.
   const [heldError, setHeldError] = useState<string | null>(null);
+  // Which retailers Flipp already covers this week, so the case for
+  // uploading a given store's flyer can be made weaker where it already
+  // exists — never blocks the rest of the screen on failure.
+  const [flippRetailers, setFlippRetailers] = useState<RetailerId[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
   /**
@@ -113,6 +118,9 @@ function FlyerImport() {
       .catch((err) =>
         setHeldError(err instanceof Error ? err.message : "Could not be read."),
       );
+    void loadFlippRetailersThisWeek()
+      .then(setFlippRetailers)
+      .catch(() => setFlippRetailers([]));
   }, []);
 
   const onFiles = useCallback((files: File[]) => {
@@ -504,6 +512,7 @@ function FlyerImport() {
 
       <HeldFlyers
         flyers={held}
+        flippRetailers={flippRetailers}
         onRemoved={() => {
           void loadAllFlyers().then(setHeld).catch(() => undefined);
           void measureStoredPages().then(setUsage).catch(() => undefined);
@@ -1208,6 +1217,14 @@ function Row({ label, value }: { label: string; value: string }) {
 // because the whole judgement is relative to it and a flyer expires while
 // nobody is looking.
 
+/** Retailer display names joined for a sentence: "A, B and C". */
+function namesList(retailers: RetailerId[]): string {
+  const list = retailers.map((r) => RETAILERS[r]?.displayName ?? r);
+  if (list.length === 0) return "";
+  if (list.length === 1) return list[0]!;
+  return `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+}
+
 /** A date as a shopper reads it. Noon UTC so it never slips back a day. */
 function readableDay(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -1225,9 +1242,11 @@ function todayIso(): string {
 
 function HeldFlyers({
   flyers,
+  flippRetailers,
   onRemoved,
 }: {
   flyers: StoredFlyer[] | null;
+  flippRetailers: RetailerId[];
   onRemoved: () => void;
 }) {
   const today = todayIso();
@@ -1248,16 +1267,37 @@ function HeldFlyers({
 
   const upcoming = flyers.filter((f) => f.validFrom > today);
 
+  // Retailers Flipp already covers this week that nothing scanned covers.
+  // The only reason to say anything here is to make uploading THOSE feel
+  // optional — a retailer already scanned needs no mention, since scanning
+  // it was always the point.
+  const scannedIds = new Set(current.map((f) => f.retailerId));
+  const flippOnly = flippRetailers
+    .filter((r) => !scannedIds.has(r))
+    .sort((a, b) =>
+      (RETAILERS[a]?.displayName ?? a).localeCompare(RETAILERS[b]?.displayName ?? b),
+    );
+
   return (
     <section className="card mb-4">
       <p className="font-bold">Flyers you already hold</p>
       <p className="mt-1 text-xs text-muted">Today is {readableDay(today)}.</p>
 
+      {flippOnly.length > 0 ? (
+        <p className="mt-2 rounded-md bg-surface p-2 text-xs text-muted">
+          Flipp already has {namesList(flippOnly)} this week — not confirmed
+          by CartMatch the way an uploaded flyer is, but uploading{" "}
+          {flippOnly.length === 1 ? "it" : "these"} is optional.
+        </p>
+      ) : null}
+
       {current.length === 0 ? (
         <p className="mt-3 rounded-md bg-warn/10 p-2 text-sm text-warn">
           {expired.length > 0
             ? `Nothing covers today. The newest you hold ran to ${readableDay(expired[0]!.validTo)} — those prices have expired and this week's need uploading.`
-            : "Nothing has been loaded yet."}
+            : flippOnly.length > 0
+              ? "Nothing scanned covers today — but Flipp already has some stores, noted above."
+              : "Nothing has been loaded yet."}
         </p>
       ) : (
         <div className="mt-3 space-y-1">
