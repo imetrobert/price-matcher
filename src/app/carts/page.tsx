@@ -365,13 +365,23 @@ function Group({
                   <div className="mt-2 rounded-md bg-surface p-2 text-xs">
                     <p className="font-semibold">Also seen on Flipp (not confirmed)</p>
                     {flipp.map((offer) => (
-                      <p key={offer.id} className="flex justify-between gap-3 text-muted">
-                        <span>
-                          {RETAILERS[offer.retailerId]?.displayName ??
-                            offer.retailerId}
-                        </span>
-                        <span>{formatCents(offer.price)} · via Flipp</span>
-                      </p>
+                      <div key={offer.id} className="mt-2 flex items-start gap-2">
+                        {offer.partnerImageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={offer.partnerImageUrl}
+                            alt=""
+                            className="h-12 w-12 shrink-0 rounded object-cover"
+                          />
+                        ) : null}
+                        <p className="flex-1 flex justify-between gap-3 text-muted">
+                          <span>
+                            {RETAILERS[offer.retailerId]?.displayName ??
+                              offer.retailerId}
+                          </span>
+                          <span>{formatCents(offer.price)} · via Flipp</span>
+                        </p>
+                      </div>
                     ))}
                   </div>
                 ) : null}
