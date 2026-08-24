@@ -27,6 +27,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { FlyerPageProof } from "@/components/FlyerPageProof";
 import { Notice, PageHeader, Spinner } from "@/components/ui";
+import { ActiveFlyerPeriod } from "@/components/ActiveFlyerPeriod";
 import { RETAILERS } from "@/config/retailers";
 import { formatCents } from "@/lib/money";
 import { DEFAULT_PREFS, loadPrefs } from "@/lib/prefs";
@@ -109,6 +110,8 @@ function Deals() {
         subtitle="Every price here was printed in a flyer you loaded."
         backHref="/"
       />
+
+      <ActiveFlyerPeriod />
 
       {loading ? (
         <section className="card mb-4">
