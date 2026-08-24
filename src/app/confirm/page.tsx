@@ -32,6 +32,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { FlyerPageProof } from "@/components/FlyerPageProof";
 import { Notice, PageHeader, Spinner } from "@/components/ui";
+import { ActiveFlyerPeriod } from "@/components/ActiveFlyerPeriod";
 import { RETAILERS } from "@/config/retailers";
 import { formatCents, tryParsePriceToCents } from "@/lib/money";
 import { DEFAULT_PREFS, loadPrefs } from "@/lib/prefs";
@@ -107,6 +108,7 @@ function ConfirmQueue() {
     return (
       <main className="mx-auto max-w-[900px]">
         <PageHeader title="Check the prices" backHref="/" />
+        <ActiveFlyerPeriod />
         <section className="card">
           <Spinner label="Finding the offers worth checking…" />
         </section>
@@ -121,6 +123,8 @@ function ConfirmQueue() {
         subtitle="Only the offers a comparison depends on — not every offer in the flyer."
         backHref="/"
       />
+
+      <ActiveFlyerPeriod />
 
       {current ? (
         <>
