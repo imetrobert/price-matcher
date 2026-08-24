@@ -32,6 +32,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { Notice, PageHeader } from "@/components/ui";
+import { ActiveFlyerPeriod } from "@/components/ActiveFlyerPeriod";
 import { WhereToGetFlyers } from "@/components/WhereToGetFlyers";
 import { fetchFlyerByUrl, splitUrls } from "@/services/flyers/fetchByUrl";
 import { RETAILERS } from "@/config/retailers";
@@ -294,6 +295,8 @@ function FlyerImport() {
         subtitle="Drop them all in. Uploading takes a couple of minutes, then you can close the tab — the reading finishes on its own."
         backHref="/"
       />
+
+      <ActiveFlyerPeriod />
 
       {/*
         Two overlays, and the second one is the point.
