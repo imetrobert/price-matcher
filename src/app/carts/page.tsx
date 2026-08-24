@@ -34,6 +34,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { FlyerPageProof } from "@/components/FlyerPageProof";
 import { Money, Notice, PageHeader } from "@/components/ui";
+import { ActiveFlyerPeriod } from "@/components/ActiveFlyerPeriod";
 import { RETAILERS } from "@/config/retailers";
 import { formatCents } from "@/lib/money";
 import { citationLine } from "@/services/flyers/citation";
@@ -103,6 +104,8 @@ function SavedCarts() {
         subtitle="Scans from this flyer week. They delete themselves when the flyers expire."
         backHref="/"
       />
+
+      <ActiveFlyerPeriod />
 
       {carts.length === 0 ? (
         <div className="mb-4">
