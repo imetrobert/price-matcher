@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ActiveFlyerPeriod } from "@/components/ActiveFlyerPeriod";
 import { useEffect, useState } from "react";
 
 import { AuthBar, AuthGuard } from "@/components/AuthGuard";
@@ -150,225 +151,92 @@ function Home() {
         <p className="mt-1 text-muted">Find price matches before you pay.</p>
       </header>
 
+      <ActiveFlyerPeriod />
+
       {/*
         The first thing on the screen, because it is the first thing somebody
         wants to know before leaving the house.
       */}
       {flyers ? (
-        <section
-          className={`card mb-4 border ${
-            flyers.readiness === "LOADED"
-              ? "border-good/40"
-              : flyers.readiness === "PARTIAL"
-                ? "border-warn/40"
-                : "border-line"
-          }`}
-        >
-          <p
-            className={`flex items-center gap-2 font-bold ${
-              flyers.readiness === "LOADED"
-                ? "text-good"
-                : flyers.readiness === "PARTIAL"
-                  ? "text-warn"
-                  : ""
-            }`}
-          >
+        flippRetailers.length > 0 ? (
+          <>
             {/*
-              Three states, three marks — because "is it working right now?"
-              is answered at a glance or not at all.
-
-                turning ring   pages are being read
-                solid disc     queued, but blocked on something outside the
-                               app: a quota that resets tomorrow, most often
-                (nothing)      stopped, with nothing left in the queue
-
-              The middle one used to spin like the first, which said the work
-              was in progress when it was waiting out a daily limit — the
-              difference between "a few more minutes" and "tomorrow morning".
+              Flipp already covers something, so scanning is not blocked on
+              anybody having uploaded or finished reading a flyer. Leading
+              with the upload/reading card here would say the opposite of
+              what is true — that a shopper still has work to do before they
+              can start — so it is demoted below, collapsed, and explained
+              rather than led with.
             */}
-            {flyers.readiness === "PARTIAL" && !flyers.stalled ? (
-              flyers.waitingReason ? (
-                <span
-                  aria-hidden
-                  className="h-4 w-4 shrink-0 rounded-full bg-warn"
-                />
-              ) : (
-                <span
-                  aria-hidden
-                  className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-line border-t-warn"
-                />
-              )
-            ) : null}
-            {flyers.headline}
-          </p>
-          <p className="mt-1 text-sm text-muted">{flyers.detail}</p>
-
-          {/*
-            Today, on the card, beside the window it has to fall inside.
-
-            The app already filters to flyers covering today, so a shopper
-            could take "loaded" on trust. Printing the date turns that into
-            something checkable at a glance — and the window is the one thing
-            here that goes stale on its own while nobody touches the app, so
-            it is worth being able to check rather than believe.
-          */}
-          {flyers.validTo ? (
-            <p className="mt-2 text-xs text-muted">
-              Today is {flyers.today}
-              {flyers.daysLeft === 1 ? (
-                <span className="font-semibold text-warn">
-                  {" "}
-                  — last day of this window
-                </span>
-              ) : flyers.daysLeft > 1 ? (
-                <> — {flyers.daysLeft} days left, through {flyers.validTo ? dayLabel(flyers.validTo) : ""}</>
-              ) : null}
-            </p>
-          ) : (
-            <p className="mt-2 text-xs text-muted">Today is {flyers.today}.</p>
-          )}
-
-          {flyers.readiness === "PARTIAL" ? (
-            <div
-              className="mt-2 h-2 overflow-hidden rounded-full bg-line"
-              role="progressbar"
-              aria-valuenow={flyers.percent}
-              aria-valuemin={0}
-              aria-valuemax={100}
-            >
-              <div
-                className="h-full rounded-full bg-warn"
-                style={{ width: `${flyers.percent}%` }}
-              />
-            </div>
-          ) : null}
-
-          {/*
-            "Finish loading" asked the reader to do something already being
-            done for them. Nothing here needs a person: the only reason to open
-            the import screen mid-run is to add a flyer that was missed.
-          */}
-          {flyers.readiness === "PARTIAL" && flyers.stalled ? (
-            <>
-              <p className="mt-2 text-xs text-muted">
-                {flyers.pagesFailed > 0
-                  ? "Pages give up after five tries. If the reason has since been fixed — a model name changed, a quota reset — put them back in the queue."
-                  : "Nothing is waiting to be read. Re-import the flyers that are short of pages."}
+            <section className="card mb-4 border border-good/40">
+              <p className="font-bold text-good">Ready to scan</p>
+              <p className="mt-1 text-sm text-muted">
+                Flipp already has prices for {namesList(flippRetailers)} this
+                week — see below for the full list by store.
               </p>
-              {flyers.pagesFailed > 0 ? (
-                <button
-                  type="button"
-                  onClick={requeue}
-                  disabled={retrying}
-                  className="btn-primary mt-3 disabled:opacity-50"
-                >
-                  {retrying
-                    ? "Queueing…"
-                    : `Try the ${flyers.pagesFailed} failed ${flyers.pagesFailed === 1 ? "page" : "pages"} again`}
-                </button>
-              ) : null}
-              <Link href="/flyers" className="btn-secondary mt-3">
-                Add more flyers
-              </Link>
-            </>
-          ) : flyers.readiness === "PARTIAL" ? (
-            <>
-              {/*
-                A queued page that keeps being handed back — an exhausted
-                daily quota does exactly this, correctly, since the page is
-                fine and the key is not. Without saying so, "31%" reads as
-                nearly there when the truth is tomorrow morning.
-              */}
-              {flyers.waitingReason ? (
-                <p className="mt-2 rounded-md bg-warn/10 p-2 text-xs text-warn">
-                  Waiting: {flyers.waitingReason}
-                </p>
-              ) : null}
-              <p className="mt-2 text-xs text-muted">
-                Reading continues on its own — you can close this. The count
-                updates every ten seconds, and again whenever you come back to
-                this tab.
-              </p>
-              {/*
-                The same two actions the loaded card offers, in the same place.
-                Scanning is worth offering mid-read: the offers already stored
-                are real, and the detail above says plainly that a page still
-                unread is missing its offers rather than free of them.
-              */}
-              <div className="mt-3 space-y-2">
-                <Link
-                  href="/scan"
-                  className={
-                    ready
-                      ? "btn-primary"
-                      : "btn-primary pointer-events-none opacity-40"
-                  }
-                  aria-disabled={!ready}
-                >
-                  Scan your cart
-                </Link>
-                <Link href="/flyers" className="btn-secondary">
-                  Add more flyers
-                </Link>
-              </div>
-            </>
-          ) : flyers.readiness === "NONE" ? (
-            flippRetailers.length > 0 ? (
-              // Nothing scanned, but Flipp already has real data for at
-              // least one store — scanning is not blocked on uploading
-              // anything, so it should not read as though it were.
-              <div className="mt-3 space-y-2">
-                <Link
-                  href="/scan"
-                  className={
-                    ready
-                      ? "btn-primary"
-                      : "btn-primary pointer-events-none opacity-40"
-                  }
-                  aria-disabled={!ready}
-                >
-                  Scan your cart
-                </Link>
-                <Link href="/flyers" className="btn-secondary">
-                  Upload this week&rsquo;s flyers
-                </Link>
-              </div>
-            ) : (
-              <Link href="/flyers" className="btn-primary mt-3">
-                Upload this week&rsquo;s flyers
-              </Link>
-            )
-          ) : (
-            /*
-              Loaded is the state this screen is in most of the week, so it is
-              the one worth laying out properly. The two things a person does
-              from here — scan the trolley they are pushing, or add a flyer
-              they have just downloaded — belong beside the sentence that says
-              the flyers are ready, not scattered down the page among links
-              that mean nothing until they are.
-
-              Comparing the flyers against each other is a different kind of
-              act: planning rather than shopping. It sits below the settings,
-              on its own.
-            */
-            <div className="mt-3 space-y-2">
               <Link
                 href="/scan"
                 className={
                   ready
-                    ? "btn-primary"
-                    : "btn-primary pointer-events-none opacity-40"
+                    ? "btn-primary mt-3"
+                    : "btn-primary mt-3 pointer-events-none opacity-40"
                 }
                 aria-disabled={!ready}
               >
                 Scan your cart
               </Link>
-              <Link href="/flyers" className="btn-secondary">
-                Import additional flyers
-              </Link>
-            </div>
-          )}
-        </section>
+            </section>
+
+            <details className="card mb-4">
+              <summary className="cursor-pointer text-sm font-semibold text-muted">
+                Scan a flyer too?{" "}
+                {flyers.readiness === "LOADED"
+                  ? "(already done)"
+                  : flyers.readiness === "PARTIAL"
+                    ? `(${flyers.percent}% read)`
+                    : "(optional)"}
+              </summary>
+              <p className="mt-2 text-xs text-muted">
+                Optional, and only worth it for a specific reason: scanning
+                your own flyer is the only way CartMatch can compute an exact
+                dollar saving with a page you can show at the till. Flipp can
+                tell you an item is advertised somewhere else, but never a
+                dollar amount — Flipp&rsquo;s price can be ambiguous between
+                &ldquo;each&rdquo; and &ldquo;2 for $X&rdquo;, so nothing built
+                on it is ever subtracted. If a confirmed number matters for a
+                store you shop at, scan its flyer. Otherwise, there is
+                nothing you need to do here.
+              </p>
+              <div className="mt-3">
+                <FlyerReadingStatus
+                  flyers={flyers}
+                  retrying={retrying}
+                  requeue={requeue}
+                  ready={ready}
+                  flippRetailers={flippRetailers}
+                />
+              </div>
+            </details>
+          </>
+        ) : (
+          <section
+            className={`card mb-4 border ${
+              flyers.readiness === "LOADED"
+                ? "border-good/40"
+                : flyers.readiness === "PARTIAL"
+                  ? "border-warn/40"
+                  : "border-line"
+            }`}
+          >
+            <FlyerReadingStatus
+              flyers={flyers}
+              retrying={retrying}
+              requeue={requeue}
+              ready={ready}
+              flippRetailers={flippRetailers}
+            />
+          </section>
+        )
       ) : checkFailed ? (
         /*
           The card that used to be nothing.
@@ -471,6 +339,17 @@ function Home() {
         </Link>
       ) : null}
 
+      {/*
+        Same gate as "Compare flyer savings" would use, widened: a search is
+        useful the moment EITHER source has anything, not only once personal
+        flyers are fully read.
+      */}
+      {(flyers && flyers.readiness !== "NONE") || flippRetailers.length > 0 ? (
+        <Link href="/search" className="btn-secondary mt-2">
+          Search this week&rsquo;s prices
+        </Link>
+      ) : null}
+
       {!ready ? (
         <div className="mt-4">
           <Notice tone="warn" title="Finish setup first">
@@ -515,5 +394,247 @@ function Row({ label, value }: { label: string; value: string }) {
       <span className="text-sm text-muted">{label}</span>
       <span className="font-semibold">{value}</span>
     </div>
+  );
+}
+
+/** Retailer display names joined for a sentence: "A, B and C". */
+function namesList(retailers: RetailerId[]): string {
+  const list = retailers.map((r) => RETAILERS[r]?.displayName ?? r);
+  if (list.length === 0) return "";
+  if (list.length === 1) return list[0]!;
+  return `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+}
+
+/**
+ * The scanned-flyer reading status: headline, detail, the date window, a
+ * progress bar while reading, and whichever actions fit the state.
+ *
+ * Extracted so the exact same logic renders two different ways depending on
+ * whether Flipp already covers something this week: as the page's leading
+ * card when it does not (nothing else to lead with), or collapsed inside a
+ * disclosure when it does (the primary action is scanning, already covered
+ * above this). The readiness branching itself never changes between the two
+ * — only what wraps it does.
+ */
+function FlyerReadingStatus({
+  flyers,
+  retrying,
+  requeue,
+  ready,
+  flippRetailers,
+}: {
+  flyers: FlyerStatus;
+  retrying: boolean;
+  requeue: () => void;
+  ready: boolean;
+  flippRetailers: RetailerId[];
+}) {
+  return (
+    <>
+      <p
+        className={`flex items-center gap-2 font-bold ${
+          flyers.readiness === "LOADED"
+            ? "text-good"
+            : flyers.readiness === "PARTIAL"
+              ? "text-warn"
+              : ""
+        }`}
+      >
+        {/*
+          Three states, three marks — because "is it working right now?"
+          is answered at a glance or not at all.
+
+            turning ring   pages are being read
+            solid disc     queued, but blocked on something outside the
+                           app: a quota that resets tomorrow, most often
+            (nothing)      stopped, with nothing left in the queue
+
+          The middle one used to spin like the first, which said the work
+          was in progress when it was waiting out a daily limit — the
+          difference between "a few more minutes" and "tomorrow morning".
+        */}
+        {flyers.readiness === "PARTIAL" && !flyers.stalled ? (
+          flyers.waitingReason ? (
+            <span
+              aria-hidden
+              className="h-4 w-4 shrink-0 rounded-full bg-warn"
+            />
+          ) : (
+            <span
+              aria-hidden
+              className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-line border-t-warn"
+            />
+          )
+        ) : null}
+        {flyers.headline}
+      </p>
+      <p className="mt-1 text-sm text-muted">{flyers.detail}</p>
+
+      {/*
+        Today, on the card, beside the window it has to fall inside.
+
+        The app already filters to flyers covering today, so a shopper
+        could take "loaded" on trust. Printing the date turns that into
+        something checkable at a glance — and the window is the one thing
+        here that goes stale on its own while nobody touches the app, so
+        it is worth being able to check rather than believe.
+      */}
+      {flyers.validTo ? (
+        <p className="mt-2 text-xs text-muted">
+          Today is {flyers.today}
+          {flyers.daysLeft === 1 ? (
+            <span className="font-semibold text-warn">
+              {" "}
+              — last day of this window
+            </span>
+          ) : flyers.daysLeft > 1 ? (
+            <> — {flyers.daysLeft} days left, through {flyers.validTo ? dayLabel(flyers.validTo) : ""}</>
+          ) : null}
+        </p>
+      ) : (
+        <p className="mt-2 text-xs text-muted">Today is {flyers.today}.</p>
+      )}
+
+      {flyers.readiness === "PARTIAL" ? (
+        <div
+          className="mt-2 h-2 overflow-hidden rounded-full bg-line"
+          role="progressbar"
+          aria-valuenow={flyers.percent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <div
+            className="h-full rounded-full bg-warn"
+            style={{ width: `${flyers.percent}%` }}
+          />
+        </div>
+      ) : null}
+
+      {/*
+        "Finish loading" asked the reader to do something already being
+        done for them. Nothing here needs a person: the only reason to open
+        the import screen mid-run is to add a flyer that was missed.
+      */}
+      {flyers.readiness === "PARTIAL" && flyers.stalled ? (
+        <>
+          <p className="mt-2 text-xs text-muted">
+            {flyers.pagesFailed > 0
+              ? "Pages give up after five tries. If the reason has since been fixed — a model name changed, a quota reset — put them back in the queue."
+              : "Nothing is waiting to be read. Re-import the flyers that are short of pages."}
+          </p>
+          {flyers.pagesFailed > 0 ? (
+            <button
+              type="button"
+              onClick={requeue}
+              disabled={retrying}
+              className="btn-primary mt-3 disabled:opacity-50"
+            >
+              {retrying
+                ? "Queueing…"
+                : `Try the ${flyers.pagesFailed} failed ${flyers.pagesFailed === 1 ? "page" : "pages"} again`}
+            </button>
+          ) : null}
+          <Link href="/flyers" className="btn-secondary mt-3">
+            Add more flyers
+          </Link>
+        </>
+      ) : flyers.readiness === "PARTIAL" ? (
+        <>
+          {/*
+            A queued page that keeps being handed back — an exhausted
+            daily quota does exactly this, correctly, since the page is
+            fine and the key is not. Without saying so, "31%" reads as
+            nearly there when the truth is tomorrow morning.
+          */}
+          {flyers.waitingReason ? (
+            <p className="mt-2 rounded-md bg-warn/10 p-2 text-xs text-warn">
+              Waiting: {flyers.waitingReason}
+            </p>
+          ) : null}
+          <p className="mt-2 text-xs text-muted">
+            Reading continues on its own — you can close this. The count
+            updates every ten seconds, and again whenever you come back to
+            this tab.
+          </p>
+          {/*
+            The same two actions the loaded card offers, in the same place.
+            Scanning is worth offering mid-read: the offers already stored
+            are real, and the detail above says plainly that a page still
+            unread is missing its offers rather than free of them.
+          */}
+          <div className="mt-3 space-y-2">
+            <Link
+              href="/scan"
+              className={
+                ready
+                  ? "btn-primary"
+                  : "btn-primary pointer-events-none opacity-40"
+              }
+              aria-disabled={!ready}
+            >
+              Scan your cart
+            </Link>
+            <Link href="/flyers" className="btn-secondary">
+              Add more flyers
+            </Link>
+          </div>
+        </>
+      ) : flyers.readiness === "NONE" ? (
+        flippRetailers.length > 0 ? (
+          // Nothing scanned, but Flipp already has real data for at
+          // least one store — scanning is not blocked on uploading
+          // anything, so it should not read as though it were.
+          <div className="mt-3 space-y-2">
+            <Link
+              href="/scan"
+              className={
+                ready
+                  ? "btn-primary"
+                  : "btn-primary pointer-events-none opacity-40"
+              }
+              aria-disabled={!ready}
+            >
+              Scan your cart
+            </Link>
+            <Link href="/flyers" className="btn-secondary">
+              Upload this week&rsquo;s flyers
+            </Link>
+          </div>
+        ) : (
+          <Link href="/flyers" className="btn-primary mt-3">
+            Upload this week&rsquo;s flyers
+          </Link>
+        )
+      ) : (
+        /*
+          Loaded is the state this screen is in most of the week, so it is
+          the one worth laying out properly. The two things a person does
+          from here — scan the trolley they are pushing, or add a flyer
+          they have just downloaded — belong beside the sentence that says
+          the flyers are ready, not scattered down the page among links
+          that mean nothing until they are.
+
+          Comparing the flyers against each other is a different kind of
+          act: planning rather than shopping. It sits below the settings,
+          on its own.
+        */
+        <div className="mt-3 space-y-2">
+          <Link
+            href="/scan"
+            className={
+              ready
+                ? "btn-primary"
+                : "btn-primary pointer-events-none opacity-40"
+            }
+            aria-disabled={!ready}
+          >
+            Scan your cart
+          </Link>
+          <Link href="/flyers" className="btn-secondary">
+            Import additional flyers
+          </Link>
+        </div>
+      )}
+    </>
   );
 }
