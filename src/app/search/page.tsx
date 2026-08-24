@@ -1,0 +1,239 @@
+"use client";
+
+/**
+ * Search this week's prices by product name, across every source at once.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS A SEPARATE PAGE FROM THE CART SCANNER
+ * ---------------------------------------------------------------------------
+ * The cart scanner matches a PHOTOGRAPHED item against offers using a scoring
+ * function built for that — same brand, same size, same everything, because
+ * the photo is specific and getting the match wrong would misprice a real
+ * item in a real trolley. A search box is the opposite kind of question:
+ * "what does the word 'yogurt' turn up anywhere this week", deliberately
+ * loose. Reusing the strict matcher here would hide results a shopper is
+ * plainly asking for; a plain substring match is the honest tool for this.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY NOTHING HERE IS EVER SUBTRACTED
+ * ---------------------------------------------------------------------------
+ * This page never computes a saving — it lists every match, at every store,
+ * from every source, and lets a shopper compare them by eye. That is a
+ * deliberate difference from the cart scanner and the deals screen, both of
+ * which do arithmetic on a specific item at a specific store. A free-text
+ * search matches too loosely for arithmetic to be trustworthy — "yogurt"
+ * matches a two-litre tub and a 100g single cup alike, and subtracting across
+ * those would be comparing two different things and calling it a saving.
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import { AuthGuard } from "@/components/AuthGuard";
+import { PageHeader, Notice, Spinner } from "@/components/ui";
+import { ActiveFlyerPeriod } from "@/components/ActiveFlyerPeriod";
+import { FlyerPageProof } from "@/components/FlyerPageProof";
+import {
+  loadCurrentOffers,
+  loadCurrentFlippOffers,
+  type StoredOffer,
+} from "@/services/flyers/storage";
+import { citationLine } from "@/services/flyers/citation";
+import { describeBasis } from "@/types/flyer";
+import { RETAILERS } from "@/config/retailers";
+import type { RetailerId } from "@/types";
+import { formatCents } from "@/lib/money";
+
+export default function SearchPage() {
+  return (
+    <AuthGuard>
+      <PriceSearch />
+    </AuthGuard>
+  );
+}
+
+function normalize(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function PriceSearch() {
+  const [query, setQuery] = useState("");
+  const [offers, setOffers] = useState<StoredOffer[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    Promise.all([loadCurrentOffers(), loadCurrentFlippOffers()])
+      .then(([scanned, flipp]) => {
+        if (!live) return;
+        setOffers([...scanned, ...flipp]);
+      })
+      .catch((err) => {
+        if (live) {
+          setLoadError(
+            err instanceof Error ? err.message : "Could not load this week's prices.",
+          );
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // Grouped by store, cheapest first within a store, matching how a shopper
+  // actually reads this: "what's my price at each place", not one flat list.
+  const grouped = useMemo(() => {
+    if (offers === null) return null;
+    const term = normalize(query.trim());
+    if (term.length < 2) return null;
+
+    const matched = offers.filter((o) => {
+      const haystack = normalize(`${o.brand ?? ""} ${o.advertisedText}`);
+      return haystack.includes(term);
+    });
+
+    const byRetailer = new Map<RetailerId, StoredOffer[]>();
+    for (const offer of matched) {
+      const list = byRetailer.get(offer.retailerId) ?? [];
+      list.push(offer);
+      byRetailer.set(offer.retailerId, list);
+    }
+    for (const list of byRetailer.values()) {
+      list.sort((a, b) => a.price - b.price);
+    }
+
+    return [...byRetailer.entries()].sort(([a], [b]) =>
+      (RETAILERS[a]?.displayName ?? a).localeCompare(RETAILERS[b]?.displayName ?? b),
+    );
+  }, [offers, query]);
+
+  return (
+    <main className="mx-auto max-w-[900px]">
+      <PageHeader
+        title="Search this week's prices"
+        subtitle="Every matching price, at every store, from every source — nothing here is ever subtracted."
+        backHref="/"
+      />
+
+      <ActiveFlyerPeriod />
+
+      {loadError ? (
+        <Notice tone="warn" title="Could not load this week's prices">
+          {loadError} Reload the page before trusting an empty result.
+        </Notice>
+      ) : null}
+
+      <div className="card mb-4">
+        <label htmlFor="search-query" className="text-sm font-semibold">
+          Product name
+        </label>
+        <input
+          id="search-query"
+          type="search"
+          inputMode="search"
+          autoComplete="off"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="e.g. yogurt, Chapman's, 2 L"
+          className="mt-2 w-full rounded-md border border-line bg-transparent px-3 py-2 text-base"
+        />
+        <p className="mt-1 text-xs text-muted">
+          Partial words work — &ldquo;yog&rdquo; finds &ldquo;yogurt&rdquo;.
+          At least 2 letters to search.
+        </p>
+      </div>
+
+      {offers === null && !loadError ? (
+        <section className="card">
+          <Spinner label="Loading this week's prices…" />
+        </section>
+      ) : null}
+
+      {offers !== null && query.trim().length >= 2 && grouped !== null ? (
+        grouped.length === 0 ? (
+          <Notice tone="info" title="No matches">
+            Nothing this week, from a scanned flyer or Flipp, matched
+            &ldquo;{query.trim()}&rdquo;.
+          </Notice>
+        ) : (
+          <div className="space-y-4">
+            {grouped.map(([retailerId, list]) => (
+              <section key={retailerId} className="card">
+                <p className="font-bold">
+                  {RETAILERS[retailerId]?.displayName ?? retailerId}
+                </p>
+                <div className="mt-2 space-y-3">
+                  {list.map((offer) => {
+                    const isPartnerFeed = offer.condition === "SOURCE_UNCERTAIN";
+                    return (
+                      <div key={offer.id} className="border-t border-line pt-2 first:border-t-0 first:pt-0">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold leading-tight">
+                              {offer.advertisedText}
+                            </p>
+                            {offer.brand ? (
+                              <p className="text-xs text-muted">{offer.brand}</p>
+                            ) : null}
+                          </div>
+                          <div className="shrink-0 text-right">
+                            <p className="font-bold">
+                              {formatCents(offer.price)}
+                              {offer.basis !== "PER_ITEM" && offer.basis !== "UNKNOWN" ? (
+                                <span className="ml-1 text-xs font-normal text-muted">
+                                  {describeBasis(offer.basis)}
+                                </span>
+                              ) : null}
+                            </p>
+                            <p className="text-[11px] font-semibold text-muted">
+                              {isPartnerFeed ? "via Flipp" : "scanned"}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-2 flex items-start gap-2">
+                          {isPartnerFeed && offer.partnerImageUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={offer.partnerImageUrl}
+                              alt=""
+                              className="h-12 w-12 shrink-0 rounded object-cover"
+                            />
+                          ) : null}
+                          <div className="min-w-0 flex-1">
+                            <p className="rounded-md bg-surface px-2 py-1 text-xs">
+                              {citationLine({
+                                retailerId: offer.retailerId,
+                                flyerPage: offer.flyerPage,
+                                validFrom: offer.validFrom,
+                                validTo: offer.validTo,
+                                hasPageImage: true,
+                                isPartnerFeed,
+                              })}
+                            </p>
+                            {!isPartnerFeed ? (
+                              <FlyerPageProof
+                                flyerId={offer.flyerId}
+                                page={offer.flyerPage}
+                                box={offer.box}
+                              />
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        )
+      ) : null}
+
+      {offers !== null && query.trim().length > 0 && query.trim().length < 2 ? (
+        <p className="text-sm text-muted">Keep typing — at least 2 letters.</p>
+      ) : null}
+    </main>
+  );
+}
