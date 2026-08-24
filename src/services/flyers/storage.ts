@@ -884,6 +884,40 @@ export async function loadCurrentOffersResult(
 }
 
 /**
+ * The Flipp date window covering the given day, if any — the widest span
+ * seen across every retailer's offers, not any one retailer's. Used only to
+ * show a date range on screen; loadFlippRetailersThisWeek() and
+ * loadCurrentFlippOffers() remain the sources of truth for actual matching.
+ */
+export async function loadFlippWindowThisWeek(
+  on: Date = new Date(),
+): Promise<{ validFrom: string; validTo: string } | null> {
+  const supabase = client();
+  if (!supabase) return null;
+  const today = isoDay(on);
+
+  const fetched = await fetchAllRows((from, to) =>
+    supabase
+      .from("cartmatch_flipp_offers")
+      .select("valid_from, valid_to")
+      .lte("valid_from", today)
+      .gte("valid_to", today)
+      .range(from, to),
+  );
+  if (!fetched.ok || fetched.rows.length === 0) return null;
+
+  let validFrom = String(fetched.rows[0]!.valid_from);
+  let validTo = String(fetched.rows[0]!.valid_to);
+  for (const row of fetched.rows) {
+    const from = String(row.valid_from);
+    const to = String(row.valid_to);
+    if (from < validFrom) validFrom = from;
+    if (to > validTo) validTo = to;
+  }
+  return { validFrom, validTo };
+}
+
+/**
  * Which retailers Flipp covered for the given day — presence only, no offer
  * detail. Answers "do I still need to scan a flyer, or does Flipp already
  * have this store this week" without loading every offer row.
