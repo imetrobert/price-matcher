@@ -32,6 +32,7 @@ import { supabaseConfigured } from "@/config/env";
 import type { RetailerId } from "@/types";
 import type { ExtractedOffer } from "./pdf/types";
 import type { OfferCondition, PriceBasis } from "@/types/flyer";
+import { looksLikeCurrentWeek } from "./status";
 
 /**
  * The browser client, or null when Supabase is not configured.
@@ -951,9 +952,21 @@ export async function loadFlippRetailersThisWeek(
  * every offer here always carries condition SOURCE_UNCERTAIN and can never be
  * confused with something read off a page. See that condition's definition
  * in types/flyer.ts for why it never takes part in arithmetic.
+ *
+ * thisWeekOnly (default true) additionally requires each offer's OWN window
+ * to look like a normal week — see looksLikeCurrentWeek() in status.ts for
+ * why this matters: a single Flipp flyer can bundle offers with a normal
+ * 6-7 day window alongside others running 20-48 days for a seasonal
+ * promotion, all under "today falls within valid_from/valid_to" being true
+ * for both. Defaulting to true here is what keeps the cart scanner's real
+ * matching results scoped to "this week" without every call site needing to
+ * remember to ask for it. Pass false explicitly for a use that wants
+ * everything currently valid regardless of window length — the search
+ * page's "include everything" option is the one caller that does.
  */
 export async function loadCurrentFlippOffers(
   on: Date = new Date(),
+  { thisWeekOnly = true }: { thisWeekOnly?: boolean } = {},
 ): Promise<StoredOffer[]> {
   const supabase = client();
   if (!supabase) return [];
@@ -970,7 +983,16 @@ export async function loadCurrentFlippOffers(
   );
   if (!fetched.ok) return [];
 
-  return fetched.rows.map((row: Record<string, unknown>) => ({
+  const rows = thisWeekOnly
+    ? fetched.rows.filter((row: Record<string, unknown>) =>
+        looksLikeCurrentWeek({
+          validFrom: String(row.valid_from),
+          validTo: String(row.valid_to),
+        }),
+      )
+    : fetched.rows;
+
+  return rows.map((row: Record<string, unknown>) => ({
     id: String(row.id),
     flyerId: String(row.flyer_id),
     retailerId: String(row.retailer_id) as RetailerId,

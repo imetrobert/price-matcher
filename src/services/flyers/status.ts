@@ -118,6 +118,64 @@ function daysBetween(from: string, to: string): number {
   return Math.round((at(to) - at(from)) / 86_400_000) + 1;
 }
 
+/**
+ * The Thursday-to-Wednesday week containing the given day — computed purely
+ * from the date, never from stored data.
+ *
+ * Why this exists: Flipp's own valid_from/valid_to on an offer is not always
+ * a normal one-week window — some banners run longer promotions or seasonal
+ * catalogs alongside their weekly circular, with a much wider date range on
+ * the same feed. Taking the min/max across every currently-valid offer (the
+ * first version of this) meant a single such offer could stretch "this
+ * week" to "this week through mid-September" on screen, which is not what
+ * anybody asking "what week is it" wants to hear. This is the fix: the
+ * calendar defines the week, not whatever the widest offer happens to say.
+ */
+export function currentWeekWindow(on: Date = new Date()): {
+  validFrom: string;
+  validTo: string;
+} {
+  const day = on.getUTCDay(); // 0 = Sunday .. 6 = Saturday
+  const sinceThursday = (day - 4 + 7) % 7; // Thursday = 4
+  const thursday = new Date(on);
+  thursday.setUTCDate(on.getUTCDate() - sinceThursday);
+  const wednesday = new Date(thursday);
+  wednesday.setUTCDate(thursday.getUTCDate() + 6);
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  return { validFrom: iso(thursday), validTo: iso(wednesday) };
+}
+
+/**
+ * Whether an offer's OWN valid_from/valid_to looks like a normal weekly
+ * flyer rather than a longer-running promotion or catalog bundled into the
+ * same feed.
+ *
+ * Confirmed against real data (Aug 2026): a single Flipp flyer can contain
+ * offers with genuinely different individual windows — most matching the
+ * normal 6-7 day week, some running 20-48 days for a seasonal promotion
+ * bundled into the same document. Both are real; only the first is "this
+ * week" in the sense a grocery shopper means it.
+ *
+ * Overlapping the current week is not sufficient alone — the current week
+ * sits entirely inside a nine-week window by definition — so this also
+ * requires the offer's own window to be short.
+ *
+ * TEN DAYS IS A GUESS, not a measured cutoff — chosen generous enough to
+ * tolerate a flyer running Wed-to-Wed instead of Thu-to-Wed without
+ * accepting a month-long promotion. The real data confirms a clean gap (6
+ * days vs 20+), so 10 sits safely in the middle of it as of this check —
+ * revisit if a future flyer's window lands closer to that line.
+ */
+export function looksLikeCurrentWeek(
+  offer: { validFrom: string; validTo: string },
+  week: { validFrom: string; validTo: string } = currentWeekWindow(),
+): boolean {
+  const overlaps = offer.validFrom <= week.validTo && offer.validTo >= week.validFrom;
+  const days =
+    (Date.parse(offer.validTo) - Date.parse(offer.validFrom)) / 86_400_000;
+  return overlaps && days <= 10;
+}
+
 function names(retailers: RetailerId[]): string {
   const list = retailers.map((r) => RETAILERS[r]?.displayName ?? r);
   if (list.length === 0) return "no stores";
