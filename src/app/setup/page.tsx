@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Notice, PageHeader } from "@/components/ui";
+import { TabBar } from "@/components/TabBar";
 import { enabledRetailers } from "@/config/retailers";
 import { SAVINGS } from "@/config/thresholds";
 import { formatCents, tryParsePriceToCents } from "@/lib/money";
@@ -106,12 +107,13 @@ export default function SetupPage() {
   }
 
   return (
-    <main>
-      <PageHeader
-        title="Settings"
-        subtitle={SETTINGS_SUBTITLE}
-        backHref="/"
-      />
+    <>
+      <main>
+        <PageHeader
+          title="Settings"
+          subtitle={SETTINGS_SUBTITLE}
+          backHref="/"
+        />
 
       <section className="card mb-4">
         <label className="label" htmlFor="postal">
@@ -265,6 +267,11 @@ export default function SetupPage() {
       <button type="button" className="btn-primary" onClick={save}>
         Save
       </button>
-    </main>
+
+      <div className="h-16" aria-hidden />
+      </main>
+
+      <TabBar />
+    </>
   );
 }
