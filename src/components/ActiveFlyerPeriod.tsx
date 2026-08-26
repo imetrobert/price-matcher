@@ -19,16 +19,16 @@
  * WHERE THE WINDOW COMES FROM
  * ---------------------------------------------------------------------------
  * Prefers the scanned-flyer window when any flyer covers today, since a
- * photographed flyer's dates are exact. Falls back to Flipp's window when
- * nothing has been scanned. Shows just today's date, plainly, when neither
- * source has anything — that is still true and still worth saying.
+ * photographed flyer's dates are exact and genuinely span one week. Falls
+ * back to the calendar's own Thursday-to-Wednesday week when nothing has
+ * been scanned — NOT to Flipp's own stored dates, which can span far wider
+ * than a week on offers tied to a longer-running promotion or catalog. The
+ * calendar is always right; the widest matching row in the database is not.
  */
 
 import { useEffect, useState } from "react";
-import {
-  loadAllFlyersResult,
-  loadFlippWindowThisWeek,
-} from "@/services/flyers/storage";
+import { loadAllFlyersResult } from "@/services/flyers/storage";
+import { currentWeekWindow } from "@/services/flyers/status";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -50,8 +50,6 @@ export function ActiveFlyerPeriod() {
     validTo: string;
     source: "SCAN" | "FLIPP";
   } | null>(null);
-  // null = still loading, undefined-equivalent "checked, found nothing" is
-  // represented by window staying null after loaded flips true.
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -71,26 +69,20 @@ export function ActiveFlyerPeriod() {
             .sort()
             .slice(-1)[0]!;
           setWindow({ validFrom, validTo, source: "SCAN" });
-          setLoaded(true);
-          return;
+        } else {
+          // Nothing scanned covers today. Rather than ask the database what
+          // Flipp's window is — fragile, since one long-running promotion on
+          // the feed can stretch it to months — the calendar itself defines
+          // the week. This is always right, and never needs a query.
+          setWindow({ ...currentWeekWindow(), source: "FLIPP" });
         }
-        // Nothing scanned covers today — try Flipp's window before giving up.
-        void loadFlippWindowThisWeek()
-          .then((flippWindow) => {
-            if (!live) return;
-            setWindow(
-              flippWindow
-                ? { ...flippWindow, source: "FLIPP" }
-                : null,
-            );
-            setLoaded(true);
-          })
-          .catch(() => {
-            if (live) setLoaded(true);
-          });
+        setLoaded(true);
       })
       .catch(() => {
-        if (live) setLoaded(true);
+        if (live) {
+          setWindow({ ...currentWeekWindow(), source: "FLIPP" });
+          setLoaded(true);
+        }
       });
 
     return () => {
