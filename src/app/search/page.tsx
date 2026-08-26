@@ -29,6 +29,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { PageHeader, Notice, Spinner } from "@/components/ui";
+import { TabBar } from "@/components/TabBar";
 import { ActiveFlyerPeriod } from "@/components/ActiveFlyerPeriod";
 import { FlyerPageProof } from "@/components/FlyerPageProof";
 import {
@@ -37,6 +38,7 @@ import {
   type StoredOffer,
 } from "@/services/flyers/storage";
 import { citationLine } from "@/services/flyers/citation";
+import { currentWeekWindow, looksLikeCurrentWeek } from "@/services/flyers/status";
 import { describeBasis } from "@/types/flyer";
 import { RETAILERS } from "@/config/retailers";
 import type { RetailerId } from "@/types";
@@ -61,10 +63,16 @@ function PriceSearch() {
   const [query, setQuery] = useState("");
   const [offers, setOffers] = useState<StoredOffer[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Default true on purpose: an offer's OWN valid_from/valid_to is not
+  // always a one-week window — some Flipp banners run a longer promotion or
+  // catalog alongside their weekly circular, on the same feed. "This week
+  // only" is the calendar's Thursday-to-Wednesday week, checked directly,
+  // not trusted from whatever the widest matching offer happens to claim.
+  const [thisWeekOnly, setThisWeekOnly] = useState(true);
 
   useEffect(() => {
     let live = true;
-    Promise.all([loadCurrentOffers(), loadCurrentFlippOffers()])
+    Promise.all([loadCurrentOffers(), loadCurrentFlippOffers(new Date(), { thisWeekOnly: false })])
       .then(([scanned, flipp]) => {
         if (!live) return;
         setOffers([...scanned, ...flipp]);
@@ -88,7 +96,10 @@ function PriceSearch() {
     const term = normalize(query.trim());
     if (term.length < 2) return null;
 
-    const matched = offers.filter((o) => {
+    const week = currentWeekWindow();
+    const scoped = thisWeekOnly ? offers.filter((o) => looksLikeCurrentWeek(o, week)) : offers;
+
+    const matched = scoped.filter((o) => {
       const haystack = normalize(`${o.brand ?? ""} ${o.advertisedText}`);
       return haystack.includes(term);
     });
@@ -109,14 +120,15 @@ function PriceSearch() {
   }, [offers, query]);
 
   return (
-    <main className="mx-auto max-w-[900px]">
-      <PageHeader
-        title="Search this week's prices"
-        subtitle="Every matching price, at every store, from every source — nothing here is ever subtracted."
-        backHref="/"
-      />
+    <>
+      <main className="mx-auto max-w-[900px]">
+        <PageHeader
+          title="Search this week's prices"
+          subtitle="Every matching price, at every store, from every source — nothing here is ever subtracted."
+          backHref="/"
+        />
 
-      <ActiveFlyerPeriod />
+        <ActiveFlyerPeriod />
 
       {loadError ? (
         <Notice tone="warn" title="Could not load this week's prices">
@@ -142,6 +154,21 @@ function PriceSearch() {
           Partial words work — &ldquo;yog&rdquo; finds &ldquo;yogurt&rdquo;.
           At least 2 letters to search.
         </p>
+
+        <label className="mt-3 flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={thisWeekOnly}
+            onChange={(e) => setThisWeekOnly(e.target.checked)}
+          />
+          This week only
+        </label>
+        {!thisWeekOnly ? (
+          <p className="mt-1 text-xs text-muted">
+            Showing everything currently valid, including longer-running
+            promotions that extend past this week.
+          </p>
+        ) : null}
       </div>
 
       {offers === null && !loadError ? (
@@ -234,6 +261,11 @@ function PriceSearch() {
       {offers !== null && query.trim().length > 0 && query.trim().length < 2 ? (
         <p className="text-sm text-muted">Keep typing — at least 2 letters.</p>
       ) : null}
-    </main>
+
+      <div className="h-16" aria-hidden />
+      </main>
+
+      <TabBar />
+    </>
   );
 }
