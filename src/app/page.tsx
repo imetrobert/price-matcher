@@ -7,8 +7,7 @@ import { useEffect, useState } from "react";
 import { AuthBar, AuthGuard } from "@/components/AuthGuard";
 import { checkAppAccess } from "@/lib/auth/access";
 import { Notice } from "@/components/ui";
-import { RETAILERS } from "@/config/retailers";
-import { formatCents } from "@/lib/money";
+import { TabBar } from "@/components/TabBar";
 import { DEFAULT_PREFS, loadPrefs, prefsAreComplete } from "@/lib/prefs";
 import {
   loadAllFlyers,
@@ -138,13 +137,11 @@ function Home() {
   };
 
   const ready = prefsAreComplete(prefs) && prefs.currentRetailerId !== null;
-  const retailer = prefs.currentRetailerId
-    ? RETAILERS[prefs.currentRetailerId]
-    : null;
 
   return (
-    <main>
-      <AuthBar />
+    <>
+      <main>
+        <AuthBar />
 
       <header className="mb-5 mt-2">
         <h1 className="text-3xl font-extrabold tracking-tight">CartMatch</h1>
@@ -157,6 +154,45 @@ function Home() {
         The first thing on the screen, because it is the first thing somebody
         wants to know before leaving the house.
       */}
+      {/*
+        Per-retailer coverage, moved to lead the page and collapsed by
+        default: useful to check, not useful to have open every time — the
+        card below it (Ready to scan, or the reading-status card) is what
+        somebody actually acts on first.
+      */}
+      {flyers ? (
+        <details className="card mb-4">
+          <summary className="cursor-pointer font-bold">
+            This week&rsquo;s price sources
+          </summary>
+          <div className="mt-2 space-y-1">
+            {flyerSourceSummary(flyers.retailers, flippRetailers).map(
+              ({ retailerId, displayName, source }) => (
+                <div
+                  key={retailerId}
+                  className="flex items-center justify-between text-sm"
+                >
+                  <span>{displayName}</span>
+                  <span
+                    className={
+                      source === "NONE" ? "text-warn" : "text-muted"
+                    }
+                  >
+                    {source === "BOTH"
+                      ? "Scanned + Flipp"
+                      : source === "SCAN"
+                        ? "Scanned"
+                        : source === "FLIPP"
+                          ? "Flipp only"
+                          : "Nothing yet"}
+                  </span>
+                </div>
+              ),
+            )}
+          </div>
+        </details>
+      ) : null}
+
       {flyers ? (
         flippRetailers.length > 0 ? (
           <>
@@ -166,20 +202,17 @@ function Home() {
               with the upload/reading card here would say the opposite of
               what is true — that a shopper still has work to do before they
               can start — so it is demoted below, collapsed, and explained
-              rather than led with.
+              rather than led with. No wording beyond the button itself:
+              the sources card above already says which stores are covered
+              and from where.
             */}
             <section className="card mb-4 border border-good/40">
-              <p className="font-bold text-good">Ready to scan</p>
-              <p className="mt-1 text-sm text-muted">
-                Flipp already has prices for {namesList(flippRetailers)} this
-                week — see below for the full list by store.
-              </p>
               <Link
                 href="/scan"
                 className={
                   ready
-                    ? "btn-primary mt-3"
-                    : "btn-primary mt-3 pointer-events-none opacity-40"
+                    ? "btn-primary"
+                    : "btn-primary pointer-events-none opacity-40"
                 }
                 aria-disabled={!ready}
               >
@@ -214,6 +247,7 @@ function Home() {
                   requeue={requeue}
                   ready={ready}
                   flippRetailers={flippRetailers}
+                  demoted
                 />
               </div>
             </details>
@@ -261,59 +295,6 @@ function Home() {
       ) : null}
 
       {/*
-        Per-retailer coverage, across everything this app tracks — separate
-        from the card above on purpose. That card answers "did the flyers I
-        scanned finish being read"; this answers "which stores have ANY
-        current price data, and from where", which Flipp can answer on its
-        own without anybody scanning anything. Shown whenever the scanned-
-        flyer check succeeded, even if it found nothing, since "nothing
-        scanned, but Flipp has three stores" is exactly the case this exists
-        to surface.
-      */}
-      {flyers ? (
-        <section className="card mb-4">
-          <p className="font-bold">This week&rsquo;s price sources</p>
-          <div className="mt-2 space-y-1">
-            {flyerSourceSummary(flyers.retailers, flippRetailers).map(
-              ({ retailerId, displayName, source }) => (
-                <div
-                  key={retailerId}
-                  className="flex items-center justify-between text-sm"
-                >
-                  <span>{displayName}</span>
-                  <span
-                    className={
-                      source === "NONE" ? "text-warn" : "text-muted"
-                    }
-                  >
-                    {source === "BOTH"
-                      ? "Scanned + Flipp"
-                      : source === "SCAN"
-                        ? "Scanned"
-                        : source === "FLIPP"
-                          ? "Flipp only"
-                          : "Nothing yet"}
-                  </span>
-                </div>
-              ),
-            )}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="card mb-4">
-        <Row label="Current store" value={retailer?.displayName ?? "Not set"} />
-        <Row label="Postal code" value={prefs.postalCode || "Not set"} />
-        <Row
-          label="Minimum savings"
-          value={formatCents(prefs.minSavingsCents)}
-        />
-        <Link href="/setup" className="btn-secondary mt-3">
-          {ready ? "Change settings" : "Set up"}
-        </Link>
-      </section>
-
-      {/*
         The card above owns everything to do with loading flyers, in all three
         states, so nothing down here repeats it. Two buttons for one
         destination is how "Add more flyers" and "Import this week's flyers"
@@ -339,21 +320,11 @@ function Home() {
         </Link>
       ) : null}
 
-      {/*
-        Same gate as "Compare flyer savings" would use, widened: a search is
-        useful the moment EITHER source has anything, not only once personal
-        flyers are fully read.
-      */}
-      {(flyers && flyers.readiness !== "NONE") || flippRetailers.length > 0 ? (
-        <Link href="/search" className="btn-secondary mt-2">
-          Search this week&rsquo;s prices
-        </Link>
-      ) : null}
-
       {!ready ? (
         <div className="mt-4">
           <Notice tone="warn" title="Finish setup first">
-            Add your postal code and choose the store you are shopping at.
+            Add your postal code and choose the store you are shopping at, on
+            the Settings tab below.
           </Notice>
         </div>
       ) : null}
@@ -373,7 +344,13 @@ function Home() {
           Developer / debug view
         </Link>
       ) : null}
-    </main>
+
+      {/* Clears the fixed tab bar below rather than being hidden behind it. */}
+      <div className="h-16" aria-hidden />
+      </main>
+
+      <TabBar />
+    </>
   );
 }
 
@@ -386,23 +363,6 @@ function dayLabel(iso: string): string {
     day: "numeric",
     timeZone: "UTC",
   });
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3 py-1">
-      <span className="text-sm text-muted">{label}</span>
-      <span className="font-semibold">{value}</span>
-    </div>
-  );
-}
-
-/** Retailer display names joined for a sentence: "A, B and C". */
-function namesList(retailers: RetailerId[]): string {
-  const list = retailers.map((r) => RETAILERS[r]?.displayName ?? r);
-  if (list.length === 0) return "";
-  if (list.length === 1) return list[0]!;
-  return `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
 }
 
 /**
@@ -422,12 +382,25 @@ function FlyerReadingStatus({
   requeue,
   ready,
   flippRetailers,
+  demoted = false,
 }: {
   flyers: FlyerStatus;
   retrying: boolean;
   requeue: () => void;
   ready: boolean;
   flippRetailers: RetailerId[];
+  /**
+   * True when this is rendered inside the collapsed "Scan a flyer too?"
+   * disclosure rather than as the page's own leading card — i.e. only when
+   * Flipp already covers something and a separate, plain "Scan your cart"
+   * button already exists above this. In that context, repeating the
+   * button here would be a second copy of the same action; the button is
+   * suppressed and the upload action reads the same regardless of readiness
+   * state, since the only thing this view exists to explain is that one
+   * optional action, not to walk through reading progress the way the full
+   * card does.
+   */
+  demoted?: boolean;
 }) {
   return (
     <>
@@ -535,7 +508,7 @@ function FlyerReadingStatus({
             </button>
           ) : null}
           <Link href="/flyers" className="btn-secondary mt-3">
-            Add more flyers
+            {demoted ? "Upload and scan PDF flyers" : "Add more flyers"}
           </Link>
         </>
       ) : flyers.readiness === "PARTIAL" ? (
@@ -557,34 +530,76 @@ function FlyerReadingStatus({
             this tab.
           </p>
           {/*
-            The same two actions the loaded card offers, in the same place.
-            Scanning is worth offering mid-read: the offers already stored
-            are real, and the detail above says plainly that a page still
-            unread is missing its offers rather than free of them.
+            Scanning is suppressed when demoted: a plain "Scan your cart"
+            button already exists above this whole disclosure in that case,
+            and repeating it here would be the same action twice on one
+            screen.
           */}
           <div className="mt-3 space-y-2">
+            {!demoted ? (
+              <Link
+                href="/scan"
+                className={
+                  ready
+                    ? "btn-primary"
+                    : "btn-primary pointer-events-none opacity-40"
+                }
+                aria-disabled={!ready}
+              >
+                Scan your cart
+              </Link>
+            ) : null}
             <Link
-              href="/scan"
-              className={
-                ready
-                  ? "btn-primary"
-                  : "btn-primary pointer-events-none opacity-40"
-              }
-              aria-disabled={!ready}
+              href="/flyers"
+              className={demoted ? "btn-primary" : "btn-secondary"}
             >
-              Scan your cart
-            </Link>
-            <Link href="/flyers" className="btn-secondary">
-              Add more flyers
+              {demoted ? "Upload and scan PDF flyers" : "Add more flyers"}
             </Link>
           </div>
         </>
       ) : flyers.readiness === "NONE" ? (
         flippRetailers.length > 0 ? (
           // Nothing scanned, but Flipp already has real data for at
-          // least one store — scanning is not blocked on uploading
-          // anything, so it should not read as though it were.
+          // least one store. In practice this branch is only ever reached
+          // already demoted — the wrapper that renders demoted=false never
+          // has anything to demote FROM in this specific case — but the
+          // check stays for the same reason as the branches above.
           <div className="mt-3 space-y-2">
+            {!demoted ? (
+              <Link
+                href="/scan"
+                className={
+                  ready
+                    ? "btn-primary"
+                    : "btn-primary pointer-events-none opacity-40"
+                }
+                aria-disabled={!ready}
+              >
+                Scan your cart
+              </Link>
+            ) : null}
+            <Link
+              href="/flyers"
+              className={demoted ? "btn-primary" : "btn-secondary"}
+            >
+              {demoted ? "Upload and scan PDF flyers" : "Upload this week\u2019s flyers"}
+            </Link>
+          </div>
+        ) : (
+          <Link href="/flyers" className="btn-primary mt-3">
+            {demoted ? "Upload and scan PDF flyers" : "Upload this week\u2019s flyers"}
+          </Link>
+        )
+      ) : (
+        /*
+          Loaded is the state this screen is in most of the week, so it is
+          the one worth laying out properly outside the demoted view. The
+          two things a person does from here — scan the trolley they are
+          pushing, or add a flyer they have just downloaded — belong beside
+          the sentence that says the flyers are ready.
+        */
+        <div className="mt-3 space-y-2">
+          {!demoted ? (
             <Link
               href="/scan"
               className={
@@ -596,42 +611,12 @@ function FlyerReadingStatus({
             >
               Scan your cart
             </Link>
-            <Link href="/flyers" className="btn-secondary">
-              Upload this week&rsquo;s flyers
-            </Link>
-          </div>
-        ) : (
-          <Link href="/flyers" className="btn-primary mt-3">
-            Upload this week&rsquo;s flyers
-          </Link>
-        )
-      ) : (
-        /*
-          Loaded is the state this screen is in most of the week, so it is
-          the one worth laying out properly. The two things a person does
-          from here — scan the trolley they are pushing, or add a flyer
-          they have just downloaded — belong beside the sentence that says
-          the flyers are ready, not scattered down the page among links
-          that mean nothing until they are.
-
-          Comparing the flyers against each other is a different kind of
-          act: planning rather than shopping. It sits below the settings,
-          on its own.
-        */
-        <div className="mt-3 space-y-2">
+          ) : null}
           <Link
-            href="/scan"
-            className={
-              ready
-                ? "btn-primary"
-                : "btn-primary pointer-events-none opacity-40"
-            }
-            aria-disabled={!ready}
+            href="/flyers"
+            className={demoted ? "btn-primary" : "btn-secondary"}
           >
-            Scan your cart
-          </Link>
-          <Link href="/flyers" className="btn-secondary">
-            Import additional flyers
+            {demoted ? "Upload and scan PDF flyers" : "Import additional flyers"}
           </Link>
         </div>
       )}
