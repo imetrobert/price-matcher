@@ -1636,18 +1636,25 @@ function describeSizeBasis(basis: string | null): string | null {
  * far as anything readable goes. What is missing is the check, and the whole
  * case for allowing the match is that this note gets shown instead.
  *
- * It says what to do, not merely that something is uncertain. "Unverified" on
- * its own is noise; "look at the tub before you quote this" is an instruction.
+ * Names the actual size when the flyer side has one — "the flyer says 250 g"
+ * is a specific thing to go check, not just a reason to distrust the match.
+ * Falls back to a generic caution only when neither side has a size to name.
  */
 function SizeUnverifiedNote({ line }: { line: CartLine }) {
   if (!line.sizeUnverified) return null;
+  const flyerSize = line.bestElsewhere?.size ?? null;
 
   return (
     <p className="mt-2 rounded-md bg-warn/10 p-2 text-xs text-warn">
-      <span className="font-semibold">Check the size before you quote this.</span>{" "}
-      The brand and product match, but the size could not be read on one side —
-      so this may be a different pack. Checkout Mode will not show it until the
-      size is confirmed.
+      <span className="font-semibold">
+        {flyerSize
+          ? `Found a match — check the size. The flyer shows ${flyerSize}.`
+          : "Check the size before you quote this."}
+      </span>{" "}
+      {flyerSize
+        ? "The brand and product match, but your cart's size was not read — confirm the tub or box in your cart is the same size before you rely on this."
+        : "The brand and product match, but the size could not be read on one side — so this may be a different pack."}{" "}
+      Checkout Mode will not show it until the size is confirmed.
     </p>
   );
 }
