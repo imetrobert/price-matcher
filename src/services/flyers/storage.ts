@@ -28,7 +28,8 @@
  */
 
 import { createClient } from "@/lib/auth/client";
-import { supabaseConfigured } from "@/config/env";
+import { supabaseConfigured, edgeFunctionUrl, env } from "@/config/env";
+import { getAccessToken } from "@/lib/auth/session";
 import type { RetailerId } from "@/types";
 import type { ExtractedOffer } from "./pdf/types";
 import type { OfferCondition, PriceBasis } from "@/types/flyer";
@@ -916,6 +917,49 @@ export async function loadFlippWindowThisWeek(
     if (to > validTo) validTo = to;
   }
   return { validFrom, validTo };
+}
+
+/**
+ * Manually re-fetch and write ONE retailer's current Flipp data right now,
+ * outside the weekly schedule — for the admin panel's "Retry" button next to
+ * a retailer showing no data.
+ *
+ * Deliberately calls the cartmatch-flipp Edge Function's new "retry" action
+ * rather than writing to cartmatch_flipp_offers from here directly — that
+ * table has no client-write RLS policy, on purpose, and this keeps it that
+ * way. The Edge Function checks has_app_access itself before writing with
+ * its own service-role key; nothing about calling it from an admin-only
+ * screen changes what it will accept from a signed-in non-admin user, so
+ * the real security boundary is server-side, not just "buried in a menu".
+ */
+export async function retryFlippRetailer(
+  retailerId: RetailerId,
+): Promise<{ ok: true; written: number; banners: number; note?: string } | { ok: false; error: string }> {
+  if (!supabaseConfigured()) return { ok: false, error: "Supabase is not configured." };
+  const token = await getAccessToken();
+  if (!token) return { ok: false, error: "Sign in first." };
+
+  try {
+    const res = await fetch(edgeFunctionUrl("cartmatch-flipp"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        apikey: env.supabaseAnonKey,
+      },
+      body: JSON.stringify({ action: "retry", retailerId }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) {
+      return { ok: false, error: data?.error ?? `Retry failed (HTTP ${res.status}).` };
+    }
+    return { ok: true, written: data.written ?? 0, banners: data.banners ?? 0, note: data.note };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Retry request failed.",
+    };
+  }
 }
 
 /**
