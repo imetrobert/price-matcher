@@ -59,6 +59,102 @@ function normalize(text: string): string {
     .toLowerCase();
 }
 
+/**
+ * English/French grocery category pairs, so a search for "fromage" also
+ * finds "cheese" and vice versa — without needing a second, French-language
+ * copy of Flipp's data. Flipp is called with locale=en-CA only; fetching a
+ * French copy too would roughly double the import function's upstream
+ * calls, which are already close to the execution-time ceiling fetching
+ * everything once, concurrently (see cartmatch-flipp-import's own
+ * comments). This also covers scanned flyers, which are often bilingual or
+ * French-primary in Quebec — something a second English-only Flipp call
+ * would never have helped with anyway.
+ *
+ * Deliberately excludes short or ambiguous words where the languages
+ * collide badly — "thé" (tea) vs "the" being the obvious one. Every entry
+ * here is a word unambiguous enough in either language that a false match
+ * is unlikely. Not exhaustive; add pairs as gaps come up in practice.
+ */
+const CATEGORY_SYNONYMS: string[][] = [
+  ["fromage", "fromages", "cheese"],
+  ["biscuit", "biscuits", "cookie", "cookies"],
+  ["lait", "milk"],
+  ["pain", "bread"],
+  ["oeuf", "oeufs", "egg", "eggs"],
+  ["poulet", "chicken"],
+  ["boeuf", "beef"],
+  ["porc", "pork"],
+  ["poisson", "fish"],
+  ["yogourt", "yaourt", "yogurt"],
+  ["beurre", "butter"],
+  ["pomme", "pommes", "apple", "apples"],
+  ["legume", "legumes", "vegetable", "vegetables"],
+  ["fruit", "fruits"],
+  ["cereale", "cereales", "cereal", "cereals"],
+  ["cafe", "coffee"],
+  ["jus", "juice"],
+  ["soupe", "soupes", "soup"],
+  ["pates", "pasta"],
+  ["riz", "rice"],
+  ["confiture", "confitures", "jam"],
+  ["chocolat", "chocolats", "chocolate"],
+  ["biere", "bieres", "beer"],
+  ["savon", "savons", "soap"],
+  ["shampooing", "shampoo"],
+  ["dentifrice", "toothpaste"],
+  ["couches", "diapers", "diaper"],
+  ["surgele", "surgeles", "congele", "congeles", "frozen"],
+  ["viande", "viandes", "meat"],
+  ["dinde", "turkey"],
+  ["saumon", "salmon"],
+  ["crevette", "crevettes", "shrimp"],
+  ["creme glacee", "ice cream"],
+  ["farine", "flour"],
+  ["sucre", "sugar"],
+  ["sel", "salt"],
+  ["huile", "oil"],
+  ["vinaigre", "vinegar"],
+  ["nouilles", "noodles"],
+  ["saucisse", "saucisses", "sausage", "sausages"],
+  ["jambon", "ham"],
+  ["noix", "nuts"],
+  ["arachide", "arachides", "peanut", "peanuts"],
+  ["raisin", "raisins", "grape", "grapes"],
+  ["orange", "oranges"],
+  ["citron", "citrons", "lemon", "lemons"],
+  ["carotte", "carottes", "carrot", "carrots"],
+  ["patate", "patates", "pomme de terre", "potato", "potatoes"],
+  ["oignon", "oignons", "onion", "onions"],
+  ["tomate", "tomates", "tomato", "tomatoes"],
+  ["laitue", "lettuce"],
+  ["concombre", "cucumber"],
+  ["mouchoirs", "tissues"],
+  ["essuie-tout", "paper towel", "paper towels"],
+  ["papier hygienique", "toilet paper"],
+  ["detersif", "detergent"],
+  ["nettoyant", "cleaner"],
+  ["desinfectant", "disinfectant"],
+];
+
+/**
+ * Given a typed query, every extra term worth also checking — the query
+ * itself plus every word from any synonym group it partially matches.
+ * "fromage" partially matches ["fromage","fromages","cheese"], so all three
+ * become search terms; a query that matches no group is unaffected.
+ */
+function expandQuery(term: string): string[] {
+  const normalized = normalize(term);
+  const terms = new Set([normalized]);
+  for (const group of CATEGORY_SYNONYMS) {
+    const normGroup = group.map(normalize);
+    const hits = normGroup.some(
+      (word) => word.includes(normalized) || normalized.includes(word),
+    );
+    if (hits) normGroup.forEach((word) => terms.add(word));
+  }
+  return [...terms];
+}
+
 function PriceSearch() {
   const [query, setQuery] = useState("");
   const [offers, setOffers] = useState<StoredOffer[] | null>(null);
@@ -99,9 +195,10 @@ function PriceSearch() {
     const week = currentWeekWindow();
     const scoped = thisWeekOnly ? offers.filter((o) => looksLikeCurrentWeek(o, week)) : offers;
 
+    const searchTerms = expandQuery(query.trim());
     const matched = scoped.filter((o) => {
       const haystack = normalize(`${o.brand ?? ""} ${o.advertisedText}`);
-      return haystack.includes(term);
+      return searchTerms.some((t) => haystack.includes(t));
     });
 
     const byRetailer = new Map<RetailerId, StoredOffer[]>();
@@ -117,7 +214,14 @@ function PriceSearch() {
     return [...byRetailer.entries()].sort(([a], [b]) =>
       (RETAILERS[a]?.displayName ?? a).localeCompare(RETAILERS[b]?.displayName ?? b),
     );
-  }, [offers, query]);
+  }, [offers, query, thisWeekOnly]);
+
+  // Just for the "also searching" note below the input — recomputed the same
+  // way as inside the memo above, cheap enough not to bother sharing.
+  const extraSearchTerms =
+    query.trim().length >= 2
+      ? expandQuery(query.trim()).filter((t) => t !== normalize(query.trim()))
+      : [];
 
   return (
     <>
@@ -154,6 +258,11 @@ function PriceSearch() {
           Partial words work — &ldquo;yog&rdquo; finds &ldquo;yogurt&rdquo;.
           At least 2 letters to search.
         </p>
+        {extraSearchTerms.length > 0 ? (
+          <p className="mt-1 text-xs text-muted">
+            Also searching: {extraSearchTerms.join(", ")}
+          </p>
+        ) : null}
 
         <label className="mt-3 flex items-center gap-2 text-sm">
           <input
