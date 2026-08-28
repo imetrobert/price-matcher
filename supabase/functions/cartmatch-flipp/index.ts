@@ -1,41 +1,28 @@
 /**
  * POST /functions/v1/cartmatch-flipp
  *
- *   { action: "list", postalCode }            -> flyers running now, per banner
- *   { action: "fetch", flyerId, merchantName } -> that flyer's offers, normalised
+ *   { action: "list", postalCode }              -> flyers running now, per banner
+ *   { action: "fetch", flyerId, merchantName }   -> that flyer's offers, normalised
+ *   { action: "retry", retailerId }              -> re-fetch and WRITE one retailer
  *
  * ---------------------------------------------------------------------------
- * WHY THIS IS SPLIT INTO TWO CALLS
+ * WHY "retry" IS DIFFERENT FROM THE OTHER TWO
  * ---------------------------------------------------------------------------
- * Because the upstream is slow. A flyer listing for a postal code it has not
- * cached took roughly SIXTY SECONDS when measured from a phone — long enough
- * that one request per banner in a single invocation would exceed any sensible
- * function timeout and take the whole week's import down with it.
- *
- * So `list` is one call, and each `fetch` is one flyer. The client queues them
- * and a person watches six rows tick over instead of watching one spinner and
- * wondering. The same shape the flyer-page worker already uses, for the same
- * reason.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS DELIBERATELY DOES NOT DO
- * ---------------------------------------------------------------------------
- * It does not write to the database. It fetches, normalises and returns; the
- * caller decides what to store. That keeps the awkward part — an undocumented
- * upstream that can change shape without notice — behind a boundary where a
- * bad response produces an error message rather than a table full of wrong
- * prices.
- *
- * It also never quotes a saving. Every offer it emits is condition-unknown;
- * see `_shared/flipp.ts` for the measurement that forced that, which is the
- * single most important thing to understand before changing any of this.
+ * list/fetch deliberately never write — see the section below, unchanged for
+ * both. retry is a narrow, explicit exception: a person looking at "Nothing
+ * yet" next to one retailer on the sources card, pressing a button for THAT
+ * retailer specifically. It writes using this function's own service-role
+ * client, the same way the scheduled import does — the browser is never
+ * granted write access to cartmatch_flipp_offers itself, only the ability to
+ * ask a trusted, has_app_access-gated function to write on its behalf. RLS
+ * on that table still has no client-write policy; nothing here changes that.
  */
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 import { normaliseFlyerItems, retailerFromMerchant } from "../_shared/flipp.ts";
 
-export const FUNCTION_BUILD = "2026-08-16-flipp-1";
+export const FUNCTION_BUILD = "2026-08-27-flipp-2";
 
 const BASE = "https://backflipp.wishabi.com/flipp";
 
@@ -340,8 +327,127 @@ async function handler(req: Request): Promise<Response> {
     );
   }
 
+  // -- retry: re-fetch and WRITE this one retailer's current banners -------
+  if (action === "retry") {
+    const retailerId = String(payload.retailerId ?? "").trim();
+    const validRetailers = new Set([
+      "maxi", "walmart", "superc", "metro", "iga", "provigo", "adonis",
+    ]);
+    if (!validRetailers.has(retailerId)) {
+      return json({ ok: false, error: "retailerId must be a known retailer." }, 400, origin);
+    }
+
+    const postalCode = Deno.env.get("CARTMATCH_POSTAL_CODE");
+    if (!postalCode) {
+      return json({ ok: false, error: "CARTMATCH_POSTAL_CODE is not set." }, 500, origin);
+    }
+
+    const url = Deno.env.get("SUPABASE_URL");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!url || !serviceKey) {
+      return json({ ok: false, error: "Missing SUPABASE_URL / SERVICE_ROLE_KEY." }, 500, origin);
+    }
+    // Service-role client used ONLY inside this action, after the user-session
+    // check above already passed — the browser never gets this key, and
+    // cartmatch_flipp_offers still has no client-write RLS policy. This is
+    // the same trust shape as the scheduled import: check access in code,
+    // then write with elevated credentials the caller never sees.
+    const supabase = createClient(url, serviceKey);
+
+    const listUrl =
+      `${BASE}/flyers?locale=en-CA&postal_code=${encodeURIComponent(postalCode)}`;
+    const listed = await getJson(listUrl);
+    if (!listed.ok) return json({ ok: false, error: `list: ${listed.error}` }, 502, origin);
+
+    const listComplaint = upstreamComplaint(listed.body);
+    if (listComplaint) return json({ ok: false, error: listComplaint }, 502, origin);
+
+    const banners = extractFlyers(listed.body)
+      .map((f) => {
+        const merchant = f.merchant ?? f.merchant_name ?? f.name;
+        return {
+          flyerId: String(f.id ?? f.flyer_id ?? ""),
+          merchantName: typeof merchant === "string" ? merchant : "",
+          retailerId: retailerFromMerchant(merchant),
+        };
+      })
+      .filter((f) => f.retailerId === retailerId && f.flyerId !== "");
+
+    // Genuinely nothing to retry — Flipp itself has no current banner for
+    // this retailer at this postal code right now. Reported plainly rather
+    // than as an error, since retrying again will not change this.
+    if (banners.length === 0) {
+      return json(
+        {
+          ok: true,
+          build: FUNCTION_BUILD,
+          retailerId,
+          banners: 0,
+          written: 0,
+          errors: {},
+          note: "Flipp has no current flyer for this retailer at this postal code.",
+        },
+        200,
+        origin,
+      );
+    }
+
+    const results = await Promise.all(
+      banners.map(async (b) => {
+        const fetched = await getJson(`${BASE}/flyers/${b.flyerId}`);
+        if (!fetched.ok) {
+          return { flyerId: b.flyerId, error: fetched.error, offers: [] };
+        }
+        const body = fetched.body as Record<string, unknown>;
+        const items = Array.isArray(body.items) ? body.items : [];
+        const { offers } = normaliseFlyerItems(items, b.merchantName, b.flyerId);
+        return { flyerId: b.flyerId, error: null as string | null, offers };
+      }),
+    );
+
+    let written = 0;
+    const errors: Record<string, string> = {};
+    for (const r of results) {
+      if (r.error) {
+        errors[r.flyerId] = r.error;
+        continue;
+      }
+      // Replace only these flyers' rows — same reasoning as the scheduled
+      // import: never touch another retailer's, never touch another flyer
+      // under this same retailer that this call did not just re-fetch.
+      await supabase.from("cartmatch_flipp_offers").delete().eq("flyer_id", r.flyerId);
+      if (r.offers.length === 0) continue;
+      const rows = r.offers.map((o) => ({
+        id: o.id,
+        flyer_id: o.flyerId,
+        retailer_id: o.retailerId,
+        advertised_text: o.advertisedText,
+        brand: o.brand,
+        brands: o.brands,
+        size: o.size,
+        size_ambiguous: o.sizeAmbiguous,
+        price_cents: o.priceCents,
+        discount_percent: o.discountPercent,
+        basis: o.basis,
+        image_url: o.imageUrl,
+        multi_product: o.multiProduct,
+        valid_from: o.validFrom,
+        valid_to: o.validTo,
+      }));
+      const { error } = await supabase.from("cartmatch_flipp_offers").insert(rows);
+      if (error) errors[r.flyerId] = error.message;
+      else written += rows.length;
+    }
+
+    return json(
+      { ok: true, build: FUNCTION_BUILD, retailerId, banners: banners.length, written, errors },
+      200,
+      origin,
+    );
+  }
+
   return json(
-    { ok: false, error: 'action must be "list" or "fetch".' },
+    { ok: false, error: 'action must be "list", "fetch", or "retry".' },
     400,
     origin,
   );
