@@ -19,6 +19,12 @@ import { listGeminiModels } from "@/services/vision";
 import { authConfigured } from "@/lib/auth/config";
 import { APP_NAME, checkAppAccess } from "@/lib/auth/access";
 import {
+  loadAllFlyersResult,
+  loadFlippRetailersThisWeek,
+  retryFlippRetailer,
+} from "@/services/flyers/storage";
+import { flyerSourceSummary } from "@/services/flyers/status";
+import {
   lookupBarcode,
   probeRetailerUrl,
   probeSucceeded,
@@ -31,7 +37,9 @@ import type {
   MatchValidationReport,
   PipelineResult,
   PriceObservation,
+  RetailerId,
 } from "@/types";
+import type { StoredFlyer } from "@/services/flyers/storage";
 
 interface AuditPayload {
   audit: AuditRecord[];
@@ -115,6 +123,8 @@ function AdminView() {
       ) : null}
 
       <RetailerProbe />
+
+      <FlippSourcesPanel />
 
       <GeminiModelsPanel />
 
@@ -356,6 +366,101 @@ function ValidationForm({
  * success here means the exact page the parsers were built against came back
  * intact — not merely that something answered.
  */
+/**
+ * Per-retailer Flipp coverage, with a manual "Retry" button next to any
+ * retailer showing nothing — admin-only, on purpose.
+ *
+ * This entire page is already wrapped in AdminOnly, but the real security
+ * boundary is server-side regardless: the Edge Function's "retry" action
+ * checks has_app_access itself before writing anything, using its own
+ * service-role key that the browser never sees. Being on this page keeps an
+ * unattended shopper from stumbling into a button that fires an extra
+ * upstream request; it is not the only thing stopping misuse of it.
+ */
+function FlippSourcesPanel() {
+  const [scanned, setScanned] = useState<StoredFlyer[] | null>(null);
+  const [flipp, setFlipp] = useState<RetailerId[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    const [flyersResult, flippRetailers] = await Promise.all([
+      loadAllFlyersResult(),
+      loadFlippRetailersThisWeek(),
+    ]);
+    setScanned(flyersResult.ok ? flyersResult.flyers : []);
+    setFlipp(flippRetailers);
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  if (scanned === null) return null;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const scannedRetailers = scanned
+    .filter((f) => f.validFrom <= today && today <= f.validTo)
+    .map((f) => f.retailerId);
+
+  const summary = flyerSourceSummary(scannedRetailers, flipp);
+
+  async function retry(retailerId: RetailerId) {
+    setBusy(retailerId);
+    setResult(null);
+    const outcome = await retryFlippRetailer(retailerId);
+    setBusy(null);
+    if (!outcome.ok) {
+      setResult(`${retailerId}: ${outcome.error}`);
+      return;
+    }
+    setResult(
+      outcome.note
+        ? `${retailerId}: ${outcome.note}`
+        : `${retailerId}: wrote ${outcome.written} offers across ${outcome.banners} banner(s).`,
+    );
+    await refresh();
+  }
+
+  return (
+    <section className="card mb-4">
+      <p className="mb-2 font-bold">Flipp coverage — manual retry</p>
+      <div className="space-y-1">
+        {summary.map(({ retailerId, displayName, source }) => (
+          <div
+            key={retailerId}
+            className="flex items-center justify-between gap-2 text-sm"
+          >
+            <span>{displayName}</span>
+            <div className="flex items-center gap-2">
+              <span className={source === "NONE" ? "text-warn" : "text-muted"}>
+                {source === "BOTH"
+                  ? "Scanned + Flipp"
+                  : source === "SCAN"
+                    ? "Scanned"
+                    : source === "FLIPP"
+                      ? "Flipp only"
+                      : "Nothing yet"}
+              </span>
+              {source === "NONE" ? (
+                <button
+                  type="button"
+                  onClick={() => retry(retailerId)}
+                  disabled={busy === retailerId}
+                  className="rounded-md border border-line px-2 py-1 text-xs font-semibold disabled:opacity-50"
+                >
+                  {busy === retailerId ? "Retrying…" : "Retry"}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+      {result ? <p className="mt-2 text-xs text-muted">{result}</p> : null}
+    </section>
+  );
+}
+
 function RetailerProbe() {
   const KNOWN = [
     {
