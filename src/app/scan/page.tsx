@@ -1484,6 +1484,7 @@ function OfferEvidence({
               page={cited.flyerPage}
               box={cited.box}
               isPartnerFeed={isPartnerFeed}
+              imageUrl={cited.partnerImageUrl}
             />
           </>
         );
