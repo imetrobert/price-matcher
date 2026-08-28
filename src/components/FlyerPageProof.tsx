@@ -40,11 +40,18 @@ export interface FlyerPageProofProps {
   /** The PDF this flyer was imported from, for when no picture was kept. */
   sourceFilename?: string | null;
   /**
-   * True for a Flipp/partner-feed offer. There is no page, no picture, and
-   * no "your own copy" of a flyer nobody photographed — attempting the usual
-   * lookup here would only ever find nothing and say something false.
+   * True for a Flipp/partner-feed offer. There is no page, no photographed
+   * picture, and no "your own copy" of a flyer nobody photographed —
+   * attempting the usual lookup here would only ever find nothing and say
+   * something false.
    */
   isPartnerFeed?: boolean;
+  /**
+   * Flipp's own per-item picture (StoredOffer.partnerImageUrl), when there
+   * is one. Only meaningful alongside isPartnerFeed — a photographed
+   * offer's picture always comes from the flyerId/page lookup instead.
+   */
+  imageUrl?: string | null;
 }
 
 export function FlyerPageProof({
@@ -53,6 +60,7 @@ export function FlyerPageProof({
   box,
   sourceFilename,
   isPartnerFeed,
+  imageUrl,
 }: FlyerPageProofProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
@@ -90,9 +98,19 @@ export function FlyerPageProof({
 
   if (isPartnerFeed) {
     return (
-      <div className="mt-3 rounded-md bg-surface p-2 text-sm text-muted">
-        Advertised via Flipp, not a flyer CartMatch photographed — check the
-        price and unit at the store before relying on it.
+      <div className="mt-3 flex items-start gap-2 rounded-md bg-surface p-2 text-sm text-muted">
+        {imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={imageUrl}
+            alt=""
+            className="h-12 w-12 shrink-0 rounded object-cover"
+          />
+        ) : null}
+        <span>
+          Advertised via Flipp, not a flyer CartMatch photographed — check
+          the price and unit at the store before relying on it.
+        </span>
       </div>
     );
   }
