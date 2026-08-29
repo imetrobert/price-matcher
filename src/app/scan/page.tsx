@@ -1551,12 +1551,17 @@ function StartOver({ count, onConfirm }: { count: number; onConfirm: () => void 
  * ---------------------------------------------------------------------------
  * WHY THIS IS WORTH A WHOLE COMPONENT
  * ---------------------------------------------------------------------------
- * A blank size is not a cosmetic gap. Matching needs a score of 90; with the
- * size unknown on either side the best available rung is the fuzzy one, capped
- * at 70. So an item with no size CANNOT match a flyer, ever — it silently
- * drops out of every comparison, and the screen used to say nothing at all
- * about it. That is the single likeliest reason a full trolley comes back with
- * two results.
+ * A blank size is not always a cosmetic gap, but it is not an automatic
+ * dead end either — the two get conflated easily, so worth being precise.
+ * When the brand and name read confidently, a missing size still clears the
+ * matching bar at a score of 90 (see SCORE.unverifiedSize in scoring.ts) —
+ * it matches, with a caution shown afterward rather than silently. It ONLY
+ * becomes a true dead end when the name itself is also too unclear to read
+ * confidently, landing in the fuzzy tier (capped at 70), which sits below
+ * the 90 needed to count as a match at all. This component cannot know in
+ * advance which of those two an item will hit — matching has not run yet at
+ * confirm time — so its wording describes the mechanism honestly rather
+ * than asserting either outcome as certain.
  *
  * ---------------------------------------------------------------------------
  * WHY THE SUGGESTION IS NOT SIMPLY FILLED IN
@@ -1585,9 +1590,10 @@ function SizeHelp({
   return (
     <div className="mt-1 rounded-md bg-warn/10 p-2 text-xs">
       <p className="text-warn">
-        <span className="font-semibold">No size, no match.</span> Flyer prices
-        are matched on brand, name and size — without one this item is left out
-        of the comparison entirely.
+        <span className="font-semibold">No size read.</span> If the brand and
+        name are clear, this can still match — you will be asked to confirm
+        the size before relying on it. It only fails to match anything if the
+        name itself is also too unclear to read confidently.
       </p>
 
       {item.sizeGuess ? (
