@@ -20,6 +20,7 @@ import {
 import {
   flyerStatus,
   flyerSourceSummary,
+  sourceLabel,
   type FlyerStatus,
 } from "@/services/flyers/status";
 import { listCarts } from "@/services/carts/history";
@@ -178,13 +179,7 @@ function Home() {
                       source === "NONE" ? "text-warn" : "text-muted"
                     }
                   >
-                    {source === "BOTH"
-                      ? "Scanned + Flipp"
-                      : source === "SCAN"
-                        ? "Scanned"
-                        : source === "FLIPP"
-                          ? "Flipp only"
-                          : "Nothing yet"}
+                    {sourceLabel(source)}
                   </span>
                 </div>
               ),
