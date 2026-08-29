@@ -1572,9 +1572,15 @@ function StartOver({ count, onConfirm }: { count: number; onConfirm: () => void 
  * on and stays out of `size` until somebody says otherwise — and once they do,
  * it is their reading rather than the model's guess.
  *
- * The basis matters more than the number. "Some of the label is legible" and
- * "this brand usually sells 650 g" are different kinds of claim, and a person
- * deciding whether to trust it should be told which one they are looking at.
+ * ---------------------------------------------------------------------------
+ * WHY MORE THAN ONE CANDIDATE, SOMETIMES
+ * ---------------------------------------------------------------------------
+ * A single suggestion presents one guess as though it were the obvious
+ * answer, even when it genuinely is not — Nutella alone comes in four
+ * common jar sizes, and picking one to show would be manufacturing false
+ * confidence the model itself does not have. When more than one size is
+ * plausible, every candidate is shown; picking is still a person's decision,
+ * not the model's.
  */
 function SizeHelp({
   item,
@@ -1586,6 +1592,8 @@ function SizeHelp({
   if (item.size) return null;
 
   const basis = describeSizeBasis(item.sizeGuessBasis);
+  const candidates = item.sizeCandidates;
+  const [choice, setChoice] = useState(candidates[0] ?? "");
 
   return (
     <div className="mt-1 rounded-md bg-warn/10 p-2 text-xs">
@@ -1596,19 +1604,47 @@ function SizeHelp({
         name itself is also too unclear to read confidently.
       </p>
 
-      {item.sizeGuess ? (
+      {candidates.length === 1 ? (
         <div className="mt-2">
           <p>
-            <span className="font-semibold">Suggested {item.sizeGuess}</span>
+            <span className="font-semibold">Suggested {candidates[0]}</span>
             {basis ? ` — ${basis}.` : "."} Not read from your photo.
           </p>
           <button
             type="button"
             className="btn-secondary mt-1"
-            onClick={() => onUse(item.sizeGuess!)}
+            onClick={() => onUse(candidates[0]!)}
           >
-            Use {item.sizeGuess}
+            Use {candidates[0]}
           </button>
+        </div>
+      ) : candidates.length > 1 ? (
+        <div className="mt-2">
+          <p>
+            <span className="font-semibold">More than one size is plausible</span>
+            {basis ? ` — ${basis}.` : "."} Not read from your photo — check the
+            tub or box and pick the one that matches.
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <select
+              value={choice}
+              onChange={(e) => setChoice(e.target.value)}
+              className="rounded-md border border-line bg-transparent px-2 py-1 text-xs"
+            >
+              {candidates.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => onUse(choice)}
+            >
+              Use this size
+            </button>
+          </div>
         </div>
       ) : (
         <p className="mt-1">
