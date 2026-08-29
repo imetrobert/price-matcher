@@ -24,7 +24,7 @@ export const CART_VISION_SCHEMA = {
           variant: { type: "string", nullable: true },
           fat_percentage: { type: "string", nullable: true },
           size: { type: "string", nullable: true },
-          size_guess: { type: "string", nullable: true },
+          size_candidates: { type: "array", items: { type: "string" }, nullable: true },
           size_guess_basis: { type: "string", nullable: true },
           package_quantity: { type: "integer", nullable: true },
           visible_upc: { type: "string", nullable: true },
@@ -46,13 +46,14 @@ For each DISTINCT product you can actually see, return one entry.
 
 Rules you must follow:
 - Report only what is legible in the image. If you cannot read the size, return null for size. Do not infer a typical size from product knowledge. "size" is for text you can actually read.
-- When, and only when, "size" is null, you may propose one in "size_guess", and you must say how you arrived at it in "size_guess_basis" using one or more of these words:
+- When, and only when, "size" is null, you may propose up to 3 candidate sizes in "size_candidates", ordered most likely first, and you must say how you arrived at them in "size_guess_basis" using one or more of these words:
     "partial_label"  — some of the size text is legible: a unit, a digit, a fragment.
     "dimensions"     — judged from how large the package looks beside other items in the photo whose size you did read, or from packaging you recognise by shape.
     "typical"        — the sizes this brand and product are normally sold in.
   Combine them when more than one applies, most reliable first, for example "partial_label+typical".
-- A size_guess is a suggestion for a person to accept or reject. It is never as good as reading the label, so never move one into "size", and never raise "confidence" because you made one.
-- If you have no basis at all, leave size_guess null. A guess with nothing behind it is worse than no guess.
+  Give more than one candidate ONLY when genuinely more than one size is plausible — for example, this brand commonly sells both a 400 g and a 750 g jar and nothing in the image favours one over the other. Do not pad the list to reach 3; one honest candidate beats three padded ones.
+- size_candidates holds suggestions for a person to accept or reject. Never as good as reading the label, so never move one into "size", and never raise "confidence" because you proposed some.
+- If you have no basis at all, leave size_candidates empty. A guess with nothing behind it is worse than no guess.
 - Do the same for every field: an unreadable field is null, never a guess.
 - "confidence" is your confidence that a shopper would agree with your reading of the visible package, from 0 to 1. Use values below 0.5 freely when the package is partly hidden, blurry, or at a steep angle.
 - If the same product appears multiple times, return it once and set package_quantity to the number of identical units visible.
@@ -73,7 +74,7 @@ interface RawProduct {
   variant?: string | null;
   fat_percentage?: string | null;
   size?: string | null;
-  size_guess?: string | null;
+  size_candidates?: unknown;
   size_guess_basis?: string | null;
   package_quantity?: number | null;
   visible_upc?: string | null;
@@ -121,7 +122,7 @@ export function parseVisionResponse(
       // Kept apart from `size`, permanently. The moment a guess can be
       // mistaken for a reading, every downstream claim that rests on size —
       // which is every price match — inherits the guess without saying so.
-      sizeGuess: cleanString(p.size_guess),
+      sizeCandidates: cleanSizeCandidates(p.size_candidates),
       sizeGuessBasis: cleanBasis(p.size_guess_basis),
       packageQuantity: cleanQuantity(p.package_quantity),
       visibleUpc: cleanUpc(p.visible_upc),
@@ -163,6 +164,19 @@ function cleanString(v: unknown): string | null {
     return null;
   }
   return t;
+}
+
+/**
+ * Up to 3 candidate sizes, cleaned the same way a single size string would
+ * be, deduplicated, and capped — the model was asked for at most 3, but
+ * nothing downstream should trust that on its own.
+ */
+function cleanSizeCandidates(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const cleaned = v
+    .map((entry) => cleanString(entry))
+    .filter((entry): entry is string => entry !== null);
+  return [...new Set(cleaned)].slice(0, 3);
 }
 
 function cleanQuantity(v: unknown): number | null {

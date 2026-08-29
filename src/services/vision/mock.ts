@@ -109,12 +109,15 @@ const MOCK_CART = {
     {
       // Size unreadable on purpose: exercises the "needs confirmation" path
       // and the rule that an unknown size caps the achievable match score.
+      // Two plausible candidates on purpose too, to exercise the dropdown.
       brand: "Ritz",
       product_name: "Crackers",
       product_type: "crackers",
       variant: "Original",
       fat_percentage: null,
       size: null,
+      size_candidates: ["200 g", "300 g"],
+      size_guess_basis: "typical",
       package_quantity: 1,
       visible_upc: null,
       language: "en",
