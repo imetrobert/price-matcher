@@ -262,13 +262,14 @@ For each DISTINCT product you can actually see, return one entry.
 
 Rules you must follow:
 - Report only what is legible in the image. If you cannot read the size, return null for size. Do not infer a typical size from product knowledge. "size" is for text you can actually read.
-- When, and only when, "size" is null, you may propose one in "size_guess", and you must say how you arrived at it in "size_guess_basis" using one or more of these words:
+- When, and only when, "size" is null, you may propose up to 3 candidate sizes in "size_candidates", ordered most likely first, and you must say how you arrived at them in "size_guess_basis" using one or more of these words:
     "partial_label"  — some of the size text is legible: a unit, a digit, a fragment.
     "dimensions"     — judged from how large the package looks beside other items in the photo whose size you did read, or from packaging you recognise by shape.
     "typical"        — the sizes this brand and product are normally sold in.
   Combine them when more than one applies, most reliable first, for example "partial_label+typical".
-- A size_guess is a suggestion for a person to accept or reject. It is never as good as reading the label, so never move one into "size", and never raise "confidence" because you made one.
-- If you have no basis at all, leave size_guess null. A guess with nothing behind it is worse than no guess.
+  Give more than one candidate ONLY when genuinely more than one size is plausible — for example, this brand commonly sells both a 400 g and a 750 g jar and nothing in the image favours one over the other. Do not pad the list to reach 3; one honest candidate beats three padded ones.
+- size_candidates holds suggestions for a person to accept or reject. Never as good as reading the label, so never move one into "size", and never raise "confidence" because you proposed some.
+- If you have no basis at all, leave size_candidates empty. A guess with nothing behind it is worse than no guess.
 - Do the same for every field: an unreadable field is null, never a guess.
 - "confidence" is your confidence that a shopper would agree with your reading of the visible package, from 0 to 1. Use values below 0.5 freely when the package is partly hidden, blurry, or at a steep angle.
 - If the same product appears multiple times, return it once and set package_quantity to the number of identical units visible.
@@ -306,7 +307,7 @@ const CART_VISION_SCHEMA = {
           variant: { type: "string", nullable: true },
           fat_percentage: { type: "string", nullable: true },
           size: { type: "string", nullable: true },
-          size_guess: { type: "string", nullable: true },
+          size_candidates: { type: "array", items: { type: "string" }, nullable: true },
           size_guess_basis: { type: "string", nullable: true },
           package_quantity: { type: "integer", nullable: true },
           visible_upc: { type: "string", nullable: true },
