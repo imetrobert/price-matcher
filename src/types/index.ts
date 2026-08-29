@@ -100,14 +100,17 @@ export interface DetectedProduct {
   fatPercentage: string | null;
   size: string | null;
   /**
-   * A size the model proposed because it could not read one.
+   * Up to 3 sizes the model proposed, most likely first, because it could
+   * not read one — most often just one; more than one only when genuinely
+   * more than one size is plausible for this product.
    *
-   * Never used by matching and never copied into `size` by the app. It is
-   * shown as a suggestion with its basis, and becomes real only when a person
-   * accepts it — at which point it is their reading, not the model's guess.
+   * Never used by matching and never copied into `size` by the app. Each is
+   * shown as a suggestion with its shared basis, and becomes real only when
+   * a person picks one — at which point it is their reading, not the
+   * model's guess. Empty array, not null, when nothing was proposed.
    */
-  sizeGuess: string | null;
-  /** How it arrived at the guess: partial_label, dimensions, typical. */
+  sizeCandidates: string[];
+  /** How it arrived at the candidates: partial_label, dimensions, typical. */
   sizeGuessBasis: string | null;
   packageQuantity: number | null;
   visibleUpc: string | null;
