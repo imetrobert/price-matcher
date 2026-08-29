@@ -245,7 +245,15 @@ const MAX_IMAGES = 4;
  */
 const DEFAULT_MODEL = DEFAULT_MODEL_CHAIN;
 const MAX_BYTES = 8 * 1024 * 1024;
-const TIMEOUT_MS = 45_000;
+// Was 45s. Raised after a real timeout on a 2-photo request over a weak
+// cellular connection — every model in CARTMATCH_GEMINI_MODEL's fallback
+// chain shares this ONE timer (see the loop below), so a slow-but-working
+// first model leaves nothing for a second one to help with; this only
+// widens the budget, it does not make a genuinely stuck request wait
+// forever. Not a guarantee against every timeout — a truly overloaded
+// backend can still exceed even this — just a fairer number for the common
+// case of two images over a slow connection.
+const TIMEOUT_MS = 75_000;
 
 const VISION_PROMPT =
   `You are identifying grocery products visible in a photograph of a shopping cart, taken in a store in Montreal, Quebec, Canada. Packaging may be in French, English, or bilingual.
