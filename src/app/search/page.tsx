@@ -37,7 +37,7 @@ import {
   loadCurrentFlippOffers,
   type StoredOffer,
 } from "@/services/flyers/storage";
-import { citationLine } from "@/services/flyers/citation";
+import { citationLine, day } from "@/services/flyers/citation";
 import { currentWeekWindow, looksLikeCurrentWeek } from "@/services/flyers/status";
 import { describeBasis } from "@/types/flyer";
 import { RETAILERS } from "@/config/retailers";
@@ -339,14 +339,16 @@ function PriceSearch() {
                           ) : null}
                           <div className="min-w-0 flex-1">
                             <p className="rounded-md bg-surface px-2 py-1 text-xs">
-                              {citationLine({
-                                retailerId: offer.retailerId,
-                                flyerPage: offer.flyerPage,
-                                validFrom: offer.validFrom,
-                                validTo: offer.validTo,
-                                hasPageImage: true,
-                                isPartnerFeed,
-                              })}
+                              {isPartnerFeed
+                                ? `${RETAILERS[offer.retailerId]?.displayName ?? offer.retailerId}, valid ${day(offer.validFrom)} to ${day(offer.validTo)}`
+                                : citationLine({
+                                    retailerId: offer.retailerId,
+                                    flyerPage: offer.flyerPage,
+                                    validFrom: offer.validFrom,
+                                    validTo: offer.validTo,
+                                    hasPageImage: true,
+                                    isPartnerFeed,
+                                  })}
                             </p>
                             {!isPartnerFeed ? (
                               <FlyerPageProof
