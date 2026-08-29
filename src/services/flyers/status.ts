@@ -185,6 +185,25 @@ function names(retailers: RetailerId[]): string {
 
 export type FlyerSource = "SCAN" | "FLIPP" | "BOTH" | "NONE";
 
+/**
+ * The label shown next to a retailer for its FlyerSource — one place, so the
+ * home screen's sources card and the admin panel's retry list can never say
+ * different things for the same state. Previously duplicated as an inline
+ * ternary in both files.
+ */
+export function sourceLabel(source: FlyerSource): string {
+  switch (source) {
+    case "BOTH":
+      return "Flipp and scanned";
+    case "SCAN":
+      return "Scanned";
+    case "FLIPP":
+      return "Flipp";
+    case "NONE":
+      return "Nothing available";
+  }
+}
+
 export interface RetailerSourceStatus {
   retailerId: RetailerId;
   displayName: string;

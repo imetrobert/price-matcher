@@ -42,7 +42,7 @@ export interface CitationInput {
 }
 
 /** A day as a shopper reads it, in the local sense of the date. */
-function day(iso: string): string {
+export function day(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
   if (!y || !m || !d) return iso;
   // Noon UTC, so a date never lands on the previous day west of Greenwich. A
