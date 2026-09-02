@@ -9,7 +9,7 @@
  * The cart scanner matches a PHOTOGRAPHED item against offers using a scoring
  * function built for that — same brand, same size, same everything, because
  * the photo is specific and getting the match wrong would misprice a real
- * item in a real trolley. A search box is the opposite kind of question:
+ * item in a real cart. A search box is the opposite kind of question:
  * "what does the word 'yogurt' turn up anywhere this week", deliberately
  * loose. Reusing the strict matcher here would hide results a shopper is
  * plainly asking for; a plain substring match is the honest tool for this.
@@ -22,7 +22,7 @@
  * deliberate difference from the cart scanner and the deals screen, both of
  * which do arithmetic on a specific item at a specific store. A free-text
  * search matches too loosely for arithmetic to be trustworthy — "yogurt"
- * matches a two-litre tub and a 100g single cup alike, and subtracting across
+ * matches a two-liter tub and a 100g single cup alike, and subtracting across
  * those would be comparing two different things and calling it a saving.
  */
 
@@ -31,7 +31,7 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { PageHeader, Notice, Spinner } from "@/components/ui";
 import { TabBar } from "@/components/TabBar";
 import { ActiveFlyerPeriod } from "@/components/ActiveFlyerPeriod";
-import { FlyerPageProof } from "@/components/FlyerPageProof";
+import { FlyerPageProof, FlippThumbnail } from "@/components/FlyerPageProof";
 import {
   loadCurrentOffers,
   loadCurrentFlippOffers,
@@ -226,6 +226,8 @@ function PriceSearch() {
   return (
     <>
       <main className="mx-auto max-w-[900px]">
+        <TabBar />
+
         <PageHeader
           title="Search this week's prices"
           subtitle="Every matching price, at every store, from every source — nothing here is ever subtracted."
@@ -330,12 +332,7 @@ function PriceSearch() {
 
                         <div className="mt-2 flex items-start gap-2">
                           {isPartnerFeed && offer.partnerImageUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={offer.partnerImageUrl}
-                              alt=""
-                              className="h-12 w-12 shrink-0 rounded object-cover"
-                            />
+                            <FlippThumbnail url={offer.partnerImageUrl} />
                           ) : null}
                           <div className="min-w-0 flex-1">
                             <p className="rounded-md bg-surface px-2 py-1 text-xs">
@@ -372,11 +369,7 @@ function PriceSearch() {
       {offers !== null && query.trim().length > 0 && query.trim().length < 2 ? (
         <p className="text-sm text-muted">Keep typing — at least 2 letters.</p>
       ) : null}
-
-      <div className="h-16" aria-hidden />
       </main>
-
-      <TabBar />
     </>
   );
 }
