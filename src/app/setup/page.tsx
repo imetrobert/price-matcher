@@ -45,15 +45,15 @@ export default function SetupPage() {
     setPrefs(local);
     setPostalInput(local.postalCode);
 
-    let cancelled = false;
+    let canceled = false;
     reconcilePrefs().then((p) => {
-      if (cancelled) return;
+      if (canceled) return;
       setPrefs(p);
       // Only overwrite the field if the user has not started typing into it.
       setPostalInput((current) => (current === "" ? p.postalCode : current));
     });
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, []);
 
@@ -109,6 +109,8 @@ export default function SetupPage() {
   return (
     <>
       <main>
+        <TabBar />
+
         <PageHeader
           title="Settings"
           subtitle={SETTINGS_SUBTITLE}
@@ -267,11 +269,7 @@ export default function SetupPage() {
       <button type="button" className="btn-primary" onClick={save}>
         Save
       </button>
-
-      <div className="h-16" aria-hidden />
       </main>
-
-      <TabBar />
     </>
   );
 }
