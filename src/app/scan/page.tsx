@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ProofSheet } from "@/components/ProofSheet";
 import { AuthGuard } from "@/components/AuthGuard";
-import { FlyerPageProof } from "@/components/FlyerPageProof";
+import { FlyerPageProof, FlippThumbnail } from "@/components/FlyerPageProof";
 import { MockBanner, Money, Notice, PageHeader, Spinner } from "@/components/ui";
 import { ActiveFlyerPeriod } from "@/components/ActiveFlyerPeriod";
 import { RETAILERS } from "@/config/retailers";
@@ -61,7 +61,7 @@ type Step = "capture" | "confirm" | "results";
  * Photographs per round, not per cart.
  *
  * Four at once was the shape that timed out, and it was also the wrong
- * interaction: it asked somebody to guess up front how many angles a trolley
+ * interaction: it asked somebody to guess up front how many angles a cart
  * needs. Two is a round. A round comes back quickly, says what it found and
  * what it could not see, and invites another — as many as it takes, each one
  * small enough to survive a shop's signal.
@@ -98,11 +98,11 @@ function ScanFlow() {
   const [step, setStep] = useState<Step>("capture");
   const [images, setImages] = useState<ShrunkImage[]>([]);
   /**
-   * This trolley's identity in the saved list.
+   * This cart's identity in the saved list.
    *
    * Minted when a scan produces results and kept until the cart is discarded.
    * The comparison is recomputed on every typed shelf price, so without a
-   * stable id one trolley would write a new saved record per keystroke.
+   * stable id one cart would write a new saved record per keystroke.
    */
   const [cartId, setCartId] = useState<string | null>(null);
   const [items, setItems] = useState<EditableItem[]>([]);
@@ -149,7 +149,7 @@ function ScanFlow() {
     try {
       // What earlier rounds already found, so this one is asked the small
       // question — "what is here that we have not got yet" — instead of being
-      // made to re-describe the whole trolley.
+      // made to re-describe the whole cart.
       const known = items
         .filter((i) => i.include)
         .map((i) => ({
@@ -217,7 +217,7 @@ function ScanFlow() {
         One query for the whole batch, before the list is shown, so a product
         somebody corrected last week arrives correct rather than arriving wrong
         and being corrected again. A failure here is silent by design: the
-        corrections are an improvement, and a trolley must still compare
+        corrections are an improvement, and a cart must still compare
         without them.
       */
       const prints = detected.map((d) => fingerprintOf(d));
@@ -264,7 +264,7 @@ function ScanFlow() {
     try {
       // Against the flyers this shopper loaded, plus this week's Flipp feed.
       // Every price behind a personal flyer offer was printed in a document
-      // they hold and can show at a till; Flipp offers carry no such
+      // they hold and can show at checkout; Flipp offers carry no such
       // guarantee and are marked SOURCE_UNCERTAIN so they never get treated
       // the same way downstream.
       const [personal, flipp] = await Promise.all([
@@ -314,7 +314,7 @@ function ScanFlow() {
       { enteredPrices },
     );
     setCart(comparison);
-    // Kept for Checkout Mode, which shows one match at a time at a till.
+    // Kept for Checkout Mode, which shows one match at a time at checkout.
     saveLastResult({
       comparison,
       currentRetailer: prefs.currentRetailerId,
@@ -350,10 +350,10 @@ function ScanFlow() {
    *
    * The important part is `clearLastResult`. A comparison is written to local
    * storage for Checkout Mode, which shows one match at a time in large type
-   * at a till. Resetting the screen without clearing that left the previous
-   * trolley's comparison sitting there, ready to be shown to a cashier by
+   * at checkout. Resetting the screen without clearing that left the previous
+   * cart's comparison sitting there, ready to be shown to a cashier by
    * somebody who believed they had started over. The screen said empty and
-   * the till screen said $2.40 off a jar of coffee that is not in the cart.
+   * the checkout screen said $2.40 off a jar of coffee that is not in the cart.
    *
    * So this is deliberately one function rather than four screens each
    * remembering to clear four things.
@@ -554,7 +554,7 @@ function ScanFlow() {
             </button>
 
             {/*
-              Secondary, and deliberately so. Photographing the trolley you are
+              Secondary, and deliberately so. Photographing the cart you are
               pushing is the thing this screen is for; choosing an existing
               picture is for the person who already has one — a photo taken in
               the aisle before opening the app, a shelf snapped last night, a
@@ -713,8 +713,8 @@ function ScanFlow() {
             Back to photos
           </button>
           {/*
-            Also here, because this is the screen where somebody realises the
-            photo caught the wrong trolley or the list is beyond fixing.
+            Also here, because this is the screen where somebody realizes the
+            photo caught the wrong cart or the list is beyond fixing.
           */}
           <div className="mt-2">
             <StartOver count={keptItems.length} onConfirm={startNewCart} />
@@ -797,7 +797,7 @@ function ConfirmCard({
               label="Size"
               value={item.size ?? ""}
               onChange={(v) => onChange({ size: v || null })}
-              // Not a plausible size. A grey "650 g" in an empty box reads as
+              // Not a plausible size. A gray "650 g" in an empty box reads as
               // a value at a glance, which is the worst thing a placeholder
               // can do on a screen about not inventing numbers.
               placeholder="type what the label says"
@@ -885,9 +885,9 @@ function CartResults({
     <section>
       <div className="card mb-4">
         {/*
-          The headline counts BOTH answers, because a trolley where nothing has
+          The headline counts BOTH answers, because a cart where nothing has
           a computed saving but four things are on sale elsewhere is not a
-          trolley with nothing to report — and that is precisely what the old
+          cart with nothing to report — and that is precisely what the old
           headline said.
         */}
         <p className="text-2xl font-extrabold">
@@ -1026,7 +1026,7 @@ function CartResults({
       {/*
         The same test Checkout Mode applies, repeated here so the button does
         not offer a screen that turns out to be empty. It includes hereOffer
-        because a till needs a document for BOTH halves, and a shelf price
+        because checkout needs a document for BOTH halves, and a shelf price
         somebody typed has none.
       */}
       {cart.cheaperElsewhere.some(
@@ -1212,7 +1212,7 @@ function ShelfPriceField({
  * be guessed from a competitor's sale price.
  *
  * It may have no per-item offer at all: a competitor advertising chicken at
- * $3.62/lb is real information about an item in your trolley, and it is shown
+ * $3.62/lb is real information about an item in your cart, and it is shown
  * with its unit rather than dropped or silently compared.
  */
 function OnSaleCard({
@@ -1275,11 +1275,6 @@ function OnSaleCard({
 
       {open ? (
         <div className="mt-3 border-t border-line pt-3">
-          <p className="mb-3 rounded-md bg-warn/10 p-2 text-xs text-warn">
-            {here} did not advertise this, so nobody knows what you would pay
-            here — {store} may still be dearer than the shelf in front of you.
-            Compare it yourself, or type the shelf price above.
-          </p>
           <OfferEvidence line={line} best={line.bestElsewhere} />
         </div>
       ) : null}
@@ -1375,6 +1370,17 @@ function OfferEvidence({
   line: CartLine;
   best: StoredOffer | null;
 }) {
+  // Computed once, used twice: to decide what goes in the citation below,
+  // AND to keep that same offer out of the "Also seen on Flipp" list above
+  // it. Without this, an item with only ONE Flipp offer at all showed it
+  // twice — once as the lead citation, once again as the sole entry of its
+  // own list, since bestElsewhere and uncertainElsewhere[0] are literally
+  // the same object in that case (see cartMatch.ts's ON_SALE_ELSEWHERE
+  // branch).
+  const cited = best ?? line.measuredElsewhere[0] ?? null;
+  const isPartnerFeed = cited?.condition === "SOURCE_UNCERTAIN";
+  const flippList = line.uncertainElsewhere.filter((o) => o.id !== cited?.id);
+
   return (
     <>
       {line.matches.length > 0 ? (
@@ -1422,24 +1428,19 @@ function OfferEvidence({
       ) : null}
 
       {/*
-        Every Flipp match, always shown in full — not just the one used as
-        the fallback lead when nothing scanned exists. Without this list, a
-        Flipp offer at a store you DID scan a cheaper trustworthy price for
-        would be silently invisible, and there would be no way to tell
-        whether "on sale elsewhere" means your own scan, Flipp, or both.
+        Every OTHER Flipp match — "other" meaning not already shown as the
+        lead citation below, see the comment on `cited` above. Without this
+        list, a Flipp offer at a store you DID scan a cheaper trustworthy
+        price for would be silently invisible, and there would be no way to
+        tell whether "on sale elsewhere" means your own scan, Flipp, or both.
       */}
-      {line.uncertainElsewhere.length > 0 ? (
+      {flippList.length > 0 ? (
         <div className="mt-3 rounded-md bg-surface p-2 text-xs">
           <p className="font-semibold">Also seen on Flipp (not confirmed)</p>
-          {line.uncertainElsewhere.map((offer) => (
+          {flippList.map((offer) => (
             <div key={offer.id} className="mt-2 flex items-start gap-2">
               {offer.partnerImageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={offer.partnerImageUrl}
-                  alt=""
-                  className="h-12 w-12 shrink-0 rounded object-cover"
-                />
+                <FlippThumbnail url={offer.partnerImageUrl} />
               ) : null}
               <p className="text-muted">
                 {RETAILERS[offer.retailerId]?.displayName ?? offer.retailerId}:{" "}
@@ -1455,46 +1456,41 @@ function OfferEvidence({
         The proof. Falls back to the cheapest weight-priced offer when there is
         no per-item one, because a page number is still a page number.
       */}
-      {(() => {
-        const cited = best ?? line.measuredElsewhere[0] ?? null;
-        if (cited === null) return null;
-        const isPartnerFeed = cited.condition === "SOURCE_UNCERTAIN";
-        return (
-          <>
-            <p className="mt-3 rounded-lg bg-surface px-2 py-1 text-xs">
-              {citationLine({
-                retailerId: cited.retailerId,
-                flyerPage: cited.flyerPage,
-                validFrom: cited.validFrom,
-                validTo: cited.validTo,
-                hasPageImage: true,
-                isPartnerFeed,
-              })}
+      {cited === null ? null : (
+        <>
+          <p className="mt-3 rounded-lg bg-surface px-2 py-1 text-xs">
+            {citationLine({
+              retailerId: cited.retailerId,
+              flyerPage: cited.flyerPage,
+              validFrom: cited.validFrom,
+              validTo: cited.validTo,
+              hasPageImage: true,
+              isPartnerFeed,
+            })}
+          </p>
+
+          {!isPartnerFeed && cited.confirmedAt === null ? (
+            <p className="mt-1 text-xs text-warn">
+              Not yet confirmed against the page — check it before showing
+              anyone.
             </p>
+          ) : null}
 
-            {!isPartnerFeed && cited.confirmedAt === null ? (
-              <p className="mt-1 text-xs text-warn">
-                Not yet confirmed against the page — check it before showing
-                anyone.
-              </p>
-            ) : null}
-
-            <FlyerPageProof
-              flyerId={cited.flyerId}
-              page={cited.flyerPage}
-              box={cited.box}
-              isPartnerFeed={isPartnerFeed}
-              imageUrl={cited.partnerImageUrl}
-            />
-          </>
-        );
-      })()}
+          <FlyerPageProof
+            flyerId={cited.flyerId}
+            page={cited.flyerPage}
+            box={cited.box}
+            isPartnerFeed={isPartnerFeed}
+            imageUrl={cited.partnerImageUrl}
+          />
+        </>
+      )}
     </>
   );
 }
 
 /**
- * "Start a new cart", with one tap between a full trolley and an empty one.
+ * "Start a new cart", with one tap between a full cart and an empty one.
  *
  * A cart is twenty minutes of photographing, correcting names and typing shelf
  * prices. A single mis-tap on a phone in a shop should not end that, and a
@@ -1567,8 +1563,8 @@ function StartOver({ count, onConfirm }: { count: number; onConfirm: () => void 
  * WHY THE SUGGESTION IS NOT SIMPLY FILLED IN
  * ---------------------------------------------------------------------------
  * Because a wrong size does not fail safely. "650 g" accepted against a
- * flyer's 750 g tub is a confident match on the wrong product, carried to a
- * till with a page number attached. So the guess is shown with what it rests
+ * flyer's 750 g tub is a confident match on the wrong product, carried to
+ * checkout with a page number attached. So the guess is shown with what it rests
  * on and stays out of `size` until somebody says otherwise — and once they do,
  * it is their reading rather than the model's guess.
  *
