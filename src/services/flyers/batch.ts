@@ -274,7 +274,7 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
     //
     // The store logo and the run dates live on the cover, and both are needed
     // before anything can be stored — a flyer with no retailer or no dates is
-    // not something a till would accept. Reading one page costs seconds and
+    // not something a cashier would accept. Reading one page costs seconds and
     // tells the person which flyer they just handed over.
     //
     // The other sixteen go to the queue. That is the whole point: the tab can
@@ -317,7 +317,7 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
     });
 
     // The logo only overrides when the filename said nothing. A filename that
-    // names a store is the person's own labelling of the file; a logo reading
+    // names a store is the person's own labeling of the file; a logo reading
     // is a model's. Where both speak, the disagreement is surfaced rather than
     // resolved silently.
     let retailerId = current.retailerId;
@@ -331,14 +331,14 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
     const disagrees =
       retailerFrom === "FILENAME" && fromLogo !== null && fromLogo !== retailerId;
 
-    // The filename wins where it speaks: it is the retailer's own labelling of
+    // The filename wins where it speaks: it is the retailer's own labeling of
     // the file, and the cover reading is a model looking at artwork. The cover
     // fills the gap for the retailers whose files carry no dates at all.
     const validFrom = current.validFrom ?? result.validFrom;
     const validTo = current.validTo ?? result.validTo;
 
     // Upload and queue. Three things must be known first — which retailer, and
-    // both dates — because without them there is nothing a till would accept,
+    // both dates — because without them there is nothing a cashier would accept,
     // and queueing seventeen pages to produce offers that can never be shown
     // would spend a quota on nothing.
     let saved: { offers: number; pages: number } | null = null;
@@ -347,7 +347,7 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
     if (!retailerId) {
       saveError = "Not queued: the store could not be identified. Set it and try again.";
     } else if (!validFrom || !validTo) {
-      saveError = "Not queued: no run dates were found, and an offer with no end date cannot be shown at a till.";
+      saveError = "Not queued: no run dates were found, and an offer with no end date cannot be shown at checkout.";
     } else if (
       options.replaceExisting !== true &&
       (await alreadyHeldComplete(flyerId(retailerId, validFrom)))
@@ -443,7 +443,7 @@ async function runOne(item: BatchItem, options: BatchOptions): Promise<BatchItem
   }
 }
 
-function summarise(result: ReadFlyerResult, pageCount: number): string {
+function summarize(result: ReadFlyerResult, pageCount: number): string {
   const read = pagesActuallyRead(result, pageCount);
   // The failure reason leads when there is one. A run that reported "0 offers
   // from 0 of 17 pages" and then "Done — every flyer read in full" happened,
@@ -566,7 +566,7 @@ export async function runBatch(
  * Save a flyer that could not be saved during the run.
  *
  * The run refuses to store a flyer without a retailer and both dates, because
- * neither an unattributed price nor an undated one is anything a till would
+ * neither an unattributed price nor an undated one is anything a cashier would
  * accept. But refusing is not the same as discarding: the offers are still in
  * memory, and asking somebody to re-read seventeen pages because a filename
  * lacked a date is thirty wasted minutes and a quota spent for nothing.

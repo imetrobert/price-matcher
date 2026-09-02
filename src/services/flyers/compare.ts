@@ -6,7 +6,7 @@
  * ---------------------------------------------------------------------------
  * It answers the question the whole app exists for — "am I paying more than I
  * need to" — using only data already held, with no photograph and no guessing
- * at what is in somebody's trolley. It is also the honest test of the matcher:
+ * at what is in somebody's cart. It is also the honest test of the matcher:
  * real French from Maxi against real English from Walmart, printed by four
  * different chains with four different house styles.
  *
@@ -58,7 +58,7 @@ export interface ComparableOffer {
 }
 
 export interface PriceGap {
-  /** The flyer wording of the cheapest offer — what a person will recognise. */
+  /** The flyer wording of the cheapest offer — what a person will recognize. */
   label: string;
   brand: string | null;
   size: string | null;
@@ -97,7 +97,7 @@ export interface PriceGap {
  *
  * So the first group can be opted into and the second cannot. That is not a
  * setting: a multi-buy total compared against a unit price is arithmetic
- * between two different quantities, and no amount of labelling makes the
+ * between two different quantities, and no amount of labeling makes the
  * subtraction mean anything.
  */
 const UNIT_PRICED_CONDITIONS: readonly OfferCondition[] = [
@@ -318,7 +318,7 @@ export interface ComparisonSummary {
  * included, and any offer whose flyer was not supplied gets one too — a
  * summary must never quietly drop what it was given.
  */
-export function summariseComparison(
+export function summarizeComparison(
   offers: StoredOffer[],
   gaps: PriceGap[],
   flyers: ComparisonFlyer[] = [],

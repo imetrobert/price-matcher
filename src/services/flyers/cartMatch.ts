@@ -4,7 +4,7 @@
  * ---------------------------------------------------------------------------
  * THE FOUR ANSWERS, AND WHY THE FOURTH IS THE POINT
  * ---------------------------------------------------------------------------
- * Somebody standing in a shop with a trolley wants to know one thing per item,
+ * Somebody standing in a shop with a cart wants to know one thing per item,
  * and it is always one of these:
  *
  *   NOT IN ANY FLYER   nobody advertised it this week. Nothing to do. This is
@@ -23,7 +23,7 @@
  *   ON SALE ELSEWHERE  another chain advertised it, and what you would pay
  *                      here is UNKNOWN. No number is possible and none is
  *                      given. This is the largest group and the whole reason
- *                      somebody scans a trolley.
+ *                      somebody scans a cart.
  *
  * ---------------------------------------------------------------------------
  * WHY THE FOURTH ONE HAD TO BE SPLIT OUT
@@ -33,7 +33,7 @@
  * made about an item whose shelf price nobody has looked at — the competitor
  * might be dearer. Worse, the honest half was hidden behind the same heading
  * as the certain half, so the answer a shopper actually wanted — "something in
- * your trolley is on sale somewhere else, go and look" — read like a weaker
+ * your cart is on sale somewhere else, go and look" — read like a weaker
  * version of a price match instead of the point of the exercise.
  *
  * So the two are now different outcomes with different words. This group says
@@ -56,7 +56,7 @@
  * such, but it is never subtracted from a package price.
  *
  * A MATCH IT IS NOT SURE OF. The same threshold the deals screen uses —
- * brand, name, variant and size all agreeing. A trolley photograph is already
+ * brand, name, variant and size all agreeing. A cart photograph is already
  * one inference; pairing it to a flyer tile on "strong token overlap" would be
  * a second inference stacked on the first, presented to a cashier as fact.
  */
@@ -110,7 +110,7 @@ export interface CartLine {
    * shopper can read "$3.62/lb at Maxi" and judge it themselves.
    */
   measuredMatches: StoredOffer[];
-  /** The same, restricted to other chains: what this trolley could be told about. */
+  /** The same, restricted to other chains: what this cart could be told about. */
   measuredElsewhere: StoredOffer[];
   /**
    * Per-item matches from a partner feed (Flipp), restricted to other chains.
@@ -252,7 +252,7 @@ function line(
    *
    * The set is the compensating control for allowing the match at all. An
    * unread size no longer blocks a comparison — it travels with it, so the
-   * screen can say "check the size before you quote this" and the till can
+   * screen can say "check the size before you quote this" and the cashier can
    * refuse it outright.
    */
   const unverified = new Set<string>();
@@ -300,7 +300,7 @@ function line(
    * What you are paying, and how anybody knows.
    *
    * A typed price wins over the flyer. Somebody reading the tag in front of
-   * them is reading what the till will charge; the flyer is a claim about that
+   * them is reading what checkout will charge; the flyer is a claim about that
    * which can be out of date, mis-read by the model, or for a variant the
    * shelf does not have. When the two disagree the person is right.
    */

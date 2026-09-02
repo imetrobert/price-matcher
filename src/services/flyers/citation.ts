@@ -46,7 +46,7 @@ export function day(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
   if (!y || !m || !d) return iso;
   // Noon UTC, so a date never lands on the previous day west of Greenwich. A
-  // flyer shown as expiring a day early is a flyer nobody takes to the till.
+  // flyer shown as expiring a day early is a flyer nobody takes to checkout.
   return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString("en-CA", {
     month: "short",
     day: "numeric",
@@ -72,7 +72,7 @@ export function citationLine(input: CitationInput): string {
  * What the shopper has to do to produce the document, given what was kept.
  *
  * Said plainly either way. Someone who turned pictures off should learn that
- * at the moment they are planning a shop, not at the till.
+ * at the moment they are planning a shop, not at checkout.
  */
 export function citationEvidence(input: CitationInput): string {
   if (input.isPartnerFeed) {

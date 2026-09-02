@@ -10,8 +10,8 @@
  * import used to read the prices and throw the pages away — it had to, since
  * five flyers of full-size images kills a phone tab and nothing survived a
  * reload. So "IGA has it for $4.99" could never become "IGA, page 7, valid
- * until the 19th, here is the page", which is the only form that works at a
- * till.
+ * until the 19th, here is the page", which is the only form that works at
+ * checkout.
  *
  * ---------------------------------------------------------------------------
  * WHAT IS SAVED, AND WHAT IS NOT
