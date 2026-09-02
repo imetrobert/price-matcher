@@ -64,7 +64,7 @@ export async function analyzeCartPhotos(
      * What earlier photos already produced.
      *
      * Sent so the model reports only what is NEW. Without it, a second angle
-     * re-describes the whole trolley: the answer takes as long as the first
+     * re-describes the whole cart: the answer takes as long as the first
      * one, and every item already confirmed comes back as a duplicate row.
      */
     known?: KnownItem[];
