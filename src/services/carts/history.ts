@@ -29,7 +29,7 @@
  * The last-cart handoff to Checkout Mode uses sessionStorage, which is emptied
  * when the tab closes. That is survivable for a handoff between two screens in
  * one visit. It is useless for history: a cart scanned on Tuesday must still be
- * there on Thursday, and closing the browser between the aisle and the till is
+ * there on Thursday, and closing the browser between the aisle and checkout is
  * an ordinary thing to do.
  */
 
@@ -161,7 +161,7 @@ function writeAll(carts: SavedCart[]): void {
  * Save a scan, replacing the newest one when it is the same scan again.
  *
  * The results screen recomputes whenever a shelf price is typed, so a single
- * trolley would otherwise write a new record on every keystroke. Same id means
+ * cart would otherwise write a new record on every keystroke. Same id means
  * same cart: the record is updated in place and the saving reflects the latest
  * numbers.
  */
