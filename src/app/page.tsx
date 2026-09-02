@@ -144,6 +144,8 @@ function Home() {
       <main>
         <AuthBar />
 
+        <TabBar />
+
       <header className="mb-5 mt-2">
         <h1 className="text-3xl font-extrabold tracking-tight">CartMatch</h1>
         <p className="mt-1 text-muted">Find price matches before you pay.</p>
@@ -227,7 +229,7 @@ function Home() {
               <p className="mt-2 text-xs text-muted">
                 Optional, and only worth it for a specific reason: scanning
                 your own flyer is the only way CartMatch can compute an exact
-                dollar saving with a page you can show at the till. Flipp can
+                dollar saving with a page you can show at checkout. Flipp can
                 tell you an item is advertised somewhere else, but never a
                 dollar amount — Flipp&rsquo;s price can be ambiguous between
                 &ldquo;each&rdquo; and &ldquo;2 for $X&rdquo;, so nothing built
@@ -340,11 +342,8 @@ function Home() {
         </Link>
       ) : null}
 
-      {/* Clears the fixed tab bar below rather than being hidden behind it. */}
-      <div className="h-16" aria-hidden />
       </main>
 
-      <TabBar />
     </>
   );
 }
@@ -589,7 +588,7 @@ function FlyerReadingStatus({
         /*
           Loaded is the state this screen is in most of the week, so it is
           the one worth laying out properly outside the demoted view. The
-          two things a person does from here — scan the trolley they are
+          two things a person does from here — scan the cart they are
           pushing, or add a flyer they have just downloaded — belong beside
           the sentence that says the flyers are ready.
         */
