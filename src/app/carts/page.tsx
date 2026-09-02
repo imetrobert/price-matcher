@@ -6,11 +6,11 @@
  * ---------------------------------------------------------------------------
  * WHAT THIS IS FOR
  * ---------------------------------------------------------------------------
- * A trolley scanned on Tuesday is still useful on Thursday: the flyers behind
+ * A cart scanned on Tuesday is still useful on Thursday: the flyers behind
  * it run all week, so the same items are still on sale at the same places. The
  * scan screen could only ever show the current cart, and Checkout Mode's copy
  * lived in sessionStorage, which is emptied the moment the tab closes. So the
- * ordinary act of closing a browser between the aisle and the till lost the
+ * ordinary act of closing a browser between the aisle and checkout lost the
  * work.
  *
  * ---------------------------------------------------------------------------
@@ -32,7 +32,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
-import { FlyerPageProof } from "@/components/FlyerPageProof";
+import { FlyerPageProof, FlippThumbnail } from "@/components/FlyerPageProof";
 import { Money, Notice, PageHeader } from "@/components/ui";
 import { ActiveFlyerPeriod } from "@/components/ActiveFlyerPeriod";
 import { RETAILERS } from "@/config/retailers";
@@ -370,12 +370,7 @@ function Group({
                     {flipp.map((offer) => (
                       <div key={offer.id} className="mt-2 flex items-start gap-2">
                         {offer.partnerImageUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={offer.partnerImageUrl}
-                            alt=""
-                            className="h-12 w-12 shrink-0 rounded object-cover"
-                          />
+                          <FlippThumbnail url={offer.partnerImageUrl} />
                         ) : null}
                         <p className="flex-1 flex justify-between gap-3 text-muted">
                           <span>
