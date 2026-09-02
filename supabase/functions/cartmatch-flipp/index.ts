@@ -2,7 +2,7 @@
  * POST /functions/v1/cartmatch-flipp
  *
  *   { action: "list", postalCode }              -> flyers running now, per banner
- *   { action: "fetch", flyerId, merchantName }   -> that flyer's offers, normalised
+ *   { action: "fetch", flyerId, merchantName }   -> that flyer's offers, normalized
  *   { action: "retry", retailerId }              -> re-fetch and WRITE one retailer
  *
  * ---------------------------------------------------------------------------
@@ -286,7 +286,7 @@ async function handler(req: Request): Promise<Response> {
     return json({ ok: true, build: FUNCTION_BUILD, flyers }, 200, origin);
   }
 
-  // -- fetch: one flyer's contents, normalised ------------------------------
+  // -- fetch: one flyer's contents, normalized ------------------------------
   if (action === "fetch") {
     const flyerId = String(payload.flyerId ?? "").trim();
     if (!/^\d+$/.test(flyerId)) {
