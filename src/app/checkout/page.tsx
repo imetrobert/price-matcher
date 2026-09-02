@@ -6,7 +6,7 @@
  * ---------------------------------------------------------------------------
  * WHAT THIS SCREEN IS FOR
  * ---------------------------------------------------------------------------
- * A person is at a till with somebody waiting behind them. They need the
+ * A person is at checkout with somebody waiting behind them. They need the
  * competitor's name, the price, the page and the dates, in that order, without
  * scrolling or pinching. Everything else is in the way.
  *
@@ -23,7 +23,7 @@
  *   and a guess at a shelf price.
  *
  *   THE PRICE IS UNCONDITIONAL. A card price may be worth knowing on the
- *   results screen; at a till it is a saving that evaporates when the cashier
+ *   results screen; at checkout it is a saving that evaporates when the cashier
  *   asks a question this app cannot answer.
  *
  *   THERE IS A PAGE TO SHOW. A claim with no document behind it is exactly
@@ -143,7 +143,7 @@ export default function CheckoutPage() {
  *
  * `savingCents` being non-null carries "both shops advertised it": the
  * comparison sets it to null precisely when your own shop did not, and a gap
- * nobody can compute is not one to quote at a till.
+ * nobody can compute is not one to quote at checkout.
  */
 function showable(line: CartLine): boolean {
   return (
@@ -152,7 +152,7 @@ function showable(line: CartLine): boolean {
     line.hereOffer !== null &&
     line.bestElsewhere.condition === "UNIT_PRICE" &&
     // A size nobody read is a size nobody checked. The results screen shows
-    // these with a warning so somebody can go and look at the tub; a till is
+    // these with a warning so somebody can go and look at the tub; checkout is
     // not the place to discover that the pack sizes differ.
     !line.sizeUnverified &&
     // The flyer must still be running. An expired advertisement is not a
@@ -170,7 +170,7 @@ function isCurrent(validTo: string): boolean {
  * How old the scan is, in words, or null when it was taken today.
  *
  * `at` was recorded from the beginning and never read. A cart from three days
- * ago rendered exactly like one from three minutes ago — at a till, in large
+ * ago rendered exactly like one from three minutes ago — at checkout, in large
  * type, with a saving on it. The project's own rule is that a cached result is
  * never presented as current without identifying its age, and this screen was
  * the one place breaking it.
