@@ -81,7 +81,7 @@ const STOPWORDS = new Set([
  * Quebec flyers are typeset in French and the accents are not applied
  * consistently between the artwork and the text layer — "épargnez" and
  * "epargnez" are the same word to a shopper and must be the same word here.
- * NFKC first so ligatures and full-width forms normalise too.
+ * NFKC first so ligatures and full-width forms normalize too.
  */
 function fold(input: string): string {
   return input
@@ -173,8 +173,8 @@ export function distinctiveTerms(text: string): string[] {
  *   a gap, and the offer is rejected.
  *
  *   Price present but none of the product's distinctive words are — the number
- *   is real and belongs to a different tile. Rejected for the same reason: at a
- *   till, the right price attached to the wrong product is worse than nothing.
+ *   is real and belongs to a different tile. Rejected for the same reason: at
+ *   checkout, the right price attached to the wrong product is worse than nothing.
  *
  *   Brand named but absent from the page — same failure, sharper. A brand is
  *   the single most load-bearing token in a price match, and "Oikos" not
