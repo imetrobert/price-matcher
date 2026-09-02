@@ -112,7 +112,7 @@ export function WhereToGetFlyers() {
 }
 
 /**
- * The toolbar as a drawing: [Enhanced Filters ▸] [PDF] [share] [favourite],
+ * The toolbar as a drawing: [Enhanced Filters ▸] [PDF] [share] [favorite],
  * with the second one ringed.
  *
  * Deliberately plain shapes. The point is which position in the row to press,
@@ -124,7 +124,7 @@ function RaddarToolbarDrawing() {
     <svg
       viewBox="0 0 360 108"
       role="img"
-      aria-label="A row of four buttons; the second, labelled PDF, is circled"
+      aria-label="A row of four buttons; the second, labeled PDF, is circled"
       className="mt-3 w-full rounded-md border border-line bg-surface"
     >
       {/* Enhanced Filters */}
@@ -137,7 +137,7 @@ function RaddarToolbarDrawing() {
       <rect x="184" y="27" width="24" height="26" rx="3" className="fill-none stroke-warn" strokeWidth="2" />
       <text x="196" y="45" textAnchor="middle" className="fill-warn" fontSize="9" fontWeight="bold">PDF</text>
 
-      {/* Share, favourite — position only, so the eye can count along the row. */}
+      {/* Share, favorite — position only, so the eye can count along the row. */}
       <rect x="232" y="18" width="52" height="44" rx="10" className="fill-none stroke-line" strokeWidth="2" />
       <path d="M248 40 l16 -8 M248 40 l16 8" className="fill-none stroke-line" strokeWidth="2" />
       <circle cx="268" cy="32" r="4" className="fill-none stroke-line" strokeWidth="2" />

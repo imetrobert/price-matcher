@@ -39,7 +39,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<State>({ status: "checking" });
 
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
 
     // Not configured at all: local development. Let the app through, and the
     // home screen shows a loud banner saying it is unprotected.
@@ -50,14 +50,14 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
     (async () => {
       const { user } = await getSession();
-      if (cancelled) return;
+      if (canceled) return;
       if (!user) {
         setState({ status: "signed-out" });
         return;
       }
 
       const access = await checkAppAccess();
-      if (cancelled) return;
+      if (canceled) return;
 
       // Three outcomes, not two. "The check could not run" is not the same as
       // "you are not allowed", and telling someone they lack access when the
@@ -75,7 +75,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     })();
 
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, []);
 

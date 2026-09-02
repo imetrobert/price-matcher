@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------------------
  * "IGA, page 7" is a citation somebody can check. A page of a Montreal grocery
  * flyer carries twenty to thirty tiles, so checking it means pinching around
- * artwork on a phone, at a till, with somebody waiting. That distance is the
+ * artwork on a phone, at checkout, with somebody waiting. That distance is the
  * difference between a citation and a proof.
  *
  * When the reading recorded where the tile sits, this draws a rectangle round
@@ -31,6 +31,50 @@
 import { useEffect, useRef, useState } from "react";
 
 import { flyerPageUrl } from "@/services/flyers/storage";
+
+/**
+ * A Flipp item picture, with a visible loading state.
+ *
+ * Flipp's own CDN can take a real, noticeable moment to answer — a plain
+ * <img> tag with nothing else shown just sits blank until then, which reads
+ * as broken rather than as loading. This shows a small spinner in the same
+ * footprint until the image actually finishes (or gives up and fails
+ * quietly, rather than spinning forever). Shared by every place a Flipp
+ * picture appears, so the wait looks the same everywhere.
+ */
+export function FlippThumbnail({
+  url,
+  className = "h-12 w-12",
+}: {
+  url: string;
+  className?: string;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <span
+      className={`relative ${className} shrink-0 overflow-hidden rounded bg-surface`}
+    >
+      {!loaded ? (
+        <span className="absolute inset-0 flex items-center justify-center">
+          <span
+            aria-hidden
+            className="h-4 w-4 animate-spin rounded-full border-2 border-line border-t-warn"
+          />
+        </span>
+      ) : null}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={url}
+        alt=""
+        className={`h-full w-full object-cover transition-opacity ${
+          loaded ? "opacity-100" : "opacity-0"
+        }`}
+        onLoad={() => setLoaded(true)}
+        onError={() => setLoaded(true)}
+      />
+    </span>
+  );
+}
 
 export interface FlyerPageProofProps {
   flyerId: string;
@@ -99,14 +143,7 @@ export function FlyerPageProof({
   if (isPartnerFeed) {
     return (
       <div className="mt-3 flex items-start gap-2 rounded-md bg-surface p-2 text-sm text-muted">
-        {imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={imageUrl}
-            alt=""
-            className="h-12 w-12 shrink-0 rounded object-cover"
-          />
-        ) : null}
+        {imageUrl ? <FlippThumbnail url={imageUrl} /> : null}
         <span>
           Advertised via Flipp, not a flyer CartMatch photographed — check
           the price and unit at the store before relying on it.
