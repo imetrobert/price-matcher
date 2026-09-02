@@ -275,7 +275,7 @@ export const PRODUCT_FIXTURES: ProductFixture[] = [
     packageCount: 1,
     gtin: null,
     identitySource: "TEST_FIXTURE",
-    note: "Decimal litre parsing.",
+    note: "Decimal liter parsing.",
   },
   {
     key: "detergent-tide-2.72l",
