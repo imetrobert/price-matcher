@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------------------
  * Every price on this screen was printed in a flyer the shopper loaded, and
  * every comparison is between two prices for the same product in the same
- * unit. Nothing here is inferred from a picture of a trolley, and nothing is
+ * unit. Nothing here is inferred from a picture of a cart, and nothing is
  * calculated by a model — the arithmetic is `calculateSavingsCents`, in
  * integer cents.
  *
@@ -33,7 +33,7 @@ import { formatCents } from "@/lib/money";
 import { DEFAULT_PREFS, loadPrefs } from "@/lib/prefs";
 import {
   findPriceGaps,
-  summariseComparison,
+  summarizeComparison,
   type ComparisonSummary,
   type PriceGap,
 } from "@/services/flyers/compare";
@@ -91,7 +91,7 @@ function Deals() {
       const found = findPriceGaps(loaded, minSaving, withConditional);
       setOffers(loaded);
       setGaps(found);
-      setSummary(summariseComparison(loaded, found, flyers));
+      setSummary(summarizeComparison(loaded, found, flyers));
       setLoading(false);
     },
     [],
@@ -373,7 +373,7 @@ function GapCard({ gap }: { gap: PriceGap }) {
         {/*
           The condition beside the number it qualifies, verbatim. A card price
           shown without "avec carte Scène+" is the exact way a saving
-          evaporates at the till, and this list is where somebody reads the
+          evaporates at checkout, and this list is where somebody reads the
           number they intend to act on.
         */}
         {gap.offers
@@ -388,7 +388,7 @@ function GapCard({ gap }: { gap: PriceGap }) {
 
       {/*
         The citation, verbatim, on the cheapest offer — because that is the one
-        somebody will take to a till, and the page number is what makes it
+        somebody will take to checkout, and the page number is what makes it
         checkable whether or not a picture was kept.
       */}
       <p className="mt-3 rounded-lg bg-surface px-2 py-1 text-xs">
