@@ -245,15 +245,34 @@ const MAX_IMAGES = 4;
  */
 const DEFAULT_MODEL = DEFAULT_MODEL_CHAIN;
 const MAX_BYTES = 8 * 1024 * 1024;
-// Was 45s. Raised after a real timeout on a 2-photo request over a weak
-// cellular connection — every model in CARTMATCH_GEMINI_MODEL's fallback
-// chain shares this ONE timer (see the loop below), so a slow-but-working
-// first model leaves nothing for a second one to help with; this only
-// widens the budget, it does not make a genuinely stuck request wait
-// forever. Not a guarantee against every timeout — a truly overloaded
-// backend can still exceed even this — just a fairer number for the common
-// case of two images over a slow connection.
+// Used only by the standalone "list models" branch and as the generic
+// message for a genuinely unexpected error outside the model-fallback loop
+// below — the loop itself no longer shares one timer across every attempt.
 const TIMEOUT_MS = 75_000;
+
+// THE ACTUAL FIX for the shared-timer problem described above: each model
+// attempt gets ITS OWN clock, not a slice of one shared 75s budget. Reverted
+// close to the original single-model figure (45s) precisely because it no
+// longer has to also cover every fallback attempt — a first model that is
+// merely slow now genuinely lets a second model try, with a full budget of
+// its own, which a shared timer could never do regardless of its size.
+const PER_MODEL_TIMEOUT_MS = 45_000;
+
+// DEFAULT_MODEL_CHAIN (see _shared/models.ts) currently holds SEVEN models.
+// At the full 45s each, walking the whole list could take four minutes —
+// almost certainly past whatever Supabase's own platform execution ceiling
+// is, which would kill the function outright and return nothing useful,
+// trading one bad outcome for a worse one. This caps total wall-clock time
+// across every attempt combined; each new attempt gets whichever is
+// smaller of PER_MODEL_TIMEOUT_MS or whatever remains of this envelope, and
+// the loop stops trying further models once the envelope is essentially
+// spent rather than starting an attempt with no realistic time left.
+const OVERALL_TIMEOUT_MS = 150_000;
+
+// A model-list lookup is metadata, not a generation call — much faster in
+// practice, and it should never be the thing standing between a shopper and
+// an answer while a real generation attempt is still worth trying.
+const LIST_MODELS_TIMEOUT_MS = 15_000;
 
 const VISION_PROMPT =
   `You are identifying grocery products visible in a photograph of a shopping cart, taken in a store in Montreal, Quebec, Canada. Packaging may be in French, English, or bilingual.
@@ -264,7 +283,7 @@ Rules you must follow:
 - Report only what is legible in the image. If you cannot read the size, return null for size. Do not infer a typical size from product knowledge. "size" is for text you can actually read.
 - When, and only when, "size" is null, you may propose up to 3 candidate sizes in "size_candidates", ordered most likely first, and you must say how you arrived at them in "size_guess_basis" using one or more of these words:
     "partial_label"  — some of the size text is legible: a unit, a digit, a fragment.
-    "dimensions"     — judged from how large the package looks beside other items in the photo whose size you did read, or from packaging you recognise by shape.
+    "dimensions"     — judged from how large the package looks beside other items in the photo whose size you did read, or from packaging you recognize by shape.
     "typical"        — the sizes this brand and product are normally sold in.
   Combine them when more than one applies, most reliable first, for example "partial_label+typical".
   Give more than one candidate ONLY when genuinely more than one size is plausible — for example, this brand commonly sells both a 400 g and a 750 g jar and nothing in the image favours one over the other. Do not pad the list to reach 3; one honest candidate beats three padded ones.
@@ -283,7 +302,7 @@ Rules you must follow:
 
 Also report how much of the cart you could NOT read, which is as important as what you could:
 - "obscured_count": how many DISTINCT items are visibly present but cannot be identified at all — buried under other items, facing away, wrapped in an opaque bag, cut off by the edge of the frame. Count the items you can see are there but cannot name. Do not include them in "products"; a guess is worse than an admission.
-- "obscured_note": one short sentence saying why, in plain words a shopper would recognise — for example "three items underneath the bread are not visible" or "the back row is facing away". Null when nothing is obscured.
+- "obscured_note": one short sentence saying why, in plain words a shopper would recognize — for example "three items underneath the bread are not visible" or "the back row is facing away". Null when nothing is obscured.
 - Count an item once. If you can read a product but not its size, that is a low-confidence PRODUCT, not an obscured one.
 - If the whole cart is clearly visible, return 0 and null.
 
@@ -481,54 +500,96 @@ identify in "obscured_count" as usual.`;
     parts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } });
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
   try {
     // Walk the list until one answers. A 503 or 429 moves to the next model
     // immediately rather than after a client-side wait: falling through costs
     // one request, and waiting out a busy model costs the caller half a minute
     // for something another model would have answered at once.
+    //
+    // EACH ATTEMPT GETS ITS OWN CLOCK. A single shared timer used to cover
+    // the whole loop — meaning a first model that was merely SLOW (not
+    // fast-failing with a 429/503) burned the entire budget alone, and its
+    // eventual abort threw straight past every remaining fallback model
+    // rather than trying the next one. The 503/429 fallback logic below was
+    // real and worked; it just never got a chance to fire for the single
+    // most common real failure — a slow response. Per-model timers are what
+    // actually make "walk the list until one answers" true for that case.
     let res: Response | null = null;
     let used = model;
+    let lastFailure: string | null = null;
+    const walkStarted = Date.now();
     for (const candidate of models) {
+      const remaining = OVERALL_TIMEOUT_MS - (Date.now() - walkStarted);
+      // Not worth starting an attempt with too little of the overall
+      // envelope left to plausibly get a real answer back — a 3-second
+      // budget is not a fair try, it is padding the failure count.
+      if (remaining < 5_000) {
+        if (!lastFailure) {
+          lastFailure = "Ran out of time trying the configured models.";
+        }
+        break;
+      }
       used = candidate;
-      res = await callGemini(
-        apiKey,
-        candidate,
-        parts,
-        flyerMode,
-        supportsThinking(candidate),
-        Number.isFinite(thinkingBudget) ? thinkingBudget : 0,
-        controller.signal,
+      const attempt = new AbortController();
+      const attemptTimer = setTimeout(
+        () => attempt.abort(),
+        Math.min(PER_MODEL_TIMEOUT_MS, remaining),
       );
-      // Counted on the way out, refused or not: a 429 is still a request as
-      // far as Google's counter is concerned. The scan spends from the whole
-      // allowance — it is the worker that holds back, because a person at a
-      // shelf has no way to wait.
-      void noteRequest(bearer, candidate);
-      // A 400 on a request carrying thinkingConfig is far more likely to be
-      // that config than the photograph. Retry once without it before
-      // blaming anything else — this drops the request to the same shape the
-      // flyer worker sends, which is known to work on this key.
-      //
-      // Deliberately not conditioned on the error text mentioning "thinking".
-      // The previous version was, and Google's message is the generic
-      // "Request contains an invalid argument" — so the recovery written for
-      // exactly this case sat there and never fired.
-      if (!res.ok && res.status === 400 && supportsThinking(candidate)) {
-        console.warn(`[cartmatch] ${candidate} rejected thinkingConfig; retrying without it.`);
+      try {
         res = await callGemini(
           apiKey,
           candidate,
           parts,
           flyerMode,
-          false,
-          0,
-          controller.signal,
+          supportsThinking(candidate),
+          Number.isFinite(thinkingBudget) ? thinkingBudget : 0,
+          attempt.signal,
         );
+        // Counted on the way out, refused or not: a 429 is still a request as
+        // far as Google's counter is concerned. The scan spends from the whole
+        // allowance — it is the worker that holds back, because a person at a
+        // shelf has no way to wait.
         void noteRequest(bearer, candidate);
+        // A 400 on a request carrying thinkingConfig is far more likely to be
+        // that config than the photograph. Retry once without it before
+        // blaming anything else — this drops the request to the same shape the
+        // flyer worker sends, which is known to work on this key.
+        //
+        // Deliberately not conditioned on the error text mentioning "thinking".
+        // The previous version was, and Google's message is the generic
+        // "Request contains an invalid argument" — so the recovery written for
+        // exactly this case sat there and never fired.
+        if (!res.ok && res.status === 400 && supportsThinking(candidate)) {
+          console.warn(`[cartmatch] ${candidate} rejected thinkingConfig; retrying without it.`);
+          res = await callGemini(
+            apiKey,
+            candidate,
+            parts,
+            flyerMode,
+            false,
+            0,
+            attempt.signal,
+          );
+          void noteRequest(bearer, candidate);
+        }
+      } catch (err) {
+        // A per-model timeout, or any other failure that never produced a
+        // Response at all (a network error, DNS, etc.) — either way, this
+        // model did not answer, so it is treated exactly like a 503: move on
+        // with a fresh clock rather than let it end the whole request.
+        clearTimeout(attemptTimer);
+        const message = err instanceof Error ? err.message : String(err);
+        const timedOut = message.toLowerCase().includes("abort");
+        lastFailure = timedOut
+          ? `${candidate} did not answer within ${PER_MODEL_TIMEOUT_MS}ms.`
+          : `${candidate} failed: ${message}`;
+        res = null;
+        if (candidate !== models[models.length - 1]) {
+          console.warn(`[cartmatch] ${lastFailure} Trying next model.`);
+        }
+        continue;
       }
+      clearTimeout(attemptTimer);
 
       if (res.ok) break;
       // 404 means this key cannot call that id at all — try the next one
@@ -544,7 +605,11 @@ identify in "obscured_count" as usual.`;
       }
     }
     if (!res) {
-      return json({ ok: false, error: "No model was configured." }, 500, origin);
+      return json(
+        { ok: false, error: lastFailure ?? "No model was configured." },
+        502,
+        origin,
+      );
     }
 
     // Every configured name refused with 404, and Google's own model list
@@ -556,12 +621,17 @@ identify in "obscured_count" as usual.`;
     // supplied this second, and if that fails too the error names both what
     // was configured and what was tried.
     if (!res.ok && res.status === 404) {
-      const available = await listUsableModels(apiKey, controller.signal);
+      const listTimer1 = new AbortController();
+      const listTimeout1 = setTimeout(() => listTimer1.abort(), LIST_MODELS_TIMEOUT_MS);
+      const available = await listUsableModels(apiKey, listTimer1.signal);
+      clearTimeout(listTimeout1);
       const suggested = available.find((m) => !models.includes(m));
       if (suggested) {
         console.warn(
           `[cartmatch] ${models.join(", ")} all refused; trying ${suggested} from the live model list.`,
         );
+        const selfCorrect = new AbortController();
+        const selfCorrectTimer = setTimeout(() => selfCorrect.abort(), PER_MODEL_TIMEOUT_MS);
         const retry = await callGemini(
           apiKey,
           suggested,
@@ -569,8 +639,9 @@ identify in "obscured_count" as usual.`;
           flyerMode,
           supportsThinking(suggested),
           Number.isFinite(thinkingBudget) ? thinkingBudget : 0,
-          controller.signal,
+          selfCorrect.signal,
         );
+        clearTimeout(selfCorrectTimer);
         void noteRequest(bearer, suggested);
         if (retry.ok) {
           res = retry;
@@ -588,7 +659,10 @@ identify in "obscured_count" as usual.`;
       // a replacement name fails the same way, so ASK, and put the real
       // answer in front of whoever has to fix it.
       if (res.status === 404) {
-        const available = await listUsableModels(apiKey, controller.signal);
+        const listTimer2 = new AbortController();
+        const listTimeout2 = setTimeout(() => listTimer2.abort(), LIST_MODELS_TIMEOUT_MS);
+        const available = await listUsableModels(apiKey, listTimer2.signal);
+        clearTimeout(listTimeout2);
         return json(
           {
             ok: false,
@@ -663,7 +737,7 @@ identify in "obscured_count" as usual.`;
       );
     }
 
-    // The raw shape is returned as-is; the browser validates and normalises it
+    // The raw shape is returned as-is; the browser validates and normalizes it
     // with the same parseVisionResponse() used everywhere else, so there is
     // exactly one implementation of that logic.
     return json({ ok: true, raw: parsed, model: used, mode: flyerMode ? "flyer" : "cart" }, 200, origin);
@@ -860,8 +934,8 @@ function supportsThinking(model: string): boolean {
  * Anything that is not a short string is dropped rather than trusted: this
  * text is interpolated into a prompt, and a caller who can put arbitrary
  * content there can steer the model. Newlines go, length is capped, and so is
- * the number of entries — a trolley does not hold sixty distinct products, and
- * a caller claiming it does is not describing a trolley.
+ * the number of entries — a cart does not hold sixty distinct products, and
+ * a caller claiming it does is not describing a cart.
  */
 function extractKnown(payload: unknown): string[] {
   if (typeof payload !== "object" || payload === null) return [];
