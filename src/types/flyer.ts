@@ -4,13 +4,13 @@
  * ---------------------------------------------------------------------------
  * WHY FLYERS ARE THE RIGHT SHAPE, NOT A FALLBACK
  * ---------------------------------------------------------------------------
- * A flyer offer is a weaker dataset than a full catalogue — only advertised
+ * A flyer offer is a weaker dataset than a full catalog — only advertised
  * items, only while advertised — and a stronger kind of evidence.
  *
  * Price-match policies overwhelmingly ask for a competitor's **advertised**
  * price. A cashier is trained to look at a flyer, check the dates, and check
  * the size. A product page printout is not the artefact that process expects.
- * So a flyer reference is not a downgrade from a product URL; at the till it is
+ * So a flyer reference is not a downgrade from a product URL; at checkout it is
  * the document that actually works.
  *
  * It also concentrates the dataset on the items where the gap is worth
@@ -27,9 +27,9 @@
  *
  * The other difference is conditions. Flyers routinely advertise prices that
  * are not simply "this costs $X": limits, multi-buys, loyalty requirements.
- * Those are modelled explicitly below rather than flattened into a number,
+ * Those are modeled explicitly below rather than flattened into a number,
  * because flattening them is how an app shows a saving that does not exist when
- * the person reaches the till.
+ * the person reaches checkout.
  */
 
 import type { Cents, CurrencyCode, RetailerId, ValidityPeriod } from "@/types";
@@ -146,8 +146,8 @@ export interface FlyerOffer {
    * but it is an exact identifier for THAT retailer's product, and neither Maxi
    * nor IGA publishes anything comparable.
    *
-   * What it buys: an offer can be tied to the retailer's own catalogue entry
-   * rather than matched by brand, name and size, so a re-import recognises the
+   * What it buys: an offer can be tied to the retailer's own catalog entry
+   * rather than matched by brand, name and size, so a re-import recognizes the
    * same product and a match against that retailer's shelf is exact rather than
    * inferred. What it does not buy: cross-retailer matching, which still needs
    * a barcode nobody prints.
@@ -188,7 +188,7 @@ export interface FlyerOffer {
   /**
    * The condition in the flyer's own words: "2 for $5", "limit 4", "with PC
    * Optimum card". Shown verbatim next to the price, because paraphrasing a
-   * condition is how a saving evaporates at the till.
+   * condition is how a saving evaporates at checkout.
    */
   conditionText: string | null;
 
@@ -215,7 +215,7 @@ export interface FlyerOffer {
  *
  * Only an unconditional unit price. Everything else is displayable — a shopper
  * may well want to know about "2 for $5" — but it is not a number this app will
- * subtract, because the saving depends on behaviour the app cannot verify.
+ * subtract, because the saving depends on behavior the app cannot verify.
  */
 export function isDirectlyComparable(offer: FlyerOffer): boolean {
   if (offer.condition !== "UNIT_PRICE") return false;
@@ -236,7 +236,7 @@ export function isDirectlyComparable(offer: FlyerOffer): boolean {
  *   Without a flyer reference — a link or a stored page — there is nothing to
  *     show; a price with no document is exactly what a cashier declines.
  *   Without an end date there is no way to demonstrate the offer is current,
- *     and "still valid" is the first thing checked at the till.
+ *     and "still valid" is the first thing checked at checkout.
  *
  * Note this does NOT check whether the offer is currently in date — that is
  * `classifyFreshness`'s job, which already returns EXPIRED outside the window.
