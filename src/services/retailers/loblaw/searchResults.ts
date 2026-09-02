@@ -19,14 +19,14 @@
  * real product at a real price and occasionally is the thing you searched for.
  * But `isSponsored` is carried through so ranking never treats position as
  * relevance — position here was bought. The matcher rejects them on brand and
- * name anyway; this is the second line of defence, not the first.
+ * name anyway; this is the second line of defense, not the first.
  *
  * ---------------------------------------------------------------------------
  * 2. memberOnlyPrice IS NOT A PRICE YOU CAN PAY
  * ---------------------------------------------------------------------------
  * It requires a loyalty account and, on some offers, having loaded the offer
  * beforehand. Presenting it as the shelf price would produce a saving that
- * evaporates at the till — the precise humiliation this app exists to prevent.
+ * evaporates at checkout — the precise humiliation this app exists to prevent.
  * Only `pricing.price` is ever used. The member price is recorded so the UI can
  * mention it, never so it can be compared against.
  *
