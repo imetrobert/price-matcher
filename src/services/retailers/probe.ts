@@ -57,7 +57,7 @@ export interface ProbeResult {
    *
    * Optional because an older deployment of the Edge Function does not send it.
    * Absent and empty mean different things — "this deployment cannot answer"
-   * versus "answered, found none" — and `summariseProbe` keeps them apart.
+   * versus "answered, found none" — and `summarizeProbe` keeps them apart.
    */
   flyerImages?: string[];
   /**
@@ -147,7 +147,7 @@ export async function probeRetailerUrl(
  * returns, and reading it as a working fetch is how a scraper ends up
  * confidently returning nothing.
  */
-export function summariseProbe(r: ProbeResult): string {
+export function summarizeProbe(r: ProbeResult): string {
   // A file, not a page. Judged on whether it is really there and really a PDF —
   // the two things that decide whether a weekly flyer import can be automated.
   if (r.looksLikePdf) {
