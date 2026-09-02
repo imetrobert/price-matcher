@@ -34,7 +34,7 @@ export const env = {
   /**
    * Retailer PRICE data only.
    *
-   * MOCK serves fixtures, labelled as such everywhere.
+   * MOCK serves fixtures, labeled as such everywhere.
    * LIVE permits only real adapters — which today means "no prices", because
    * no retailer adapter is implemented.
    */
