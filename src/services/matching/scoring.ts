@@ -58,7 +58,7 @@ export const SCORE = {
 
     Before this rung existed, an unread size dropped the item to the fuzzy
     ceiling of 70 against a bar of 90, so it matched nothing at all and said
-    nothing about why. A trolley of unreadable tubs came back empty and looked
+    nothing about why. A cart of unreadable tubs came back empty and looked
     like a week with no savings in it.
   */
   unverifiedSize: 90,
