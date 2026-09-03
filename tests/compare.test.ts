@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { findPriceGaps, isComparable, summariseComparison } from "@/services/flyers/compare";
+import { findPriceGaps, isComparable, summarizeComparison } from "@/services/flyers/compare";
 import type { StoredOffer } from "@/services/flyers/storage";
 
 function offer(patch: Partial<StoredOffer> = {}): StoredOffer {
@@ -207,7 +207,7 @@ describe("what is never compared", () => {
 describe("saying what the comparison was working from", () => {
   it("counts what was used and what was set aside", () => {
     // "No gaps found" means something different with two flyers than with five.
-    const summary = summariseComparison(
+    const summary = summarizeComparison(
       [
         offer(),
         offer({ id: "o2", retailerId: "iga", condition: "MULTI_BUY" }),
@@ -298,7 +298,7 @@ describe("saying what the comparison was working from", () => {
       offer({ id: "a", retailerId: "maxi", advertisedText: "Lait", price: 599 }),
       offer({ id: "b", retailerId: "iga", advertisedText: "Pain", price: 399 }),
     ];
-    const summary = summariseComparison(offers, [], [
+    const summary = summarizeComparison(offers, [], [
       {
         retailerId: "maxi",
         validFrom: "2026-08-13",
@@ -316,7 +316,7 @@ describe("saying what the comparison was working from", () => {
     ]);
 
     expect(summary.sources).toHaveLength(2);
-    const iga = summary.sources.find((s) => s.retailerId === "iga")!;
+    const iga = summary.sources.find((s: { retailerId: string }) => s.retailerId === "iga")!;
     expect(iga.pagesRead).toBe(4);
     expect(iga.pageCount).toBe(16);
     // A page unread is offers missing, not offers absent — the same
@@ -327,7 +327,7 @@ describe("saying what the comparison was working from", () => {
   it("does not claim incompleteness it cannot see", () => {
     // No flyer records supplied. Not knowing how many pages exist is not
     // evidence that some are unread.
-    const summary = summariseComparison(
+    const summary = summarizeComparison(
       [offer({ id: "a", retailerId: "maxi", advertisedText: "Lait", price: 599 })],
       [],
     );
@@ -342,7 +342,7 @@ describe("saying what the comparison was working from", () => {
     const offers = [
       offer({ id: "a", retailerId: "maxi", advertisedText: "Lait", price: 599 }),
     ];
-    const summary = summariseComparison(offers, [], [
+    const summary = summarizeComparison(offers, [], [
       {
         retailerId: "maxi",
         validFrom: "2026-08-13",
@@ -359,7 +359,7 @@ describe("saying what the comparison was working from", () => {
       },
     ]);
 
-    const walmart = summary.sources.find((s) => s.retailerId === "walmart");
+    const walmart = summary.sources.find((s: { retailerId: string }) => s.retailerId === "walmart");
     expect(walmart).toBeDefined();
     expect(walmart!.offers).toBe(0);
     expect(walmart!.validTo).toBe("2026-08-19");
@@ -371,7 +371,7 @@ describe("saying what the comparison was working from", () => {
   it("keeps an offer whose flyer record was not supplied", () => {
     // A summary must never quietly drop what it was handed. Callers that pass
     // no flyers at all depend on this too.
-    const summary = summariseComparison(
+    const summary = summarizeComparison(
       [offer({ id: "a", retailerId: "iga", advertisedText: "Pain", price: 399 })],
       [],
       [
@@ -384,9 +384,9 @@ describe("saying what the comparison was working from", () => {
         },
       ],
     );
-    expect(summary.sources.map((s) => s.retailerId).sort()).toEqual(["iga", "maxi"]);
-    expect(summary.sources.find((s) => s.retailerId === "iga")!.offers).toBe(1);
-    expect(summary.sources.find((s) => s.retailerId === "maxi")!.offers).toBe(0);
+    expect(summary.sources.map((s: { retailerId: string }) => s.retailerId).sort()).toEqual(["iga", "maxi"]);
+    expect(summary.sources.find((s: { retailerId: string }) => s.retailerId === "iga")!.offers).toBe(1);
+    expect(summary.sources.find((s: { retailerId: string }) => s.retailerId === "maxi")!.offers).toBe(0);
   });
 
   it("counts conditional offers by whether they could ever be compared", () => {
@@ -395,7 +395,7 @@ describe("saying what the comparison was working from", () => {
       offer({ id: "b", advertisedText: "Pain", price: 399, condition: "LOYALTY_ONLY" }),
       offer({ id: "c", advertisedText: "Riz", price: 500, condition: "MULTI_BUY" }),
     ];
-    const summary = summariseComparison(offers, []);
+    const summary = summarizeComparison(offers, []);
     expect(summary.offersConsidered).toBe(1);
     expect(summary.offersConditionalUsable).toBe(1);
     expect(summary.offersNeverComparable).toBe(1);

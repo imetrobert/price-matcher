@@ -1,5 +1,5 @@
 /**
- * A size the model proposed, kept separate from one it read.
+ * Candidate sizes the model proposed, kept separate from one it read.
  *
  * ---------------------------------------------------------------------------
  * WHY THE SEPARATION IS THE WHOLE FEATURE
@@ -8,7 +8,7 @@
  * best rung available is the fuzzy one, capped at 70. So an item with no size
  * cannot match a flyer at all — which makes a guessed size very tempting and
  * very dangerous: "650 g" accepted against a flyer's 750 g tub is a confident
- * match on the wrong product, carried to a till with a page number attached.
+ * match on the wrong product, carried to checkout with a page number attached.
  *
  * The guess therefore has to stay out of `size` until a person accepts it.
  * These tests pin that, and pin that the reasoning shown beside it is the
@@ -23,14 +23,14 @@ import { buildCanonicalProduct } from "@/services/products/normalize";
 
 const raw = (product: Record<string, unknown>) => ({ products: [product] });
 
-describe("reading a proposed size", () => {
-  it("keeps a guess out of size", () => {
+describe("reading proposed sizes", () => {
+  it("keeps candidates out of size", () => {
     const [p] = parseVisionResponse(
       raw({
         brand: "Oikos",
         product_name: "Oikos",
         size: null,
-        size_guess: "650 g",
+        size_candidates: ["650 g"],
         size_guess_basis: "typical",
         confidence: 0.9,
       }),
@@ -38,16 +38,16 @@ describe("reading a proposed size", () => {
     );
 
     expect(p!.size).toBeNull();
-    expect(p!.sizeGuess).toBe("650 g");
+    expect(p!.sizeCandidates).toEqual(["650 g"]);
     expect(p!.sizeGuessBasis).toBe("typical");
   });
 
-  it("keeps a read size exactly as read, guess or no guess", () => {
+  it("keeps a read size exactly as read, candidates or no candidates", () => {
     const [p] = parseVisionResponse(
       raw({
         brand: "Oikos",
         size: "750 g",
-        size_guess: "650 g",
+        size_candidates: ["650 g"],
         size_guess_basis: "typical",
         confidence: 0.9,
       }),
@@ -58,20 +58,35 @@ describe("reading a proposed size", () => {
     expect(p!.size).toBe("750 g");
   });
 
-  it("has no guess when none was offered", () => {
+  it("has no candidates when none were offered", () => {
     const [p] = parseVisionResponse(raw({ brand: "Oikos", confidence: 0.5 }), {
       isMock: false,
     });
-    expect(p!.sizeGuess).toBeNull();
+    expect(p!.sizeCandidates).toEqual([]);
     expect(p!.sizeGuessBasis).toBeNull();
+  });
+
+  it("keeps up to 3 candidates, most likely first, and drops duplicates", () => {
+    const [p] = parseVisionResponse(
+      raw({
+        brand: "Nutella",
+        size: null,
+        size_candidates: ["400 g", "750 g", "400 g", "950 g", "200 g"],
+        size_guess_basis: "typical",
+        confidence: 0.7,
+      }),
+      { isMock: false },
+    );
+    expect(p!.sizeCandidates).toEqual(["400 g", "750 g", "950 g"]);
   });
 });
 
 describe("the basis is the app's vocabulary, not the model's prose", () => {
   const basisOf = (v: unknown) =>
-    parseVisionResponse(raw({ brand: "X", size_guess: "650 g", size_guess_basis: v, confidence: 1 }), {
-      isMock: false,
-    })[0]!.sizeGuessBasis;
+    parseVisionResponse(
+      raw({ brand: "X", size_candidates: ["650 g"], size_guess_basis: v, confidence: 1 }),
+      { isMock: false },
+    )[0]!.sizeGuessBasis;
 
   it("keeps the three known words and their combinations", () => {
     expect(basisOf("partial_label")).toBe("partial_label");
@@ -112,13 +127,13 @@ describe("why a missing size matters at all", () => {
   it("matches without a size, but never as proof", () => {
     /*
       This reverses a rule that was in force earlier the same day, and the
-      reversal was deliberate. Requiring a size to match meant a trolley of
+      reversal was deliberate. Requiring a size to match meant a cart of
       tubs photographed at an angle produced no results at all and gave no
       reason — the strictness was invisible, which made it useless as a
       safeguard and expensive as a feature.
 
       Now it matches, and the caution is carried on the result instead: the
-      match cannot back a claim at a till, and the screens say the size is
+      match cannot back a claim at checkout, and the screens say the size is
       unconfirmed. A person can act on that; a silently dropped item is not
       something anybody can act on.
     */

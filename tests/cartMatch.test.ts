@@ -25,7 +25,7 @@ function item(patch: Partial<DetectedProduct> = {}): DetectedProduct {
     variant: null,
     fatPercentage: null,
     size: "2 L",
-    sizeGuess: null,
+    sizeCandidates: [],
     sizeGuessBasis: null,
     packageQuantity: 1,
     visibleUpc: null,
@@ -73,9 +73,9 @@ describe("not in any flyer", () => {
   });
 
   it("does not become a match on a loose resemblance", () => {
-    // Same category, different product. Pairing a trolley photograph to a
+    // Same category, different product. Pairing a cart photograph to a
     // flyer tile on token overlap would stack one inference on another and
-    // present the result at a till as fact.
+    // present the result at checkout as fact.
     const cart = compareCartToFlyers(
       [item({ brand: "Lactantia", productName: "Lait 2%", size: "2 L" })],
       [offer({ brand: "Natrel", advertisedText: "Lait 3.25%", size: "1 L" })],
@@ -344,7 +344,7 @@ describe("naming an item in a list", () => {
 describe("what may be shown to a cashier", () => {
   // Mirrors the gate in /checkout. Kept here because it is a claim about the
   // data, not about a screen: a match with no computable gap, a conditional
-  // price, or no page behind it must not reach a till whatever renders it.
+  // price, or no page behind it must not reach checkout whatever renders it.
 
   const gate = (line: CartLine) =>
     line.savingCents !== null &&
@@ -366,7 +366,7 @@ describe("what may be shown to a cashier", () => {
   });
 
   it("refuses one where your own shop never advertised the product", () => {
-    // Nothing to subtract from. The results screen still shows it; a till is
+    // Nothing to subtract from. The results screen still shows it; checkout is
     // not the place to explain that the gap is unknown. It is now structural
     // as well as gated: such a line is not in cheaperElsewhere at all.
     const cart = compareCartToFlyers(
@@ -407,7 +407,7 @@ describe("what may be shown to a cashier", () => {
 
   it("refuses a match whose size nobody confirmed", () => {
     // The compensating control for matching without a size. The results screen
-    // shows these with "check the size before you quote this"; a till is not
+    // shows these with "check the size before you quote this"; checkout is not
     // the place to discover that the packs differ.
     const cart = compareCartToFlyers(
       [item({ size: null })],

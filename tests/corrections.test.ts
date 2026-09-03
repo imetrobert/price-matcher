@@ -24,7 +24,7 @@ const reading = (patch: Partial<DetectedProduct> = {}): DetectedProduct =>
     variant: "Strawberry",
     fatPercentage: null,
     size: null,
-    sizeGuess: null,
+    sizeCandidates: [],
     sizeGuessBasis: null,
     packageQuantity: 1,
     visibleUpc: null,
